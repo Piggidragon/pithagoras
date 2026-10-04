@@ -6,9 +6,9 @@ import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-polic
 import { projectOf } from "./workspaces.js";
 import { browserServers, mcpServerNames, serversAndBrowsers } from "./api/mcp.js";
 import { mkdirSync, realpathSync } from "node:fs";
-import path from "node:path";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
+import { EXECUTOR_KIND } from "./executor-kind.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
@@ -117,14 +117,11 @@ function schema(db: Database.Database): void {
       routine_slug TEXT,
       reloads INTEGER NOT NULL DEFAULT 0
     );
-    -- The index on (channel_id, channel_key) is created in migrate(), not here.
+    -- The index on channel_key is created in migrate(), not here.
     -- CREATE TABLE IF NOT EXISTS is a no-op against an existing table, so on an
     -- upgrade these columns do not exist yet at this point and indexing them
     -- fails — which took the server down until the migration had run.
 
-    -- Every event pi emits is appended here. This is what makes the portal
-    -- fire-and-forget: a browser that reconnects days later replays from its
-    -- last seen seq instead of having missed the run entirely.
     CREATE TABLE IF NOT EXISTS canvases (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -140,6 +137,9 @@ function schema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases(session_id);
 
+    -- Every event pi emits is appended here. This is what makes the portal
+    -- fire-and-forget: a browser that reconnects days later replays from its
+    -- last seen seq instead of having missed the run entirely.
     CREATE TABLE IF NOT EXISTS events (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
@@ -232,8 +232,6 @@ function schema(db: Database.Database): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Portal-wide defaults applied to every new session. Env vars are the
-    -- fallback, so an untouched install still works out of the box.
     -- Who the agent talks to. Identified by the platform's own stable id,
     -- scoped by channel, because a display name is chosen by whoever types it.
     CREATE TABLE IF NOT EXISTS people (
@@ -330,6 +328,8 @@ function schema(db: Database.Database): void {
       session_id TEXT
     );
 
+    -- Portal-wide defaults applied to every new session. Env vars are the
+    -- fallback, so an untouched install still works out of the box.
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -469,15 +469,15 @@ function migrate(d: Database.Database): void {
   if (!names.includes("pi_session_file")) {
     d.exec("ALTER TABLE sessions ADD COLUMN pi_session_file TEXT");
   }
-  // The lowest role this session has ever served. Ratchets down and never up:
-  // once a guest has spoken in a conversation, the private context files stay
-  // out of it even if the next message is from the primary user.
   if (!names.includes("browser")) {
     d.exec("ALTER TABLE sessions ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
   }
   if (!names.includes("last_person_key")) {
     d.exec("ALTER TABLE sessions ADD COLUMN last_person_key TEXT");
   }
+  // The lowest role this session has ever served. Ratchets down and never up:
+  // once a guest has spoken in a conversation, the private context files stay
+  // out of it even if the next message is from the primary user.
   if (!names.includes("role")) {
     d.exec("ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'primary'");
   }
@@ -792,7 +792,7 @@ export function deleteSession(id: string): void {
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-  d.prepare("DELETE FROM settings WHERE key = ?").run(`subagent_model:${id}`);
+  setSessionSubagentModel(id, null);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
   // The pictures stay in the chat's folder, which is not the chat's to take away, and so they stay in the gallery, as pictures of that folder with what they were asked for.
   // Nothing else may name the folder once the chat is gone, so it is kept with them (see image-gallery.ts).
@@ -843,7 +843,6 @@ export function appendEvent(sessionId: string, type: string, payload: unknown): 
   };
 }
 
-/** Events after `since`, for replaying what a disconnected browser missed. */
 /**
  * Where to start replaying so a session gets its own last `keep` events.
  *
@@ -1244,6 +1243,7 @@ export function eventsBefore(sessionId: string, before: number, limit = 1500): E
     .all(sessionId, before, limit) as EventRow[];
 }
 
+/** Events after `since`, for replaying what a disconnected browser missed. */
 export function eventsSince(sessionId: string, since = 0, limit = 5000): EventRow[] {
   return getDb()
     .prepare(
@@ -1255,9 +1255,9 @@ export function eventsSince(sessionId: string, since = 0, limit = 5000): EventRo
 /**
  * A session marked `running` at boot cannot actually be running — the process
  * that owned it died with the previous server. Mark them interrupted so the UI
- * can offer a resume instead of showing a spinner forever.
+ * can offer a resume instead of showing a spinner forever. Gives the ids of the
+ * sessions it marked.
  */
-/** The ids of the sessions it marked. */
 export function markOrphanedSessionsInterrupted(): string[] {
   const rows = getDb()
     .prepare(
@@ -1309,15 +1309,19 @@ export function getVoiceInstructions(): string {
   }
 }
 
-/** Only what the portal was explicitly told; absent keys fall through. */
+/**
+ * Only what the portal was explicitly told; absent keys fall through.
+ *
+ * The three model defaults and nothing else of the table: it holds much that is not these, and
+ * everything else is read by its own key (see getSetting).
+ */
 export function getStoredSettings(): Partial<GlobalSettings> {
-  const rows = getDb().prepare("SELECT key, value FROM settings").all() as {
-    key: string;
-    value: string;
-  }[];
-  return Object.fromEntries(
-    rows.filter((r) => r.value).map((r) => [r.key, r.value])
-  ) as Partial<GlobalSettings>;
+  const stored: Partial<GlobalSettings> = {};
+  for (const key of ["provider", "model", "thinkingLevel"] as const) {
+    const value = getSetting(key);
+    if (value) stored[key] = value;
+  }
+  return stored;
 }
 
 /**
@@ -1361,14 +1365,8 @@ export { SETTING_DEFAULTS as getSettingDefaults };
  * handed back to pi's own defaults instead of being pinned forever.
  */
 export function setSettings(patch: Partial<GlobalSettings>): GlobalSettings {
-  const upsert = getDb().prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  );
-  const clear = getDb().prepare("DELETE FROM settings WHERE key = ?");
   for (const [k, v] of Object.entries(patch)) {
-    if (typeof v !== "string") continue;
-    if (v.trim()) upsert.run(k, v.trim());
-    else clear.run(k);
+    if (typeof v === "string") putSetting(k, v.trim());
   }
   return getSettings();
 }
@@ -1389,12 +1387,14 @@ export const CONTEXT_LIMIT_MIN = 1_024;
 export const CONTEXT_LIMIT_MAX = 10_000_000;
 const contextLimitKey = (provider: string, model: string) => `context_limit:${provider}/${model}`;
 
-export function getContextLimit(provider: string, model: string): number | undefined {
-  const row = getDb()
-    .prepare("SELECT value FROM settings WHERE key = ?")
-    .get(contextLimitKey(provider, model)) as { value: string } | undefined;
-  const n = Number(row?.value);
+/** A stored window, or nothing where it is not stored, or is not one the portal accepts. */
+function storedLimit(key: string): number | undefined {
+  const n = Number(getSetting(key));
   return Number.isInteger(n) && n >= CONTEXT_LIMIT_MIN && n <= CONTEXT_LIMIT_MAX ? n : undefined;
+}
+
+export function getContextLimit(provider: string, model: string): number | undefined {
+  return storedLimit(contextLimitKey(provider, model));
 }
 
 /** `null` hands the model back to the default, or to what its definition says. */
@@ -1406,11 +1406,7 @@ const DEFAULT_LIMIT_KEY = "context_limit_default";
 
 /** The window every chat is held to, unless its model has one of its own. */
 export function getDefaultContextLimit(): number | undefined {
-  const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(DEFAULT_LIMIT_KEY) as
-    | { value: string }
-    | undefined;
-  const n = Number(row?.value);
-  return Number.isInteger(n) && n >= CONTEXT_LIMIT_MIN && n <= CONTEXT_LIMIT_MAX ? n : undefined;
+  return storedLimit(DEFAULT_LIMIT_KEY);
 }
 
 export function setDefaultContextLimit(tokens: number | null): void {
@@ -1418,13 +1414,7 @@ export function setDefaultContextLimit(tokens: number | null): void {
 }
 
 function storeLimit(key: string, tokens: number | null): void {
-  if (tokens === null) getDb().prepare("DELETE FROM settings WHERE key = ?").run(key);
-  else
-    getDb()
-      .prepare(
-        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      )
-      .run(key, String(tokens));
+  putSetting(key, tokens === null ? "" : String(tokens));
 }
 
 /**
@@ -1459,24 +1449,14 @@ export interface ReportTo {
 }
 
 export function getDefaultReportTo(): ReportTo | null {
-  const stored = getStoredSettings() as Record<string, string>;
-  const channel = stored.report_channel;
-  const target = stored.report_target;
+  const channel = getSetting("report_channel");
+  const target = getSetting("report_target");
   return channel && target ? { channel, target } : null;
 }
 
 export function setDefaultReportTo(to: ReportTo | null): void {
-  const upsert = getDb().prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  );
-  const clear = getDb().prepare("DELETE FROM settings WHERE key = ?");
-  if (!to) {
-    clear.run("report_channel");
-    clear.run("report_target");
-    return;
-  }
-  upsert.run("report_channel", to.channel);
-  upsert.run("report_target", to.target);
+  putSetting("report_channel", to?.channel ?? "");
+  putSetting("report_target", to?.target ?? "");
 }
 
 /** Something the portal said into a conversation, waiting to join its context. */
@@ -1509,12 +1489,6 @@ export function pendingNotes(sessionId: string): { id: number; text: string }[] 
 export function consumeNotes(sessionId: string, ids: number[]): void {
   const mark = getDb().prepare("UPDATE notes SET consumed_at = datetime('now') WHERE id = ? AND session_id = ?");
   getDb().transaction(() => { for (const id of ids) mark.run(id, sessionId); })();
-}
-/** Legacy callers that intentionally consume immediately. */
-export function takeNotes(sessionId: string): string[] {
-  const rows = pendingNotes(sessionId);
-  consumeNotes(sessionId, rows.map(r => r.id));
-  return rows.map(r => r.text);
 }
 
 export interface ToolRule {
@@ -1715,7 +1689,7 @@ export function adoptBrowserGrants(d: Database.Database = getDb(), fresh: string
 
 /** Is there a grant still waiting for the browser's tools to be seen? */
 function browserAdoptionPending(): boolean {
-  return (getStoredSettings() as Record<string, string>).browser_tools_adopted === "pending";
+  return getSetting("browser_tools_adopted") === "pending";
 }
 
 /**
@@ -1726,8 +1700,10 @@ function browserAdoptionPending(): boolean {
  * having the browser is having its tools. A second place recording the same
  * answer could only ever disagree with the first.
  *
- * The `sessions.browser` column is what that second place was. It is left in
- * the schema and read by nothing.
+ * The `sessions.browser` column is what that second place was. It is still
+ * read, and not to be dropped: here while no browser tool has been seen (see
+ * `browserColumnDecides`, which a container deployment always is), by
+ * `adoptBrowserGrants` to carry the grants over, and by `browserExceptions`.
  */
 export function browserAllowed(session: SessionRow): boolean {
   return browserAllowedWith(session, browserPolicy());
@@ -1797,7 +1773,7 @@ function seenBrowserTools(): string[] {
  * it, which is what a default is for, so it is on, as any other server is.
  */
 function browserColumnDecides(): boolean {
-  if ((process.env.EXECUTOR || "host") === "container") return true;
+  if (EXECUTOR_KIND === "container") return true;
   if (browserAdoptionPending()) return true;
   return !browserConfigured();
 }
@@ -1808,7 +1784,7 @@ function browserColumnDecides(): boolean {
  * adoptPortalBrowser moves over once.
  */
 export function portalBrowserState(): "on" | "off" | "unset" {
-  const value = (getStoredSettings() as Record<string, string>).browser_tools;
+  const value = getSetting("browser_tools");
   return value === "1" ? "on" : value === "0" ? "off" : "unset";
 }
 
@@ -1997,7 +1973,7 @@ export function isSignedOut(mac: string): boolean {
  */
 export function extensionStash(): Record<string, unknown> {
   try {
-    const raw = JSON.parse((getStoredSettings() as Record<string, string>).extension_stash || "{}");
+    const raw = JSON.parse(getSetting("extension_stash") || "{}");
     return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   } catch {
     return {};
@@ -2010,7 +1986,7 @@ export function setExtensionStash(stash: Record<string, unknown>): void {
 
 /** Tools that are off unless a conversation says otherwise. */
 export function toolDefaultsOff(): string[] {
-  return parseToolsOff((getStoredSettings() as Record<string, string>).tools_off_default);
+  return parseToolsOff(getSetting("tools_off_default"));
 }
 
 export function setToolDefaultsOff(names: string[]): string[] {
@@ -2066,7 +2042,7 @@ export const remembered = (t: { name: string; source: string; description?: stri
  * "built in" — because that is what the heading says.
  */
 export function toolGroupNames(): Record<string, string> {
-  const raw = (getStoredSettings() as Record<string, string>).tool_group_names;
+  const raw = getSetting("tool_group_names");
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -2094,7 +2070,7 @@ export function setToolGroupNames(names: Record<string, unknown>): Record<string
 }
 
 export function knownTools(): KnownTool[] {
-  const raw = (getStoredSettings() as Record<string, string>).tools_seen;
+  const raw = getSetting("tools_seen");
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -2275,7 +2251,7 @@ export function rememberTools(reported: KnownTool[]): void {
  * block everything.
  */
 export function browserAllowlist(): string[] {
-  const raw = (getStoredSettings() as Record<string, string>).browser_allowlist ?? "";
+  const raw = getSetting("browser_allowlist") ?? "";
   return raw
     .split(/[\n,]/)
     .map((d) => d.trim())
@@ -2283,10 +2259,7 @@ export function browserAllowlist(): string[] {
 }
 
 export function setBrowserAllowlist(domains: string): void {
-  const upsert = getDb().prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  );
-  upsert.run("browser_allowlist", domains.trim());
+  putSetting("browser_allowlist", domains.trim());
 }
 
 /**
@@ -2309,15 +2282,15 @@ function noteOpenSubagent(sessionId: string, payload: unknown): void {
   else if (p.op === "end") getDb().prepare("DELETE FROM open_subagents WHERE session_id = ? AND id = ?").run(sessionId, p.id);
 }
 
-/**
- * Background subagents a chat started and whose end was never written: the
- * process that ran them went with the last server.
- */
 /** The background subagents one chat has open. */
 export function openSubagentsIn(sessionId: string): string[] {
   return (getDb().prepare("SELECT id FROM open_subagents WHERE session_id = ?").all(sessionId) as { id: string }[]).map((r) => r.id);
 }
 
+/**
+ * Background subagents a chat started and whose end was never written: the
+ * process that ran them went with the last server.
+ */
 export function openDetachedSubagents(): { sessionId: string; id: string }[] {
   return (getDb().prepare("SELECT session_id, id FROM open_subagents").all() as { session_id: string; id: string }[]).map((r) => ({
     sessionId: r.session_id,

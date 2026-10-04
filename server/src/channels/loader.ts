@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { bundledPath } from "../bundled.js";
 import { dataFolder } from "../data-dir.js";
 import { isUnderText, isWithinText } from "../within.js";
 
@@ -80,18 +81,7 @@ export const channelsDir = (): string => {
  * The repo's own `channels/` directory. Resolved relative to the compiled file
  * so it works both from `dist` and from a source run.
  */
-const builtinDir = (): string => {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const candidate of [
-    path.resolve(here, "../../../channels"), // dist/channels -> repo root
-    path.resolve(here, "../../channels"),
-    path.resolve(process.cwd(), "channels"),
-    path.resolve(process.cwd(), "../channels"),
-  ]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return path.resolve(process.cwd(), "channels");
-};
+const builtinDir = (): string => bundledPath("channels") ?? path.resolve(process.cwd(), "channels");
 
 const isChannelPackage = (meta: any) =>
   Boolean(meta?.pithagoras?.channel) || /^pithagoras-channel-/.test(meta?.name ?? "");
@@ -215,7 +205,6 @@ export async function installChannelPackage(spec: string): Promise<string> {
     // into whatever project happens to be above this directory.
     const stub = { name: "pithagoras-channels", private: true, dependencies: {} };
     mkdirSync(dir, { recursive: true });
-    const { writeFileSync } = await import("node:fs");
     writeFileSync(path.join(dir, "package.json"), JSON.stringify(stub, null, 2) + "\n");
   }
 

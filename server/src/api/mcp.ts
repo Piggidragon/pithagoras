@@ -114,8 +114,10 @@ export function mcpServerNames(): string[] {
   }
 }
 
-/** Where the agent's browser listens for the debugging protocol. */
-export const BROWSER_CDP = process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
+/** Where the agent's browser listens for the debugging protocol, read from the environment as it is now. */
+export const browserCdp = () => process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
+/** The same, as it was when the portal started: what the tools and the servers configured for it go by. */
+export const BROWSER_CDP = browserCdp();
 
 /** The servers of a configuration that attach to our browser, whatever they are called. */
 function connectedIn(config: McpFile): string[] {

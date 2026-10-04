@@ -11,7 +11,8 @@ import {
   consumeNotes,
 } from "../db.js";
 import { resolveChannelSession, scopeKey, unscopeKey } from "../agent.js";
-import { sessions, CommandFailed, EXECUTOR_KIND, stripThinkingMarkers } from "../session-manager.js";
+import { EXECUTOR_KIND } from "../executor-kind.js";
+import { sessions, CommandFailed, stripThinkingMarkers } from "../session-manager.js";
 import { ruleApplies, taintSession } from "../pi/guard.js";
 import { readAnswer, recordAnswer, type QuestionRow } from "../questions.js";
 import { recordApproval } from "../approvals.js";
@@ -564,13 +565,6 @@ class ChannelSupervisor {
       executor: EXECUTOR_KIND,
     });
 
-    // A conversation is only ever as trusted as its least trusted participant,
-    // and it does not recover: a group where a guest has spoken keeps serving
-    // guest-level context even when the next message is from the primary user.
-    // Before a primary is named nobody is a stranger, so nothing is downgraded
-    // either — otherwise the upgrade itself would quietly strip context from
-    // every existing conversation.
-
     // Everything below jumps the queue on purpose. ask() serialises per
     // session, so anything meant to affect the run in progress has to be
     // handled before it, or it waits behind the thing it is answering.
@@ -634,6 +628,12 @@ class ChannelSupervisor {
       };
     }, {
       beforeTurn: async () => {
+        // A conversation is only ever as trusted as its least trusted participant,
+        // and it does not recover: a group where a guest has spoken keeps serving
+        // guest-level context even when the next message is from the primary user.
+        // Before a primary is named nobody is a stranger, so nothing is downgraded
+        // either — otherwise the upgrade itself would quietly strip context from
+        // every existing conversation.
         if (person && hasPrimary()) {
           const current = getSession(session.id);
           if (!current) throw new Error("Session no longer exists");

@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DATA_DIR } from "../data-dir.js";
-import { config } from "./browser-service.js";
 
 /**
  * The same browser, without a container.

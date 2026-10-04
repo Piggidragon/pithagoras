@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { getStoredSettings, getDb } from "../db.js";
+import { browserCdp } from "../api/mcp.js";
+import { getSetting, putSetting } from "../db.js";
 import { containerAction, containerState, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
 import * as local from "./browser-local.js";
 
@@ -33,19 +34,15 @@ export interface BrowserConfig {
  * upgrading from it should not have to retype anything.
  */
 export function config(): BrowserConfig {
-  const s = getStoredSettings() as Record<string, string>;
   return {
-    user: s.browser_user || process.env.BROWSER_USER || "agent",
-    password: s.browser_password || process.env.BROWSER_PASSWORD || "",
-    port: s.browser_port || process.env.BROWSER_PORT || "3010",
-    httpsPort: s.browser_https_port || process.env.BROWSER_HTTPS_PORT || "3011",
+    user: getSetting("browser_user") || process.env.BROWSER_USER || "agent",
+    password: getSetting("browser_password") || process.env.BROWSER_PASSWORD || "",
+    port: getSetting("browser_port") || process.env.BROWSER_PORT || "3010",
+    httpsPort: getSetting("browser_https_port") || process.env.BROWSER_HTTPS_PORT || "3011",
   };
 }
 
 export function saveConfig(patch: Partial<BrowserConfig>): BrowserConfig {
-  const upsert = getDb().prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  );
   const map: Record<keyof BrowserConfig, string> = {
     user: "browser_user",
     password: "browser_password",
@@ -53,7 +50,7 @@ export function saveConfig(patch: Partial<BrowserConfig>): BrowserConfig {
     httpsPort: "browser_https_port",
   };
   for (const [k, v] of Object.entries(patch)) {
-    if (typeof v === "string" && v) upsert.run(map[k as keyof BrowserConfig], v);
+    if (typeof v === "string" && v) putSetting(map[k as keyof BrowserConfig], v);
   }
   return config();
 }
@@ -74,7 +71,7 @@ export async function status() {
   if (process.env.BROWSER_EXTERNAL === 'true') {
     let running = false;
     try {
-      const response = await fetch(`${process.env.BROWSER_CDP_URL || 'http://127.0.0.1:9222'}/json/version`, {signal: AbortSignal.timeout(4000)});
+      const response = await fetch(`${browserCdp()}/json/version`, {signal: AbortSignal.timeout(4000)});
       running = response.ok && typeof (await response.json() as {Browser?:string}).Browser === 'string';
     } catch { /* An externally managed browser can be stopped independently. */ }
     return {available:false, mode:'external' as const, image:true, container:running ? 'running' as const : 'stopped' as const, pulling};

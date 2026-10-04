@@ -701,12 +701,7 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   const changed = await ownChanges(repo, now.files, tops);
   // A remote inside the folder goes with it: what only it has is not saved.
   // Then only the others count, named one by one.
-  const urls = (await git(repo, ["config", "--get-regexp", "^remote\\..*\\.url$"], { ok: [1] })).stdout.split("\n").filter(Boolean);
-  const remotes = urls.map((line) => {
-    const [key, ...rest] = line.split(" ");
-    const where = localRemote(rest.join(" "), repo.root);
-    return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), goes: insideReal(folder)(where) };
-  });
+  const remotes = (await remoteUrls(repo)).map(({ name, url }) => ({ name, goes: insideReal(folder)(localRemote(url, repo.root)) }));
   const saved = remotes.some((r) => r.goes) ? remotes.filter((r) => !r.goes).map((r) => `--remotes=${r.name}`) : ["--remotes"];
   const count = async (args: string[]) => {
     const out = (await git(repo, ["rev-list", ...args, "--count"])).stdout.trim();
@@ -769,15 +764,20 @@ export function describeRemote(url: string): { address: string; web?: string } {
   }
 }
 
-async function listRemotes(repo: Repo): Promise<Remote[]> {
+/** The remotes of a repository, each by its name and the URL as it is written in the config. */
+async function remoteUrls(repo: Repo): Promise<{ name: string; url: string }[]> {
   const { stdout } = await git(repo, ["config", "--get-regexp", "^remote\\..*\\.url$"], { ok: [1] });
   return stdout
     .split("\n")
     .filter(Boolean)
     .map((line) => {
       const [key, ...rest] = line.split(" ");
-      return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), ...describeRemote(rest.join(" ")) };
+      return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), url: rest.join(" ") };
     });
+}
+
+async function listRemotes(repo: Repo): Promise<Remote[]> {
+  return (await remoteUrls(repo)).map(({ name, url }) => ({ name, ...describeRemote(url) }));
 }
 
 // --- diffs --------------------------------------------------------------------
@@ -1151,11 +1151,6 @@ async function pushRemote(repo: Repo): Promise<string> {
   return (remotes.find((r) => r.name === "origin") ?? remotes[0]).name;
 }
 
-/**
- * Push the branch. One that is not on the remote yet is published there and
- * follows it from then on. Never forced: rewriting what others may have is not
- * something a button does.
- */
 /** The branch checked out, and where it pushes to — null for a detached HEAD, `upstream` null where it follows nothing. */
 async function tracking(repo: Repo): Promise<{ branch: string; upstream: { remote: string; ref: string } | null } | null> {
   const { stdout: head } = await git(repo, ["symbolic-ref", "-q", "--short", "HEAD"], { ok: [1] });

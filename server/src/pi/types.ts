@@ -41,13 +41,6 @@ export interface PiTool {
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */
   defaultOn?: boolean;
-  /**
-   * Something other than the tool policy decides this one.
-   *
-   * "browser" for the tools the agent's browser brings: they follow the grant
-   * the globe beside the composer sets, not the switches here.
-   */
-  owner?: "browser";
 }
 
 /**

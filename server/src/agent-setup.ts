@@ -1,6 +1,6 @@
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { agentHome } from "./agent.js";
+import { agentHome } from "./agent-home.js";
 import { writeFileAtomic } from "./atomic-write.js";
 import { understoryOn } from "./features.js";
 import { CHANGED, FileError, baseDir, writeText } from "./workspace-files.js";
@@ -17,7 +17,6 @@ import { CHANGED, FileError, baseDir, writeText } from "./workspace-files.js";
  */
 
 export const AGENT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"] as const;
-export type AgentFile = (typeof AGENT_FILES)[number];
 
 /**
  * The files shown and edited on the agent's page: those three, and WATCH.md,

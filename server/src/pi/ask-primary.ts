@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { getDb, getDefaultReportTo, type SessionRow } from "../db.js";
+import { getDefaultReportTo, getSession } from "../db.js";
 import { unscopeKey } from "../agent.js";
 import { askQuestion } from "../questions.js";
 import { channelSupervisor } from "../channels/supervisor.js";
@@ -61,16 +61,10 @@ export function askPrimaryTool(sessionId: string) {
           );
         }
 
-        const session = getDb()
-          .prepare("SELECT * FROM sessions WHERE id = ?")
-          .get(sessionId) as SessionRow | undefined;
+        const session = getSession(sessionId);
         if (!session?.channel_slug || !session.channel_key) {
           return fail("This conversation has nowhere to send an answer back to.");
         }
-        // Whether an answer can be routed back, which is not whether the
-        // question is worth asking. Refusing to ask at all because the return
-        // leg is missing throws away the part that matters — the question
-        // reaching a human — so it only changes what everyone is told.
         // Whether it arrives the moment it is written, or waits for them to
         // speak again. Either way it arrives, so neither the question nor the
         // promise changes — only the timing does.

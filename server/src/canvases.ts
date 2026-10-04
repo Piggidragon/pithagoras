@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
+import { getDb, getSession } from './db.js';
 
 export interface CanvasRow { id: string; session_id: string; title: string; content: string; revision: number; status: string; active_call: string | null; agent_read_revision: number | null; updated_at: string; persisted: boolean; /** A write that was cut off left the document as it was before it, to go back to: see restoreCanvas. */ restorable: boolean }
 export const canvasEvents = new EventEmitter();
@@ -86,7 +86,7 @@ export function readCanvas(session: string, id: string): CanvasRow {
 export function focusCanvas(session:string,id:string) { const row=readCanvas(session,id);canvasEvents.emit(session,{type:'focus',canvas:row});return row; }
 function notify(row: CanvasRow) { canvasEvents.emit(row.session_id, { type: 'update', canvas: row }); return row; }
 export function createCanvas(session: string, title: string): CanvasRow {
-  if (!getDb().prepare('SELECT id FROM sessions WHERE id = ?').get(session)) throw new Error('Session not found');
+  if (!getSession(session)) throw new Error('Session not found');
   if (!title.trim() || title.length > 200) throw new Error('Title must contain 1–200 characters');
   const id = nanoid();
   temporary.set(id,{id,session_id:session,title:title.trim(),content:'',revision:0,status:'draft',active_call:null,agent_read_revision:null,updated_at:new Date().toISOString(),persisted:false,restorable:false});
@@ -169,6 +169,13 @@ export function finishCanvasWrite(session: string,id: string,call: string,interr
   clearTimeout(writing.get(id)?.timer);
   writing.delete(id);
   return notify(next);
+}
+/**
+ * At start: a write that was going on when the server stopped is over, as one that was cut off is (see finishCanvasWrite).
+ * What it had streamed stays, and the text from before it is still there to restore.
+ */
+export function interruptCanvasWrites() {
+  getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
 }
 /** The document as it was before the write that was cut off, put back: a revision of its own, as an edit by the person is. */
 export function restoreCanvas(session: string,id: string,revision: number): CanvasRow {

@@ -25,9 +25,6 @@ import { pictureIn } from "./show-image-tool.js";
 export const GENERATE_IMAGE_VOICE_LINE =
   "To make a new picture from a description, call generate_image: it saves the picture in the chat folder and shows it, so do not call show_image on it afterwards.";
 
-/** Where generated pictures go, inside the chat's folder, so that they do not mix with the work. */
-export { GENERATED_DIR };
-
 /** A name made here: the time, and something that tells two in one second apart. */
 const fileName = (ext: string): string =>
   `image-${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-")}-${randomBytes(3).toString("hex")}.${ext}`;

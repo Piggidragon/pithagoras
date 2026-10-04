@@ -7,12 +7,12 @@ import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
-import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-snapshot.js";
+import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-mcp-rules.js";
 import { browserTools } from "../browser/tools.js";
+import { bundledPath } from "../bundled.js";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
@@ -44,15 +44,6 @@ function asArray(v: any): any[] {
   const resolved = typeof v === "function" ? v() : v;
   return Array.isArray(resolved) ? resolved : [];
 }
-
-/**
- * Files pi should treat as context on top of the ones it finds itself.
- *
- * Only picked up where they exist, so a task workspace is unaffected and the
- * agent's home directory gets its character, its user and its memory without
- * anything being generated. Who may see which of them is settled in
- * context-files.ts, which the guard reads as well.
- */
 
 /**
  * While Understory holds the agent's memory, MEMORY.md is not read: two
@@ -95,6 +86,14 @@ export function loadTheme(
 }
 const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
 
+/**
+ * Files pi should treat as context on top of the ones it finds itself.
+ *
+ * Only picked up where they exist, so a task workspace is unaffected and the
+ * agent's home directory gets its character, its user and its memory without
+ * anything being generated. Who may see which of them is settled in
+ * context-files.ts, which the guard reads as well.
+ */
 export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
   for (const name of filesFor(role)) {
@@ -109,14 +108,13 @@ export function extraContextFiles(cwd: string, role?: string): { path: string; c
 }
 
 /**
- * A short anchor saying the files are the agent's own.
+ * A short anchor saying the files are the agent's own: the ones handed to it now.
  *
  * Each file opens with its own instruction block, so this does not repeat them
  * — it exists because a context file is otherwise presented as reference
  * material, and the model read its own identity as notes about a third party.
  * One line at system level is enough to change what they are.
  */
-/** The line saying the agent's own files are its own: the ones handed to it now. */
 function ownFiles(cwd: string, role?: string): string[] {
   const present = filesFor(role).filter((name) => {
     try {
@@ -176,23 +174,9 @@ function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: (
   });
 }
 
-/**
- * Skills shipped with the portal, loaded from the image rather than installed.
- *
- * Resolved relative to the compiled file so it works from dist and from source,
- * the same way the builtin channels are found.
- */
+/** Skills shipped with the portal, loaded from the image rather than installed. */
 export function builtinSkillsDir(): string | undefined {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const candidate of [
-    path.resolve(here, "../../../skills"),
-    path.resolve(here, "../../skills"),
-    path.resolve(process.cwd(), "skills"),
-    path.resolve(process.cwd(), "../skills"),
-  ]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
+  return bundledPath("skills");
 }
 
 /**
@@ -458,12 +442,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // place: they belong to the image, so an edit would be lost on the next
         // deploy without saying so.
         ...(builtinSkills ? { additionalSkillPaths: [builtinSkills] } : {}),
-        // Inline rather than an installed package: the portal owns routines, so
-        // a package would have to call back over HTTP to reach the database it
-        // sits beside. Absent unless asked, so a task session never sees them.
-        // Registered only where each belongs: routine management for sessions
+        // The portal's own extensions, inline rather than an installed package:
+        // the portal owns routines, so a package would have to call back over
+        // HTTP to reach the database it sits beside. The list is built above,
+        // each registered only where it belongs: routine management for sessions
         // reached through a channel, reporting for routine runs.
-        ...(factories.length ? { extensionFactories: factories } : {}),
+        extensionFactories: factories,
         // pi discovers one context file per directory — AGENTS.md or CLAUDE.md
         // — so the agent's own files would be invisible to it. Rather than
         // generating an AGENTS.md from them and keeping it in sync, they are
@@ -1083,8 +1067,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }));
   }
 
-  /** Names this session has switched off. Applied at every start and on change. */
-  /** Not private: create() fills it before the session is handed over. */
+  /**
+   * Names this session has switched off. Applied at every start and on change.
+   * Not private: create() fills it before the session is handed over.
+   */
   switchedOff = new Set<string>();
 
   /**
@@ -1282,16 +1268,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   /**
-   * Give the session the context window this portal holds the model to.
-   *
-   * pi reads the window off the model it is running, so the number is put there
-   * rather than beside it — the percentage and the moment of compaction then
-   * agree with it. Assigned to the agent's state instead of going through
-   * setModel, which writes a model change into the conversation and into pi's
-   * default model. With nothing set the definition's own number is put back, so
-   * removing a limit takes effect too.
-   */
-  /**
    * For the places that have another job first: reading a stored number and
    * looking at the session's model can both fail (a database closing at
    * shutdown, a pi release that stops exposing `agent`), and a run that never
@@ -1306,6 +1282,16 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
   }
 
+  /**
+   * Give the session the context window this portal holds the model to.
+   *
+   * pi reads the window off the model it is running, so the number is put there
+   * rather than beside it — the percentage and the moment of compaction then
+   * agree with it. Assigned to the agent's state instead of going through
+   * setModel, which writes a model change into the conversation and into pi's
+   * default model. With nothing set the definition's own number is put back, so
+   * removing a limit takes effect too.
+   */
   applyContextLimit(): void {
     const current = this.session.model;
     if (!current) return;

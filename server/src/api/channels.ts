@@ -2,7 +2,7 @@ import express, { type Router } from "express";
 import { nanoid } from "nanoid";
 import { countChannelSessions, deleteSession, getDb } from "../db.js";
 import { sessions } from "../session-manager.js";
-import { agentHome } from "../agent.js";
+import { agentHome } from "../agent-home.js";
 import { DEFAULT_AGENT, getAgent } from "../agents.js";
 import { freeSlug, isValidSlug, slugify } from "../slug.js";
 import { channelSupervisor } from "../channels/supervisor.js";
@@ -13,14 +13,13 @@ import {
   installChannelPackage,
   loadChannels,
   removeChannelPackage,
-  type ChannelField,
   type LoadedChannel,
 } from "../channels/loader.js";
 
 /**
  * A channel is a two-way link into the agent: messages arrive through it and
- * the agent's replies go back out the same way. Every channel points at the
- * same agent session, so they are different doors into one conversation.
+ * the agent's replies go back out the same way. Each conversation on a channel
+ * has its own session, under the agent the channel talks as.
  *
  * The kinds on offer are whatever channel packages are loaded — the builtins in
  * the repo and anything installed from GitHub or npm. Nothing is hardcoded

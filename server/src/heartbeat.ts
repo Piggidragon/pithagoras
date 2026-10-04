@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import { createSession, getDb, type SessionRow } from "./db.js";
+import { createSession, getDb, getSession, type SessionRow } from "./db.js";
 import { AgentError, getAgent, listAgents, type Agent } from "./agents.js";
 import { countNotes } from "./activity.js";
-import { sessions, EXECUTOR_KIND } from "./session-manager.js";
+import { EXECUTOR_KIND } from "./executor-kind.js";
+import { sessions } from "./session-manager.js";
 import { NOTE_TOOL } from "./pi/heartbeat-names.js";
 
 /**
@@ -103,7 +104,7 @@ function sessionFor(agent: Agent): SessionRow {
   if (existing) return existing;
   const id = nanoid(12);
   createSession({ id, title: `${agent.name} · heartbeat`, workspace: agent.home, executor: EXECUTOR_KIND, kind: "heartbeat" });
-  return getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow;
+  return getSession(id)!;
 }
 
 /**

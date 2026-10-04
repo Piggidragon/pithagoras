@@ -5,6 +5,7 @@ import {
   browserConfigured,
   browserExceptions,
   getDb,
+  getSession,
   knownTools,
   portalBrowserOn,
   portalBrowserState,
@@ -16,8 +17,8 @@ import {
   setSessionTools,
   setToolDefaultsOff,
   toolDefaultsOff,
-  type SessionRow,
 } from "../db.js";
+import { EXECUTOR_KIND } from "../executor-kind.js";
 import { PORTAL_BROWSER_TOOLS, browserTool } from "../tool-policy.js";
 import { BROWSER_CDP, browserServers, findConnection, mcpServerNames, readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/browser-service.js";
@@ -298,10 +299,6 @@ export function browserRouter(): Router {
   });
 
   /**
-   * Turn the browser on or off for one session. Takes effect on its next
-   * launch: the tool list is fixed when pi starts.
-   */
-  /**
    * Grant the browser to one conversation, where the tool switches cannot.
    *
    * With EXECUTOR=container pi is reached over RPC and never reports what it
@@ -311,15 +308,14 @@ export function browserRouter(): Router {
    * quietly writing a column nothing reads.
    */
   router.put("/sessions/:id/browser", (req, res) => {
-    if ((process.env.EXECUTOR || "host") !== "container") {
+    if (EXECUTOR_KIND !== "container") {
       return res.status(400).json({
         error:
           "The browser is switched with its tools — open the tools list beside the composer, or Settings → Tools for every conversation",
       });
     }
     const on = Boolean(req.body?.enabled);
-    const row = getDb().prepare("SELECT id FROM sessions WHERE id = ?").get(req.params.id);
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!getSession(req.params.id)) return res.status(404).json({ error: "Not found" });
     getDb().prepare("UPDATE sessions SET browser = ? WHERE id = ?").run(on ? 1 : 0, req.params.id);
     res.json({ enabled: on });
   });

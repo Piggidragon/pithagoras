@@ -681,11 +681,6 @@ export function picturesById(ids: string[]): GalleryPicture[] {
   return ids.map(rowOf).filter((row): row is ListedRow => !!row).map(shown);
 }
 
-export const pictureById = (id: string): GalleryPicture | undefined => {
-  const row = rowOf(id);
-  return row ? shown(row) : undefined;
-};
-
 /**
  * A picture opened to be sent: the descriptor, its size and its type, from
  * the same check a picture in the Files panel gets. A file that is gone, or

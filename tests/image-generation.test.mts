@@ -14,7 +14,8 @@ process.env.AGENT_HOME = path.join(temp, "agent-home");
 const { getSetting, putSetting } = await import("../server/src/db.ts");
 const gen = await import("../server/src/image-generation.ts");
 const { GENERATED_PICTURE_MARK } = await import("../server/src/generated-picture.ts");
-const { GenerateImageTool, GENERATED_DIR, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
+const { GenerateImageTool, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
+const { GENERATED_DIR } = await import("../server/src/image-gallery.ts");
 const editing = await import("../server/src/image-editing.ts");
 const { EditImageTool, editedName } = await import("../server/src/pi/edit-image-tool.ts");
 

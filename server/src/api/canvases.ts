@@ -1,10 +1,10 @@
 import express from 'express';
-import { getDb } from '../db.js';
+import { getSession } from '../db.js';
 import { persistCanvas, listCanvases, createCanvas, editCanvas, deleteCanvas, restoreCanvas } from '../canvases.js';
 export function canvasesRouter() {
   const router=express.Router();
   router.use('/sessions/:sessionId/canvases', (req,res,next)=> {
-    if(!getDb().prepare('SELECT id FROM sessions WHERE id = ?').get(req.params.sessionId)) return res.status(404).json({error:'Session not found'});
+    if(!getSession(req.params.sessionId)) return res.status(404).json({error:'Session not found'});
     next();
   });
   router.get('/sessions/:sessionId/canvases', (req,res)=>res.json(listCanvases(String(req.params.sessionId))));

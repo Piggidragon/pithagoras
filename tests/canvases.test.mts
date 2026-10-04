@@ -6,7 +6,7 @@ import { join } from 'node:path';
 process.env.DATA_DIR=mkdtempSync(join(tmpdir(),'pithagoras-canvas-test-'));
 const {getDb}=await import('../server/src/db.js');
 const {CanvasTools,WriteStream,canvasWritePrefix}=await import('../server/src/pi/canvas-tools.js');
-const {readCanvas,editCanvas,listCanvases,persistCanvas,restoreCanvas,forgetCanvases,createCanvas}=await import('../server/src/canvases.js');
+const {readCanvas,editCanvas,listCanvases,persistCanvas,restoreCanvas,forgetCanvases,createCanvas,interruptCanvasWrites}=await import('../server/src/canvases.js');
 getDb().prepare('INSERT INTO sessions (id,title,workspace) VALUES (?,?,?)').run('s1','test','/tmp');
 getDb().prepare('INSERT INTO sessions (id,title,workspace) VALUES (?,?,?)').run('s2','other','/tmp');
 function setup(){const controller=new CanvasTools('s1');const tools:Record<string,any>={};controller.extension({registerTool:(t:any)=>tools[t.name]=t} as any);return {controller,tools};}
@@ -258,12 +258,20 @@ test('a write cut off by a restart can be gone back from; what was held back is 
  const {controller,tools}=setup();
  const original='A document the restart should not cost.';const id=await storedCanvas(tools,original,'Restart');
  const row=value(await tools.canvas_read.execute('read',{canvas_id:id}));
+ const calm=await storedCanvas(tools,'Nobody is writing to this one.','Calm');
+ const calmBefore=inTable(calm);
  delta(controller,'r',`{"canvas_id":"${id}","revision":${row.revision},"operation":"replace","content":"A doc`);
  // The server stops here: nothing held in memory is left, and what it does at start is this.
  forgetCanvases('s1');
- getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
+ // What the write had moved on in the table is not what the agent had read.
+ getDb().prepare('UPDATE canvases SET agent_read_revision = NULL WHERE id = ?').run(id);
+ interruptCanvasWrites();
+ // A canvas no write was going on in is left as it was.
+ assert.deepEqual(inTable(calm),calmBefore);
  const after=readCanvas('s1',id);
  assert.equal(after.restorable,true);
+ // No call is running any more, the canvas says it was cut off, and it counts as read: the agent may write to it again.
+ assert.deepEqual([after.status,after.active_call,after.agent_read_revision],['interrupted',null,after.revision]);
  assert.equal(restoreCanvas('s1',id,after.revision).content,original);
 });
 test('temporary canvases of a chat that is gone are let go, and nothing else is',async()=>{

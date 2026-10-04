@@ -1,5 +1,6 @@
 import { bindHost, loginThrottle, portalSecurityHeaders, tlsFiles } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
+import { interruptCanvasWrites } from "./canvases.js";
 import { eventsRouter } from "./api/events.js";
 import { serveWeb } from "./web-static.js";
 import { clampLevel } from "./pi/model-runtime.js";
@@ -12,21 +13,41 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import { nanoid } from "nanoid";
 import {
+  clearProjectTools,
+  chatModel,
+  contextLimitProblem,
   createSession,
   deleteSession,
+  getContextLimit,
+  getDb,
+  getDefaultContextLimit,
   getSession,
+  getSettingDefaults,
+  getSettings,
   listAgentSessions,
   listChatSessions,
   listHeartbeatSessions,
   listRoutineSessions,
   listSessions,
+  projectTools,
+  projectsWithTools,
+  setContextLimit,
+  setDefaultContextLimit,
+  setProjectTools,
+  setSettings,
+  setToolDefaultsOff,
+  setToolGroupNames,
+  shownStoredSettings,
+  shownTools,
+  toolDefaultsOff,
+  toolGroupNames,
   updateSession,
 } from "./db.js";
 import { checkWorkspace, workspaceRoot } from "./workspaces.js";
 import { insideReal, isWithinText } from "./within.js";
-import { agentHomePath } from "./agent-home.js";
+import { agentHome, agentHomePath } from "./agent-home.js";
 import { dataFolder } from "./data-dir.js";
-import { agentHome, resolveChannelSession } from "./agent.js";
+import { resolveChannelSession } from "./agent.js";
 import { AgentError, agentOf, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
 import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
@@ -38,10 +59,11 @@ import {
   writeAgentFile,
   type WizardInput,
 } from "./agent-setup.js";
-import { sessions, CommandFailed, EXECUTOR_KIND, IMAGE_ROOT } from "./session-manager.js";
+import { EXECUTOR_KIND } from "./executor-kind.js";
+import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, toolEnabled, toolSource } from "./tool-policy.js";
-import { mcpServerNames } from "./api/mcp.js";
+import { mcpRouter, mcpServerNames } from "./api/mcp.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, requireAuth, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
@@ -51,7 +73,6 @@ import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
-import { mcpRouter } from "./api/mcp.js";
 import { featuresRouter } from "./api/features.js";
 import { imagesRouter } from "./api/images.js";
 import { forgetPicturesIn } from "./image-gallery.js";
@@ -60,13 +81,12 @@ import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
-import { browserRouter } from "./api/browser.js";
+import { adoptPortalBrowser, browserRouter, pinConnection } from "./api/browser.js";
 import { terminalRouter } from "./api/terminal.js";
 import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
-import { adoptPortalBrowser, pinConnection } from "./api/browser.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -76,7 +96,6 @@ import {
   readCompactionSettings,
   writeCompactionSettings,
 } from "./pi-settings.js";
-import { getDb } from "./db.js";
 import { getBuiltinCommands, picturesRefused } from "./pi/builtins.js";
 import { SessionEditError } from "./pi/session-edit.js";
 import {
@@ -91,28 +110,6 @@ import {
   titleFrom,
   writeInstructions,
 } from "./projects.js";
-import {
-  contextLimitProblem,
-  getContextLimit,
-  getDefaultContextLimit,
-  getSettingDefaults,
-  chatModel,
-  getSettings,
-  getStoredSettings,
-  shownStoredSettings,
-  shownTools,
-  clearProjectTools,
-  projectTools,
-  projectsWithTools,
-  setProjectTools,
-  toolGroupNames,
-  setToolGroupNames,
-  setToolDefaultsOff,
-  toolDefaultsOff,
-  setContextLimit,
-  setDefaultContextLimit,
-  setSettings,
-} from "./db.js";
 
 const WORKSPACE_ROOT = workspaceRoot();
 const PORT = Number(process.env.PORT || 4100);
@@ -341,6 +338,9 @@ app.get("/api/projects", (req, res) => {
   }
 });
 
+/** Whether a request's list of tools to switch off is one: a list of names. */
+const isToolList = (value: unknown): value is string[] => Array.isArray(value) && value.every((name) => typeof name === "string");
+
 /**
  * Stores what a project's chats start with, given the tools it wants off: the
  * difference from the portal-wide default, which is all that is kept. What the
@@ -365,9 +365,7 @@ app.post("/api/projects", (req, res) => {
     return res.status(400).json({ error: "instructions must be text" });
   }
   if (toolsOff !== undefined) {
-    if (!Array.isArray(toolsOff) || toolsOff.some((tool) => typeof tool !== "string")) {
-      return res.status(400).json({ error: "toolsOff must be a list of tool names" });
-    }
+    if (!isToolList(toolsOff)) return res.status(400).json({ error: "toolsOff must be a list of tool names" });
     if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   }
   try {
@@ -467,9 +465,7 @@ app.get("/api/projects/:name/tools", (req, res) => {
  */
 app.put("/api/projects/:name/tools", async (req, res) => {
   const off = req.body?.off;
-  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
-    return res.status(400).json({ error: "off must be a list of tool names" });
-  }
+  if (!isToolList(off)) return res.status(400).json({ error: "off must be a list of tool names" });
   try {
     const project = getProject(WORKSPACE_ROOT, req.params.name);
     if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
@@ -634,7 +630,7 @@ app.get("/api/sessions", (_req, res) => {
  */
 app.get("/api/agent/sessions", (req, res) => {
   // One agent's, given `?agent=`; the first agent's otherwise.
-  const agent = typeof req.query.agent === "string" ? getAgent(req.query.agent) : getAgent("home");
+  const agent = typeof req.query.agent === "string" ? getAgent(req.query.agent) : defaultAgent();
   if (!agent) return res.status(404).json({ error: "No such agent" });
   const channels = getDb()
     .prepare("SELECT id, slug, name, kind FROM channels")
@@ -828,14 +824,18 @@ app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
 
 const editStatus = { busy: 409, missing: 404, empty: 400 } as const;
 
+const editFailure = (res: express.Response, e: unknown) => {
+  if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
+  res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
+};
+
 /** Removes a message and the agent's answer to it. */
 app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
   try {
     await sessions.removeMessage(req.params.id, Number(req.params.seq), "turn");
     res.json({ ok: true });
   } catch (e) {
-    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
-    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
+    editFailure(res, e);
   }
 });
 
@@ -851,8 +851,7 @@ app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
     await sessions.editMessage(req.params.id, Number(req.params.seq), message);
     res.json({ ok: true, status: "running" });
   } catch (e) {
-    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
-    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
+    editFailure(res, e);
   }
 });
 
@@ -864,8 +863,7 @@ app.post("/api/sessions/:id/messages/:seq/version", async (req, res) => {
     await sessions.switchVersion(req.params.id, Number(req.params.seq), to);
     res.json({ ok: true });
   } catch (e) {
-    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
-    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
+    editFailure(res, e);
   }
 });
 
@@ -906,13 +904,6 @@ app.put("/api/sessions/:id/draft", (req, res) => {
 });
 
 /**
- * The tools this conversation could use, and which of them are on.
- *
- * A running session answers from pi's registry. One that is not running —
- * not started yet, or gone idle — from what the portal has seen registered,
- * marked `live: false`: what is switched there is kept for when it starts.
- */
-/**
  * A container session reaches pi over RPC, which has no tool registry to ask
  * and nothing to tell. Said plainly rather than answered with an empty list
  * and a switch that does nothing.
@@ -920,6 +911,13 @@ app.put("/api/sessions/:id/draft", (req, res) => {
 const TOOLS_UNSUPPORTED =
   "Tools cannot be switched with EXECUTOR=container: pi runs inside the container and the portal never sees what it registered";
 
+/**
+ * The tools this conversation could use, and which of them are on.
+ *
+ * A running session answers from pi's registry. One that is not running —
+ * not started yet, or gone idle — from what the portal has seen registered,
+ * marked `live: false`: what is switched there is kept for when it starts.
+ */
 app.get("/api/sessions/:id/tools", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -938,9 +936,7 @@ app.put("/api/sessions/:id/tools", async (req, res) => {
   if (!session) return res.status(404).json({ error: "Not found" });
   if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const off = req.body?.off;
-  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
-    return res.status(400).json({ error: "off must be a list of tool names" });
-  }
+  if (!isToolList(off)) return res.status(400).json({ error: "off must be a list of tool names" });
   res.json({ off: await sessions.setTools(session.id, off) });
 });
 
@@ -989,9 +985,7 @@ app.put("/api/tool-names", (req, res) => {
 app.put("/api/tools", async (req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json({ error: TOOLS_UNSUPPORTED });
   const off = req.body?.off;
-  if (!Array.isArray(off) || off.some((name) => typeof name !== "string")) {
-    return res.status(400).json({ error: "off must be a list of tool names" });
-  }
+  if (!isToolList(off)) return res.status(400).json({ error: "off must be a list of tool names" });
   const stored = setToolDefaultsOff(off);
   const applied = await sessions.applyToolDefaults();
   res.json({ off: stored, applied });
@@ -1438,8 +1432,6 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
   console.log(`  auth:     ${authEnabled ? "password" : "DISABLED"}`);
 
-  // Enabled channels come up with the server, so a restart does not silently
-  // leave the agent unreachable.
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
   // Agents with a heartbeat look around on their own, when nothing else is using the model.
@@ -1453,6 +1445,8 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
     modelRuntime().catch((e) => console.error(`[portal] pi's model catalogue could not be built: ${(e as Error).message}`));
   }
 
+  // Enabled channels come up with the server, so a restart does not silently
+  // leave the agent unreachable.
   channelSupervisor
     .sync()
     .then(() => console.log(`  channels: ${channelSupervisor.summary()}`))
@@ -1485,7 +1479,7 @@ sessions.startReaper();
 // Folders put aside for removal that a stop cut short: see folder-removal.ts.
 sweepRemoved(WORKSPACE_ROOT);
 sweepRemoved(agentsRoot());
-getDb().prepare("UPDATE canvases SET active_call = NULL, status = 'interrupted', agent_read_revision = revision WHERE active_call IS NOT NULL").run();
+interruptCanvasWrites();
 pinConnection();
 adoptPortalBrowser();
 // The memory tidied up at its set time, when the portal runs Understory.

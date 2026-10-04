@@ -4,7 +4,7 @@ import { agentFileStatus, isInitialised, runWizard, writeAgentFile, type WizardI
 import { listAgentSessions, listSessions } from "../db.js";
 import { deleteNote, listNotes, markNoteRead, markNotesRead, unreadNotes } from "../activity.js";
 import { heartbeat, setHeartbeat, watchList } from "../heartbeat.js";
-import { EXECUTOR_KIND } from "../session-manager.js";
+import { EXECUTOR_KIND } from "../executor-kind.js";
 import { FileError } from "../workspace-files.js";
 import { fail } from "./files.js";
 

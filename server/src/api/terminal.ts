@@ -1,7 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, readlinkSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
 import { MARKER } from "../background.js";

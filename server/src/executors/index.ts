@@ -54,20 +54,10 @@ function piArgs(opts: LaunchOptions, sessionDir: string): string[] {
   return args;
 }
 
-/** Environment passed through to pi — provider credentials plus a sane PATH. */
-function piEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    // pi writes nothing interactive; make sure it never tries.
-    CI: "1",
-    TERM: "dumb",
-  };
-}
-
 /**
- * Runs pi as a child process of the portal, working directly on mounted workspace
- * directories. Fast and simple; pi has the portal's own permissions, so this
- * assumes you trust the tasks you submit.
+ * Runs pi in the portal's own process (through the SDK), working directly on
+ * mounted workspace directories. Fast and simple; pi has the portal's own
+ * permissions, so this assumes you trust the tasks you submit.
  */
 export class HostExecutor implements Executor {
   readonly kind = "host" as const;

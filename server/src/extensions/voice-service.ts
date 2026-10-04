@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { checked, containerAction, containerState, dockerAvailable, ensureImage, PULL_STARTING, request } from './docker.js';
-import { asrDevice, ttsDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, speechUrl, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, whisperUrl as managedWhisperUrl, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
+import { asrDevice, ttsDevice, choiceFromKey, choiceKey, cpuServerConfig, cpuThreads, DEFAULT_CHOICE, healthUrls, parseChoice, pickGpu, sameChoice, serverConfig, SPEECH_PORT, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, type Gpu, type Host, type TtsEngine, type VoiceChoice } from '../voice-engines.js';
 import { NoGpu, askedCard, cardOf, decide, detectGpus, deviceId, explain, holds, hostProbe, isNoGpu, readHost, SMI_ARGS, type Card, type Detected, type Probe } from '../voice-gpu.js';
 
 export const CONTAINER = 'pithagoras-voice';
@@ -11,8 +11,6 @@ export const BASE_IMAGE = 'ubuntu:22.04';
 /** The image a choice runs in: the CUDA one wherever the GPU is used, else the small base. */
 export const imageFor = (choice: VoiceChoice) => usesGpu(choice) ? IMAGE : BASE_IMAGE;
 const VOLUME = 'pithagoras_voice-models';
-export const whisperUrl = managedWhisperUrl;
-export const breezeUrl = speechUrl;
 let pending = false;
 let progress = '';
 let error = '';

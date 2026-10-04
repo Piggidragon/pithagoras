@@ -8,10 +8,9 @@ import {
   rmSync,
 } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { writeFileAtomic } from "../atomic-write.js";
 import { piAgentDir } from "../pi-settings.js";
-import { agentHome } from "../agent.js";
+import { agentHome } from "../agent-home.js";
 import { builtinSkillsDir } from "../pi/sdk-client.js";
 import { isValidSlug, slugify } from "../slug.js";
 import { importFromGit, previewFromGit, readSource, type SkillSource } from "../skills/github.js";

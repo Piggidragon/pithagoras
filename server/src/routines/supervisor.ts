@@ -1,8 +1,9 @@
 import { nanoid } from "nanoid";
-import { createSession, findRoutineSession, getDb, type SessionRow } from "../db.js";
-import { agentHome } from "../agent.js";
+import { createSession, findRoutineSession, getDb, getSession, type SessionRow } from "../db.js";
+import { agentHome } from "../agent-home.js";
 import { checkWorkspace } from "../workspaces.js";
-import { sessions, EXECUTOR_KIND } from "../session-manager.js";
+import { EXECUTOR_KIND } from "../executor-kind.js";
+import { sessions } from "../session-manager.js";
 import { forgetBrowserSession } from "../browser/tools.js";
 import { isDue, nextRun, parseCron } from "./cron.js";
 import { reportFraming, reportToFor } from "../pi/report-tool.js";
@@ -261,8 +262,7 @@ class RoutineSupervisor {
       kind: "routine",
       routine_slug: row.slug,
     });
-    const created = getDb().prepare("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow;
-    return created;
+    return getSession(id)!;
   }
 }
 

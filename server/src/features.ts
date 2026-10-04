@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { bundledPath } from "./bundled.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { realPath } from "./within.js";
 import { piAgentDir, piSettingsPath, readPiSettings } from "./pi-settings.js";
@@ -23,21 +23,9 @@ export const SUBAGENT_PACKAGE = "pithagoras-subagent";
 
 export type SubagentMode = "interrupt" | "background";
 
-/**
- * The subagent tool shipped with the portal, resolved relative to the
- * compiled file so it is found from dist and from source alike.
- */
+/** The subagent tool shipped with the portal: the folder that holds its package. */
 export function bundledSubagentDir(): string | undefined {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const candidate of [
-    path.resolve(here, "../../extensions/subagent"),
-    path.resolve(here, "../extensions/subagent"),
-    path.resolve(process.cwd(), "extensions/subagent"),
-    path.resolve(process.cwd(), "../extensions/subagent"),
-  ]) {
-    if (existsSync(path.join(candidate, "package.json"))) return candidate;
-  }
-  return undefined;
+  return bundledPath("extensions/subagent", "package.json");
 }
 
 const real = (p: string) => realPath(p) ?? path.resolve(p);
@@ -153,12 +141,7 @@ export function understoryIn(config: McpFile): boolean {
   return !!entry && typeof entry === "object" && entry.disabled !== true;
 }
 
-/**
- * Whether Understory is the agent's memory now. Read from mcp.json each time
- * it is asked — when a chat starts — so the file is the one place it is said,
- * and switching the server off in Settings → MCP brings MEMORY.md back too;
- * so does switching off pi-mcp-adapter, which its tools come through.
- */
+/** The answer of `understoryOn` for the files as they were last read. */
 let known: { stamp: string; on: boolean } | undefined;
 
 /** When the two files it is read from last changed: asked each time a prompt is built, read only when they did. */
@@ -175,6 +158,13 @@ function filesStamp(): string {
     .join("|");
 }
 
+/**
+ * Whether Understory is the agent's memory now. Asked each time a chat starts
+ * and read from mcp.json whenever that file or pi's settings have changed, so
+ * the file is the one place it is said, and switching the server off in
+ * Settings → MCP brings MEMORY.md back too; so does switching off
+ * pi-mcp-adapter, which its tools come through.
+ */
 export function understoryOn(): boolean {
   const stamp = filesStamp();
   if (known?.stamp === stamp) return known.on;

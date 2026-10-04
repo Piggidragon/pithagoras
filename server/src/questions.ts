@@ -80,24 +80,12 @@ export function askQuestion(input: {
 export const getQuestion = (id: string): QuestionRow | undefined =>
   getDb().prepare("SELECT * FROM questions WHERE id = ?").get(id) as QuestionRow | undefined;
 
-export const pendingQuestions = (): QuestionRow[] =>
-  getDb()
-    .prepare("SELECT * FROM questions WHERE answered_at IS NULL ORDER BY asked_at ASC")
-    .all() as QuestionRow[];
-
 export function recordAnswer(id: string, answer: string): void {
   getDb()
     .prepare("UPDATE questions SET answered_at = ?, answer = ? WHERE id = ?")
     .run(new Date().toISOString(), answer, id);
 }
 
-/**
- * Is this message from the primary user an answer to a waiting question?
- *
- * Matched only at the start of a message and only against an id that is
- * actually waiting, so "#tea break in 5" reaches the agent as a message rather
- * than being swallowed as an answer to something.
- */
 /**
  * Approval has to be a word, not a mood.
  *
@@ -115,6 +103,13 @@ const APPROVES = /^(approve|approved|allow|allowed|yes|ok|okay|go ahead|do it|al
  */
 const ALWAYS = /^(always)\b/i;
 
+/**
+ * Is this message from the primary user an answer to a waiting question?
+ *
+ * Matched only at the start of a message and only against an id that is
+ * actually waiting, so "#tea break in 5" reaches the agent as a message rather
+ * than being swallowed as an answer to something.
+ */
 export function readAnswer(
   text: string
 ): { question: QuestionRow; answer: string; approves: boolean; always: boolean } | null {

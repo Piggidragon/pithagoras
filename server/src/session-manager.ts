@@ -24,7 +24,8 @@ import { forgetBrowserSession } from "./browser/tools.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
 import { forgetCanvases } from "./canvases.js";
 import { forTranscript } from "./stored-event.js";
-import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
+import { buildExecutor, type Executor } from "./executors/index.js";
+import { EXECUTOR_KIND } from "./executor-kind.js";
 import { describeToolCall } from "./tool-summary.js";
 import {
   appendEvent,
@@ -182,7 +183,6 @@ type Removed = { from: number; to: number | null; also?: number[]; kept?: number
 
 /** Pictures sent with messages, a folder per chat: see prompt-images.ts. */
 const IMAGE_ROOT = path.resolve(process.env.DATA_DIR || "./data", "images");
-const EXECUTOR_KIND = (process.env.EXECUTOR || "host") as ExecutorKind;
 
 /**
  * An extension's failure, said with its package's name rather than a path:
@@ -810,7 +810,6 @@ class SessionManager extends EventEmitter {
     this.commandsInHand.delete(sessionId);
   }
 
-  /** Extension status lines and widgets for a session, as they are now. */
   /**
    * Tool calls running in each chat, its subagents' included, by call id. A
    * process pi started for one and one an extension started look the same
@@ -853,6 +852,7 @@ class SessionManager extends EventEmitter {
     return this.calls.has(sessionId);
   }
 
+  /** Extension status lines and widgets for a session, as they are now. */
   extensionState(sessionId: string): { statuses: { key: string; text: string }[]; widgets: { key: string; lines: string[] }[] } {
     const ui = this.extensionUi.get(sessionId);
     return {
@@ -2179,7 +2179,6 @@ class SessionManager extends EventEmitter {
       prepared.onAccepted?.();
       await finished;
       // Already relayed piece by piece; handing it back would post it twice.
-      // Streamed already, so handing it back would post it twice.
       return onReply && streamText ? "" : all.join("\n\n").trim();
     } finally {
       clearTimeout(timer);
@@ -2187,10 +2186,7 @@ class SessionManager extends EventEmitter {
     }
   }
 
-  /**
-   * Whether a run is in flight. Checked before queueing an interrupt, which
-   * would otherwise wait politely behind the very task it means to stop.
-   */
+  /** Who is speaking in the conversation now: see speakerRole. */
   setSpeaker(sessionId: string, person: PersonRow): void {
     this.speaker.set(sessionId, person);
   }
@@ -2236,6 +2232,10 @@ class SessionManager extends EventEmitter {
     return anySessionRunning();
   }
 
+  /**
+   * Whether a run is in flight. Checked before queueing an interrupt, which
+   * would otherwise wait politely behind the very task it means to stop.
+   */
   isBusy(sessionId: string): boolean {
     if (this.asking.has(sessionId)) return true;
     return getSession(sessionId)?.status === "running";
@@ -2635,4 +2635,4 @@ class SessionManager extends EventEmitter {
 }
 
 export const sessions = new SessionManager();
-export { SESSION_ROOT, IMAGE_ROOT, EXECUTOR_KIND };
+export { SESSION_ROOT, IMAGE_ROOT };

@@ -270,18 +270,20 @@ export function isLlamaProvider(id: string | undefined): boolean {
   return kind === "llama-cpp" || kind === "llama-swap";
 }
 
+/** A key that names an environment variable, as pi reads one: `$NAME` or `${NAME}`. */
+const ENV_REF = /^\$\{?([A-Z_][A-Z0-9_]*)\}?$/i;
+
 export function keyHint(value: unknown): string | undefined {
   if (typeof value !== "string" || !value) return undefined;
   if (value.startsWith("!")) return "from a command";
-  if (/^\$\{?[A-Z_][A-Z0-9_]*\}?$/i.test(value)) return value.replace(/[${}]/g, "");
+  const env = ENV_REF.exec(value);
+  if (env) return env[1];
   if (value.length <= 8) return "••••";
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
 /** A key that only exists because pi wants one, not because the server does. */
 const isPlaceholder = (key: unknown) => typeof key === "string" && ["none", "ollama", "local", "sk-no-key-required"].includes(key);
-
-const presetFor = (kind: ProviderKind) => PRESETS.find((p) => p.kind === kind)!;
 
 /**
  * Everything set up: servers from models.json, and keys from auth.json.
@@ -374,8 +376,6 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind): string {
   if ((kind === "llama-cpp" || kind === "llama-swap" || kind === "ollama") && (parsed.pathname === "/" || parsed.pathname === "")) url += "/v1";
   return url.replace(/\/models$/, "");
 }
-
-const ENV_REF = /^\$\{?([A-Z_][A-Z0-9_]*)\}?$/i;
 
 /** A stored key as pi would read it: `$NAME` and `${NAME}` are looked up in the environment, anything else is the key as it stands, and a command is not run here. */
 export function resolveKey(key: string | undefined): string | undefined {

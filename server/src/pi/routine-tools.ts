@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { getDb, type SessionRow } from "../db.js";
+import { getDb, getSession } from "../db.js";
 import { unscopeKey } from "../agent.js";
 import { placeProblem, routinePlace } from "../workspaces.js";
 import { channelSupervisor } from "../channels/supervisor.js";
@@ -100,9 +100,7 @@ export function reportBackTo(sessionId?: string): {
   target: string | null;
 } {
   if (!sessionId) return { channel: null, target: null };
-  const session = getDb()
-    .prepare("SELECT * FROM sessions WHERE id = ?")
-    .get(sessionId) as SessionRow | undefined;
+  const session = getSession(sessionId);
   if (!session?.channel_slug || !session.channel_key)
     return { channel: null, target: null };
   if (!channelSupervisor.canSend(session.channel_slug))
