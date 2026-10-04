@@ -73,9 +73,30 @@ export function MemoryPage() {
   const note = params.get("note");
   const asView = params.get("view");
   const view: View | null = asView === "log" || asView === "graph" || asView === "issues" ? asView : null;
-  const openNote = (path: string) => setParams({ note: path });
-  const openView = (v: View) => setParams({ view: v });
-  const close = () => setParams({});
+  // Whether the open note is being edited, with something changed in it: it is told by the note.
+  const [editing, setEditing] = useState(false);
+  /** Said before what is open is left: its draft is in no other place. */
+  const settled = async () =>
+    !editing || (await confirmDialog({ title: t("Discard your changes?"), message: t("The note you are editing has changes that are not saved."), confirmLabel: t("Discard"), danger: true }));
+  const openNote = async (path: string) => {
+    if (path !== note && (await settled())) setParams({ note: path });
+  };
+  const openView = async (v: View) => {
+    if (await settled()) setParams({ view: v });
+  };
+  const close = async () => {
+    if (await settled()) setParams({});
+  };
+  // A reload of the page, or leaving it, is asked about by the browser.
+  useEffect(() => {
+    if (!editing) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [editing]);
 
   const [tree, setTree] = useState<MemoryNode | null>(null);
   const [validation, setValidation] = useState<MemoryValidation | null>(null);
@@ -116,7 +137,7 @@ export function MemoryPage() {
     setWiping(true);
     try {
       await api.wipeMemory();
-      close();
+      setParams({});
       // Nothing found is left to show: what it found is gone.
       setQuery("");
       load();
@@ -129,7 +150,7 @@ export function MemoryPage() {
 
   const changed = (what: "saved" | "deleted", health: MemoryHealth) => {
     // A deleted note is not there to show any more.
-    if (what === "deleted") close();
+    if (what === "deleted") setParams({});
     refresh();
     setAfter({ what, health });
   };
@@ -223,7 +244,7 @@ export function MemoryPage() {
             )}
             <button
               type="button"
-              onClick={load}
+              onClick={async () => (await settled()) && load()}
               disabled={loading}
               aria-label={t("Read the memory again")}
               title={t("Read the memory again")}
@@ -290,7 +311,7 @@ export function MemoryPage() {
 
         <main className={`${open ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
           {note ? (
-            <Note key={`${note}#${round}`} path={note} writable={writable} onOpen={openNote} onBack={close} onChanged={changed} />
+            <Note key={`${note}#${round}`} path={note} writable={writable} onOpen={openNote} onBack={close} onChanged={changed} onEditing={setEditing} />
           ) : view === "log" ? (
             <LogView key={round} writable={writable} onOpen={openNote} onBack={close} onCleared={refresh} />
           ) : view === "graph" ? (
@@ -457,6 +478,7 @@ function Note({
   onOpen,
   onBack,
   onChanged,
+  onEditing,
 }: {
   path: string;
   writable: boolean;
@@ -464,6 +486,8 @@ function Note({
   onBack: () => void;
   /** After it was saved or deleted, with what Understory said of the memory then. */
   onChanged: (what: "saved" | "deleted", health: MemoryHealth) => void;
+  /** Whether a draft with something changed in it is open: what the page asks about before it leaves. */
+  onEditing: (editing: boolean) => void;
 }) {
   const [concept, setConcept] = useState<MemoryConcept | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -485,15 +509,20 @@ function Note({
   const title = f?.title || path.split("/").pop();
   const canChange = writable && !reservedNote(path) && !!concept;
 
-  const edit = () =>
-    concept &&
-    setDraft({
-      title: String(f?.title ?? ""),
-      type: String(f?.type ?? ""),
-      description: String(f?.description ?? ""),
-      tags: (Array.isArray(f?.tags) ? f.tags : []).map(String).join(", "),
-      body: concept.body,
-    });
+  /** The draft as it starts, from the note as it is. */
+  const started = (c: MemoryConcept): NoteDraft => ({
+    title: String(c.frontmatter?.title ?? ""),
+    type: String(c.frontmatter?.type ?? ""),
+    description: String(c.frontmatter?.description ?? ""),
+    tags: (Array.isArray(c.frontmatter?.tags) ? c.frontmatter.tags : []).map(String).join(", "),
+    body: c.body,
+  });
+  const edit = () => concept && setDraft(started(concept));
+  const changedDraft = !!draft && !!concept && JSON.stringify(draft) !== JSON.stringify(started(concept));
+  useEffect(() => {
+    onEditing(changedDraft);
+    return () => onEditing(false);
+  }, [changedDraft]);
 
   const save = async () => {
     if (!draft || !concept) return;

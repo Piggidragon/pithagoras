@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Select } from "./Select";
 import {
   LuBot,
@@ -115,6 +115,7 @@ function Timing({
             onChange={(e) => onRunAt(e.target.value)}
             className={`${inputCls} mt-1 text-xs [color-scheme:dark]`}
           />
+          {!runAt && <p role="alert" className="mt-1 text-[11px] text-warn">{t("Pick a time to run it at.")}</p>}
           <p className="mt-1 text-[11px] text-fg-faint">
             {t("Your local time. It runs once and then switches itself off, keeping the result. A time that passed while the portal was down still runs when it comes back.")}
           </p>
@@ -175,13 +176,26 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
 
   const open = routines.find((r) => r.id === openId);
 
+  // Shown in the list and in a routine alike: a refused save or run is said where it was asked for.
+  const errorBox = error && (
+    <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+      <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1">{error}</span>
+      <button onClick={() => setError(null)} aria-label={t("Dismiss")}>✕</button>
+    </div>
+  );
+
   if (open) {
     return (
       <div className="h-full overflow-y-auto px-4 py-6">
         <div className="mx-auto w-full max-w-3xl">
+          {errorBox}
           <RoutineDetail
             routine={open}
-            onBack={() => setOpenId(null)}
+            onBack={() => {
+              setOpenId(null);
+              setError(null);
+            }}
             onChanged={load}
             onError={setError}
             onOpenSession={onOpenSession}
@@ -215,13 +229,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
           </div>
         </PageHeader>
 
-        {error && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="min-w-0 flex-1">{error}</span>
-            <button onClick={() => setError(null)}>✕</button>
-          </div>
-        )}
+        {errorBox}
 
         <div className="mt-4 flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
@@ -546,7 +554,7 @@ function NewRoutine({
       <WorkspacePicker value={workspace} onChange={setWorkspace} places={places} />
 
       <div className="flex items-center gap-2">
-        <button disabled={!name.trim() || busy} onClick={create} className={primaryCls}>
+        <button disabled={!name.trim() || busy || (mode === "once" && !runAt)} onClick={create} className={primaryCls}>
           {busy ? <LuRefreshCw className="h-4 w-4 animate-spin" /> : <LuCheck className="h-4 w-4" />}
           {t("Create")}
         </button>
@@ -590,7 +598,15 @@ function RoutineDetail({
   const [saved, flashSaved] = useFlash();
   const [runs, setRuns] = useState<{ id: string; title: string }[]>([]);
 
+  // What the form was last filled from: the fields are filled again from the routine
+  // for another routine, after this form's own save, or when nothing typed would be lost.
+  // A change of the routine's `updatedAt` that is no save of this form (the enable
+  // switch saves at once) must not take a draft away.
+  const filled = useRef({ id: r.id, own: false });
   useEffect(() => {
+    const was = filled.current;
+    filled.current = { id: r.id, own: false };
+    if (r.id === was.id && !was.own && dirty) return;
     setName(r.name);
     setMode(r.mode);
     setSchedule(r.schedule || "0 9 * * *");
@@ -633,6 +649,7 @@ function RoutineDetail({
 
   const act = async (which: "save" | "run", fn: () => Promise<unknown>) => {
     setBusy(which);
+    onError("");
     try {
       await fn();
       await onChanged();
@@ -850,10 +867,11 @@ function RoutineDetail({
                 ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),
               });
+              filled.current.own = true;
               flashSaved();
             })
           }
-          disabled={busy !== null || !dirty}
+          disabled={busy !== null || !dirty || (mode === "once" && !runAt)}
           className={primaryCls}
         >
           {busy === "save" ? (

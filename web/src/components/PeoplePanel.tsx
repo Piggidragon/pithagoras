@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LuCheck,
   LuChevronLeft,
@@ -225,11 +225,18 @@ function PersonDetail({
   const [busy, setBusy] = useState(false);
   const [saved, flashSaved] = useFlash();
 
+  // The fields are filled from the person for another person, after this form's own save
+  // (the server keeps the name and the notes trimmed, so what was typed is not what is
+  // stored), or when nothing typed would be lost.
+  const filled = useRef({ key: person.key, own: false });
   useEffect(() => {
+    const was = filled.current;
+    filled.current = { key: person.key, own: false };
+    if (person.key === was.key && !was.own && dirty) return;
     setName(person.name);
     setRole(person.role);
     setNotes(person.notes);
-  }, [person.key]);
+  }, [person.key, person.name, person.role, person.notes]);
 
   const dirty = name !== person.name || role !== person.role || notes !== person.notes;
   /** Said when this would leave nobody primary, which opens every channel to anybody. */
@@ -321,6 +328,7 @@ function PersonDetail({
               if (leaving && !(await confirmDialog({ title: t("Take away the only primary user's role?"), confirmLabel: t("Save"), ...noPrimaryLeft }))) return;
               act(async () => {
                 await api.updatePerson(person.key, { name, role, notes, force: leaving || undefined });
+                filled.current.own = true;
                 flashSaved();
               });
             }}

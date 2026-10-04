@@ -488,6 +488,7 @@ const de: Locale = {
     "Faster": "Schneller",
     "Smarter": "Klüger",
     // components/ConfigModal.tsx
+    "It is uninstalled: its commands, tools and skills are gone from every chat.": "Es wird deinstalliert: Seine Befehle, Werkzeuge und Skills fehlen dann in jedem Chat.",
     "Providers": "Anbieter",
     "Where the models come from": "Woher die Modelle kommen",
     "Defaults": "Standards",
@@ -527,7 +528,7 @@ const de: Locale = {
     "Nowhere — routines stay silent": "Nirgendwohin — Routinen bleiben still",
     "Nothing to pick yet. A destination is a conversation that already exists on a channel that can speak first — message your bot once and it appears here. A webhook never will: it can only answer.": "Noch nichts zur Auswahl. Ein Ziel ist ein Gespräch, das es auf einem Kanal schon gibt, der von sich aus schreiben kann — schreib deinem Bot einmal, dann erscheint es hier. Ein Webhook nie: Er kann nur antworten.",
     "Ask before deleting": "Vor dem Löschen fragen",
-    "Chats, messages, files, skills, routines, projects, voices, channels, providers. Unsaved changes are still asked about: there is no other copy of them.": "Chats, Nachrichten, Dateien, Skills, Routinen, Projekte, Stimmen, Kanäle, Anbieter. Nach ungespeicherten Änderungen wird trotzdem gefragt: Es gibt keine andere Kopie davon.",
+    "Chats, messages, files, skills, routines, projects, voices, channels, providers, MCP servers and extensions. Unsaved changes are still asked about: there is no other copy of them.": "Chats, Nachrichten, Dateien, Skills, Routinen, Projekte, Stimmen, Kanäle, Anbieter, MCP-Server und Erweiterungen. Nach ungespeicherten Änderungen wird trotzdem gefragt: Es gibt keine andere Kopie davon.",
     "Signed in": "Angemeldet",
     "Signing out asks for the password here again. Other browsers stay signed in.": "Nach dem Abmelden wird hier wieder nach dem Passwort gefragt. Andere Browser bleiben angemeldet.",
     "Sign out": "Abmelden",
@@ -910,6 +911,7 @@ const de: Locale = {
     // components/Markdown.tsx
     "Picture from {host} not loaded": "Bild von {host} nicht geladen",
     // components/McpPanel.tsx
+    "Its entry is deleted from the MCP file, with its environment, headers and anything added by hand. There is no undo.": "Sein Eintrag wird aus der MCP-Datei gelöscht, samt Umgebung, Headern und allem, was von Hand hinzugefügt wurde. Das lässt sich nicht rückgängig machen.",
     "Reading configuration…": "Konfiguration wird gelesen…",
     "The MCP adapter is not installed": "Der MCP-Adapter ist nicht installiert",
     "MCP support comes from the {name} extension. Until it is installed, servers configured here are read by nothing.": "MCP-Unterstützung kommt von der Erweiterung {name}. Solange sie nicht installiert ist, liest niemand die hier eingerichteten Server.",
@@ -975,6 +977,7 @@ const de: Locale = {
     "Milliseconds": "Millisekunden",
     "default": "Standard",
     // components/MemoryPage.tsx
+    "The note you are editing has changes that are not saved.": "An der Notiz, die du bearbeitest, gibt es ungespeicherte Änderungen.",
     "Clear the whole memory?": "Das ganze Gedächtnis leeren?",
     "Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone.": "Jede Notiz und jeder Ordner wird gelöscht, und Index und Log beginnen leer, wie bei einem neuen Gedächtnis. Der Agent vergisst alles, was er hier behalten hat. Das lässt sich nicht rückgängig machen.",
     "Clear the memory": "Das Gedächtnis leeren",
@@ -1249,6 +1252,7 @@ const de: Locale = {
     "Drag the bottom right corner to resize": "Untere rechte Ecke ziehen, um die Größe zu ändern",
     "Drag the bottom left corner to resize": "Untere linke Ecke ziehen, um die Größe zu ändern",
     // components/RoutinesPage.tsx
+    "Pick a time to run it at.": "Wähle eine Zeit, zu der es laufen soll.",
     "ok": "ok",
     "Every 15 min": "Alle 15 Min.",
     "Hourly": "Stündlich",
@@ -1388,6 +1392,8 @@ const de: Locale = {
     "Recents": "Zuletzt",
     "{n} more…": "{n} weitere…",
     // components/SkillsPanel.tsx
+    "Replace your local edits?": "Deine lokalen Änderungen ersetzen?",
+    "Update fetches {name} from its source again. What you changed in it here, saved or not, is replaced.": "Aktualisieren holt {name} erneut aus der Quelle. Was du hier daran geändert hast, gespeichert oder nicht, wird ersetzt.",
     "A skill is a set of instructions the agent pulls in when its description matches what is being asked. Every session sees them, so they are a good place for a procedure you would otherwise repeat. Switching one off stops pi loading it at all, rather than hiding it here.": "Ein Skill ist eine Anleitung, die der Agent heranzieht, wenn ihre Beschreibung zur Anfrage passt. Jede Sitzung sieht sie, also sind sie ein guter Ort für einen Ablauf, den du sonst immer wieder erklären würdest. Ausschalten sorgt dafür, dass pi ihn gar nicht lädt, statt ihn hier nur zu verstecken.",
     "Yours": "Deine",
     "Import from GitHub": "Von GitHub importieren",

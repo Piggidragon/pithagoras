@@ -157,3 +157,115 @@ test('the fields of a heartbeat are the sizes they were written for: 8rem for th
   // Text of 12px on a 16px line, 6px above and below, and the border: 30px, not the 34px of a roomy field.
   expect((await page.getByLabel('Command it may run').boundingBox())!.height).toBeCloseTo(30, 0);
 });
+
+test('switching a channel on or off does not take back what was typed in it and not yet saved', async ({ page }) => {
+  const channel = { ...CHANNEL };
+  const patches: unknown[] = [];
+  await portal(page, {
+    '/api/channels': { channels: [channel], kinds: [{ id: 'bot', label: 'Chat bot', blurb: 'A bot', fields: [], packageName: 'pi-bot', builtin: true, runnable: true }], broken: [], channelsDir: '/a/channels' },
+    '/api/agents': { agents: [{ id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', unread: 0 }] },
+  });
+  // A save answers with the channel as it is now, stamped as changed, and the list does too.
+  await page.route('**/api/channels/c1', async (route) => {
+    const body = route.request().postDataJSON();
+    patches.push(body);
+    Object.assign(channel, body, { updated_at: String(Date.now()) });
+    await route.fulfill({ json: channel });
+  });
+  await page.goto('/settings/channels');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: /Ops bot/ }).click();
+  const name = dialog.getByRole('textbox').first();
+  await name.fill('Ops bot, renamed');
+  const save = dialog.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeEnabled();
+  await dialog.getByRole('switch', { name: 'Ops bot' }).click();
+  await expect.poll(() => patches.length).toBe(1);
+  expect(patches[0]).toEqual({ enabled: false });
+  await expect(dialog.getByRole('switch', { name: 'Ops bot' })).toHaveAttribute('aria-checked', 'false');
+  await expect(name).toHaveValue('Ops bot, renamed');
+  await expect(save).toBeEnabled();
+});
+
+test('removing an MCP server or an installed package asks first, and names it', async ({ page }) => {
+  const deleted: string[] = [];
+  const mcp = { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', servers: [{ name: 'files', entry: { command: 'npx' }, transport: 'stdio', disabled: false }], settings: {}, raw: '{}', parseError: null };
+  await portal(page, {
+    '/api/mcp': mcp,
+    '/api/extensions': { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:pi-notes', name: 'pi-notes', settings: [], enabled: true, scope: 'user' }] },
+  });
+  await page.route('**/api/mcp/servers/files', async (route) => {
+    deleted.push(`${route.request().method()} mcp files`);
+    await route.fulfill({ json: { ok: true } });
+  });
+  await page.route('**/api/packages', async (route) => {
+    if (route.request().method() === 'DELETE') deleted.push(`DELETE package ${route.request().postDataJSON().spec}`);
+    await route.fulfill({ json: { ok: true, output: '' } });
+  });
+  await page.goto('/settings/mcp');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Remove files' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Remove files?' });
+  await expect(ask).toContainText('There is no undo');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  expect(deleted).toEqual([]);
+  await dialog.getByRole('button', { name: 'Remove files' }).click();
+  await ask.getByRole('button', { name: 'Remove' }).click();
+  await expect.poll(() => deleted).toEqual(['DELETE mcp files']);
+
+  await page.goto('/settings/extensions');
+  await dialog.getByRole('button', { name: 'Remove pi-notes' }).click();
+  const askPackage = page.getByRole('alertdialog', { name: 'Remove pi-notes?' });
+  await askPackage.getByRole('button', { name: 'Cancel' }).click();
+  expect(deleted).toEqual(['DELETE mcp files']);
+  await dialog.getByRole('button', { name: 'Remove pi-notes' }).click();
+  await askPackage.getByRole('button', { name: 'Remove' }).click();
+  await expect.poll(() => deleted).toEqual(['DELETE mcp files', 'DELETE package npm:pi-notes']);
+});
+
+/** The MCP file as the page reads it: the servers, the adapter's settings and the text of the file, which a change of either rewrites. */
+function mcpFile(servers: { name: string; disabled: boolean }[], settings: Record<string, unknown> = {}) {
+  const raw = () => JSON.stringify({ mcpServers: Object.fromEntries(servers.map((s) => [s.name, { command: 'npx', ...(s.disabled ? { disabled: true } : {}) }])), settings }, null, 2) + '\n';
+  return {
+    servers, settings,
+    view: () => ({ path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings, raw: raw(), parseError: null, servers: servers.map((s) => ({ name: s.name, entry: { command: 'npx' }, transport: 'stdio', disabled: s.disabled })) }),
+  };
+}
+
+test('the raw editor follows the file when the list above rewrites it, so saving it does not undo that', async ({ page }) => {
+  const file = mcpFile([{ name: 'files', disabled: false }]);
+  await portal(page, {});
+  await page.route('**/api/mcp', (route) => route.fulfill({ json: file.view() }));
+  await page.route('**/api/mcp/servers/files', (route) => {
+    file.servers[0].disabled = route.request().postDataJSON().entry.disabled === true;
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/settings/mcp');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Edit the file directly' }).click();
+  const raw = dialog.getByRole('textbox').last();
+  await expect(raw).not.toHaveValue(/disabled/);
+  // The server is switched off in the list: the file says so, and so does the editor.
+  await dialog.getByRole('checkbox', { name: 'On' }).click();
+  await expect(raw).toHaveValue(/"disabled": true/);
+});
+
+test('adapter settings that could not be saved stay to be saved again', async ({ page }) => {
+  const file = mcpFile([]);
+  const saves: unknown[] = [];
+  await portal(page, {});
+  await page.route('**/api/mcp', (route) => route.fulfill({ json: file.view() }));
+  await page.route('**/api/mcp/settings', (route) => {
+    saves.push(route.request().postDataJSON());
+    return route.fulfill({ status: 500, json: { error: 'The file is read-only' } });
+  });
+  await page.goto('/settings/mcp');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByPlaceholder('10').fill('5');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(() => saves.length).toBe(1);
+  await expect(dialog.getByRole('alert')).toContainText('The file is read-only');
+  // Still there to be tried again, with what was typed.
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
+  await expect(dialog.getByPlaceholder('10')).toHaveValue('5');
+});

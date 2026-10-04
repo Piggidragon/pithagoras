@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Select } from "./Select";
+import { confirmDialog } from "./ConfirmDialog";
 import {
   LuChevronLeft,
   LuChevronRight,
@@ -81,12 +82,15 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
     load();
   }, []);
 
+  /** True when it went through. */
   const act = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
       await load();
+      return true;
     } catch (e) {
       onError((e as Error).message);
+      return false;
     }
   };
 
@@ -219,7 +223,11 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
                     api.saveMcpServer(s.name, { ...s.entry, disabled: !s.disabled }, s.name),
                   )
                 }
-                onDelete={() => act(() => api.deleteMcpServer(s.name))}
+                onDelete={async () => {
+                  // It holds the server's environment, headers and anything written by hand, and a tap beside the On box is easy to make.
+                  if (!(await confirmDialog({ title: t("Remove {name}?", { name: s.name }), message: t("Its entry is deleted from the MCP file, with its environment, headers and anything added by hand. There is no undo."), confirmLabel: t("Remove"), danger: true, deletes: true }))) return;
+                  await act(() => api.deleteMcpServer(s.name));
+                }}
               />
             ))}
           </ul>
@@ -296,6 +304,7 @@ function ServerRow({
       <button
         className="shrink-0 rounded-lg p-1.5 text-fg-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100 [@media(hover:none)]:opacity-100"
         title={t("Remove")}
+        aria-label={t("Remove {name}", { name: server.name })}
         onClick={onDelete}
       >
         <LuTrash2 className="h-4 w-4" />
@@ -642,16 +651,26 @@ function GlobalSettings({
   onSave,
 }: {
   settings: Record<string, unknown>;
-  onSave: (next: Record<string, unknown>) => void;
+  /** True when it was saved: what is not stays to be saved again. */
+  onSave: (next: Record<string, unknown>) => Promise<boolean>;
 }) {
+  const shown = (v: unknown) => (v === undefined ? "" : String(v));
   const [prefix, setPrefix] = useState(String(settings.toolPrefix ?? "server"));
-  const [idle, setIdle] = useState(settings.idleTimeout === undefined ? "" : String(settings.idleTimeout));
-  const [timeout, setTimeout] = useState(
-    settings.requestTimeoutMs === undefined ? "" : String(settings.requestTimeoutMs),
-  );
+  const [idle, setIdle] = useState(shown(settings.idleTimeout));
+  const [timeout, setTimeout] = useState(shown(settings.requestTimeoutMs));
   const [dirty, setDirty] = useState(false);
 
-  const save = () => {
+  // The fields follow the file when it changes elsewhere (the raw editor, another
+  // window), unless something is typed in them: that is saved, or not, as it is.
+  const loaded = JSON.stringify(settings);
+  useEffect(() => {
+    if (dirty) return;
+    setPrefix(String(settings.toolPrefix ?? "server"));
+    setIdle(shown(settings.idleTimeout));
+    setTimeout(shown(settings.requestTimeoutMs));
+  }, [loaded]);
+
+  const save = async () => {
     const next: Record<string, unknown> = { ...settings };
     if (prefix === "server") delete next.toolPrefix;
     else next.toolPrefix = prefix;
@@ -659,8 +678,7 @@ function GlobalSettings({
     else next.idleTimeout = Number(idle);
     if (timeout.trim() === "") delete next.requestTimeoutMs;
     else next.requestTimeoutMs = Number(timeout);
-    onSave(next);
-    setDirty(false);
+    if (await onSave(next)) setDirty(false);
   };
 
   const track = <T,>(set: (v: T) => void) => (v: T) => {
@@ -722,11 +740,21 @@ function RawEditor({
   onError,
 }: {
   initial: string;
-  onSaved: () => void;
+  onSaved: () => Promise<void>;
   onError: (e: string) => void;
 }) {
-  const [text, setText] = useState(initial || '{\n  "mcpServers": {}\n}\n');
+  const seeded = (file: string) => file || '{\n  "mcpServers": {}\n}\n';
+  const [text, setText] = useState(seeded(initial));
+  /** What `text` started from: it is changed once it is not that. */
+  const [from, setFrom] = useState(seeded(initial));
   const [saving, setSaving] = useState(false);
+
+  // The file as it is now, unless the text has been typed in: a toggle in the list
+  // above rewrites the file, and saving the old text would undo it.
+  useEffect(() => {
+    if (text === from) setText(seeded(initial));
+    setFrom(seeded(initial));
+  }, [initial]);
 
   return (
     <div className="mt-2">
@@ -744,7 +772,8 @@ function RawEditor({
           setSaving(true);
           try {
             await api.saveMcpRaw(text);
-            onSaved();
+            setFrom(text);
+            await onSaved();
           } catch (e) {
             onError((e as Error).message);
           } finally {

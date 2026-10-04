@@ -51,6 +51,7 @@ import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { EffortPicker, Empty, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { confirmDialog } from "./ConfirmDialog";
 import { PackageCatalog } from "./PackageCatalog";
 import { packageName } from "../package-names";
 import { prefetchSettings, useCached } from "../settings-cache";
@@ -263,10 +264,10 @@ export const ConfigModal = memo(function ConfigModal({
       }
     >
       {error && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+        <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
           <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
           <span className="min-w-0 flex-1">{error}</span>
-          <button onClick={() => setError(null)} className="text-danger/70 hover:text-danger">
+          <button onClick={() => setError(null)} aria-label={t("Dismiss")} className="text-danger/70 hover:text-danger">
             ✕
           </button>
         </div>
@@ -502,7 +503,7 @@ function Confirmations() {
   return (
     <SwitchRow
       title={t("Ask before deleting")}
-      detail={t("Chats, messages, files, skills, routines, projects, voices, channels, providers. Unsaved changes are still asked about: there is no other copy of them.")}
+      detail={t("Chats, messages, files, skills, routines, projects, voices, channels, providers, MCP servers and extensions. Unsaved changes are still asked about: there is no other copy of them.")}
       on={ask}
       onChange={setAsk}
     />
@@ -1217,8 +1218,14 @@ function ExtensionsPanel({
                   )}
                   <button
                     disabled={busy !== null}
-                    onClick={() => act(ext.spec, () => api.removePackage(ext.spec))}
+                    onClick={async () => {
+                      // Its commands, tools and skills go from every chat, and the switch beside it is easy to miss for this one.
+                      const name = displayName(ext.name, names);
+                      if (!(await confirmDialog({ title: t("Remove {name}?", { name }), message: t("It is uninstalled: its commands, tools and skills are gone from every chat."), confirmLabel: t("Remove"), danger: true, deletes: true }))) return;
+                      await act(ext.spec, () => api.removePackage(ext.spec));
+                    }}
                     title={t("Remove")}
+                    aria-label={t("Remove {name}", { name: displayName(ext.name, names) })}
                     className={`${ext.enabled === undefined ? "ml-auto " : ""}shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40`}
                   >
                     {busy === ext.spec ? (

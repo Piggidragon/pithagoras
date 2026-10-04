@@ -406,7 +406,11 @@ function SkillDetail({
                 {tx("Imported from {source}", { source: <span className="font-mono">{s.source.spec}</span> })}
               </span>
               <button
-                onClick={() => act(() => api.updateSkill(s.name))}
+                onClick={async () => {
+                  // Fetched again over what is on disk, and the draft follows the file: nothing of what was changed here stays.
+                  if (!(await confirmDialog({ title: t("Replace your local edits?"), message: t("Update fetches {name} from its source again. What you changed in it here, saved or not, is replaced.", { name: s.name }), confirmLabel: t("Update"), danger: true }))) return;
+                  act(() => api.updateSkill(s.name));
+                }}
                 disabled={busy}
                 className="shrink-0 text-accent hover:text-accent disabled:opacity-40"
                 title={t("Re-import, replacing local edits")}

@@ -147,3 +147,21 @@ test("an agent's file buttons say which of them is open", async ({ page }) => {
   await memory.click();
   await expect(memory).toHaveAttribute('aria-pressed', 'false');
 });
+
+test("a save of an agent's file that the server refuses says so, and keeps what was typed", async ({ page }) => {
+  const files = { initialised: true, home: '/a', memory: 'file', files: [{ name: 'SOUL.md', exists: true, content: '# SOUL.md\n', mtime: 1000 }] };
+  await portal(page, (p, method) => {
+    if (p === '/api/agents/home/setup') return { json: files };
+    if (p === '/api/agents/home/files/SOUL.md' && method === 'PUT') return { status: 500, json: { error: 'No space left on device' } };
+  });
+  await page.goto('/agents?agent=home&tab=files');
+  const main = page.getByRole('main');
+  await main.getByRole('button', { name: 'SOUL.md' }).click();
+  const box = main.locator('textarea');
+  await box.fill('# SOUL.md\nBe kind.');
+  await main.getByRole('button', { name: 'Save' }).click();
+  await expect(main.getByRole('alert')).toHaveText('No space left on device');
+  // The draft is still there to copy or to send again.
+  await expect(box).toHaveValue('# SOUL.md\nBe kind.');
+  await expect(main.getByRole('button', { name: 'Save' })).toBeEnabled();
+});

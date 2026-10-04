@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean } = {}) {
+async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
@@ -23,6 +23,7 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     else if (p === '/api/sessions/s1' && method === 'PATCH' && opts.renameFails) return route.fulfill({ status: 500, json: { error: 'disk full' } });
     else if (p === '/api/sessions/s1' && method === 'PATCH') { session.title = body.title; reply = session; }
     else if (p === '/api/routines' && method === 'GET') reply = { routines: [routine] };
+    else if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return route.fulfill({ status: 400, json: { error: opts.refuses } });
     else if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: String(Date.now()) }); reply = routine; }
     else if (p === '/api/routines/r1/sessions') reply = { sessions: [] };
     else if (p === '/api/routines/report-targets') reply = { targets: [], default: null };
@@ -207,6 +208,69 @@ test('a second save soon after the first keeps its "Saved" for as long as the fi
   await expect(save).toHaveText('Saved');
   await page.clock.runFor(1500);
   await expect(save).toHaveText('Save');
+});
+
+test('switching a routine on or off does not take back what was typed in it and not yet saved', async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  const instructions = page.getByText('Build it');
+  await instructions.fill('Build it, then test it');
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeEnabled();
+  // The switch saves at once, and the server stamps the routine as changed.
+  await page.getByRole('switch', { name: 'Nightly build' }).click();
+  await expect.poll(() => sent.filter((s) => s.method === 'PATCH').length).toBe(1);
+  expect(sent[0].body).toEqual({ enabled: false });
+  await expect(page.getByRole('switch', { name: 'Nightly build' })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.locator('textarea').first()).toHaveValue('Build it, then test it');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect.poll(() => sent.filter((s) => s.method === 'PATCH').length).toBe(2);
+  expect(sent[1].body.instructions).toBe('Build it, then test it');
+  // Saved, the form is the routine again.
+  await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeDisabled();
+});
+
+test('a save of a routine that the server refuses says so inside the routine, where it was asked for', async ({ page }) => {
+  await portal(page, { refuses: 'Needs a schedule or a time' });
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  await page.getByText('Build it').fill('Build it again');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Needs a schedule or a time');
+  // Away from the routine, the next one does not start with the last one's complaint.
+  await page.getByRole('main').getByRole('button', { name: 'Routines', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('a one-off routine with no time picked cannot be created or saved, and says what is missing', async ({ page }) => {
+  const sent = await portal(page);
+  await page.goto('/routines');
+  await page.getByRole('button', { name: 'New routine' }).click();
+  await page.getByPlaceholder('Morning summary').fill('Once only');
+  const timing = page.getByRole('radiogroup', { name: 'Schedule' });
+  await timing.getByRole('radio', { name: 'Once' }).click();
+  const when = page.locator('input[type="datetime-local"]');
+  await when.fill('');
+  await expect(page.getByText('Pick a time to run it at.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled();
+  await when.fill('2030-01-02T03:04');
+  await expect(page.getByText('Pick a time to run it at.')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Create' })).toBeEnabled();
+  expect(sent.filter((s) => s.method === 'POST')).toEqual([]);
+});
+
+test('a routine changed to a one-off cannot be saved while its time is empty', async ({ page }) => {
+  await portal(page);
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  await page.getByRole('radiogroup', { name: 'Schedule' }).getByRole('radio', { name: 'Once' }).click();
+  const when = page.locator('input[type="datetime-local"]');
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+  await when.fill('');
+  await expect(page.getByText('Pick a time to run it at.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 });
 
 test.describe('in a browser set to German', () => {

@@ -97,7 +97,7 @@ canvases — dock beside the conversation, each on its own side. See
 
 ## Confirmations
 
-Deleting a session, a project, a routine and the like asks first. **Settings →
+Deleting a session, a project, a routine and the like asks first, and so does removing an MCP server or an extension. **Settings →
 This browser → Confirmations → Ask before deleting** turns the question off.
 It is kept per browser deliberately: a phone that trips over a delete button is
 not made safer by the laptop having turned the question off.

@@ -20,7 +20,13 @@ async function portal(page: Page, people: any[]) {
       body = { rules };
     } else if (p.startsWith('/api/people/')) {
       sent.push({ method, url: p + url.search, body: method === 'PATCH' ? route.request().postDataJSON() : undefined });
-      body = method === 'PATCH' ? { person: people[0] } : { ok: true };
+      // A save is stored as the server keeps the text: trimmed. The role stays as it was here.
+      const patched = people.find((x) => x.key === decodeURIComponent(p.slice('/api/people/'.length)));
+      if (method === 'PATCH' && patched) {
+        const sentBody = route.request().postDataJSON();
+        Object.assign(patched, { name: sentBody.name.trim() || patched.name, notes: sentBody.notes.trim() });
+      }
+      body = method === 'PATCH' ? { person: patched ?? people[0] } : { ok: true };
     } else if (p === '/api/settings') body = { settings: {}, stored: {}, defaults: {}, piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w' };
     else if (p === '/api/models') body = { models: [], providers: {} };
     else if (p === '/api/extensions') body = { settingsPath: '/a/settings.json', extensions: [] };
@@ -94,6 +100,20 @@ test('a person\'s role is a radio group, so the one they have is said and not on
   await role.getByRole('radio', { name: 'Blocked' }).click();
   await expect(role.getByRole('radio', { name: 'Blocked' })).toHaveAttribute('aria-checked', 'true');
   await expect(role.getByRole('radio', { name: 'Colleague' })).toHaveAttribute('aria-checked', 'false');
+});
+
+test('after a save the form is what is stored, so Save goes away even where the server trimmed the notes', async ({ page }) => {
+  const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:kim', 'Kim', 'colleague')]);
+  await page.goto('/settings/people');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: /Kim/ }).click();
+  const notes = dialog.getByPlaceholder(/Their role, what they work on/);
+  await notes.fill('Reviews the pull requests.\n');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  // The form shows what the server kept, and has nothing left to save.
+  await expect(notes).toHaveValue('Reviews the pull requests.');
+  await expect(dialog.getByRole('button', { name: 'Save' })).toHaveCount(0);
 });
 
 test('with another primary user, demoting somebody asks nothing and sends no force', async ({ page }) => {

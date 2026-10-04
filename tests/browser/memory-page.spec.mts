@@ -240,6 +240,40 @@ test('a note is edited in place: its title, type, tags and text, and saving says
   await expect(page.getByText('#host')).toBeVisible();
 });
 
+test('a note being edited is not left for another note, the log, the graph or a refresh without asking', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  const form = page.getByRole('form', { name: 'Edit the note' });
+  // Opened for editing and not changed: nothing to lose, so the next note opens at once.
+  await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+  await expect(page).toHaveURL(/note=%2Fdeployment%2Fbranches.md/);
+  await notes(page).getByRole('button', { name: /The owner/ }).click();
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  await form.getByLabel('Text, in markdown').fill('A long rewrite, not saved yet.');
+
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  for (const leave of [
+    () => notes(page).getByRole('button', { name: /Branch Deployment/ }).click(),
+    () => page.getByRole('button', { name: 'Log', exact: true }).click(),
+    () => page.getByRole('button', { name: 'Graph', exact: true }).click(),
+    () => page.getByRole('button', { name: 'Read the memory again' }).click(),
+  ]) {
+    await leave();
+    await expect(ask).toContainText('The note you are editing has changes that are not saved.');
+    await ask.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page).toHaveURL(/note=%2Fpeople%2Fowner.md/);
+    await expect(form.getByLabel('Text, in markdown')).toHaveValue('A long rewrite, not saved yet.');
+  }
+  expect(changes).toEqual([]);
+
+  // Answered "Discard", the other note opens.
+  await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(page).toHaveURL(/note=%2Fdeployment%2Fbranches.md/);
+  await expect(form).toHaveCount(0);
+});
+
 test('deleting a note asks first, then shows what it broke and offers to put it right', async ({ page }) => {
   const { changes } = await portal(page);
   await page.goto('/memory?note=%2Fpeople%2Fowner.md');

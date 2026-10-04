@@ -1,13 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /** Settings → Skills with one skill the user can edit, over canned answers. */
-async function portal(page: Page) {
-  const skill = { name: 'notes', description: 'Take notes', path: '/agent/skills/notes/SKILL.md', scope: 'user', editable: true, manualOnly: false, broken: false, enabled: true, source: null, content: '---\nname: notes\n---\nTake notes.' };
+async function portal(page: Page, source: unknown = null) {
+  const updates: string[] = [];
+  const skill = { name: 'notes', description: 'Take notes', path: '/agent/skills/notes/SKILL.md', scope: 'user', editable: true, manualOnly: false, broken: false, enabled: true, source, content: '---\nname: notes\n---\nTake notes.' };
   await page.route('**/api/**', async (route) => {
     const p = new URL(route.request().url()).pathname;
     const method = route.request().method();
     if (p === '/api/auth/status') return route.fulfill({ json: { authed: true, authRequired: false } });
     if (p === '/api/sessions' && method === 'GET') return route.fulfill({ json: { sessions: [], executor: 'host' } });
+    if (p === '/api/skills/notes/update') { updates.push(method); skill.content = '---\nname: notes\n---\nTake the upstream notes.'; return route.fulfill({ json: { ok: true, imported: ['notes'] } }); }
     if (p === '/api/skills') return route.fulfill({ json: { root: '/agent/skills', skills: [skill], diagnostics: [] } });
     return route.fulfill({ json: {} });
   });
@@ -15,6 +17,7 @@ async function portal(page: Page) {
     (window as any).EventSource = class { onmessage: any; onopen: any; onerror: any; addEventListener() {} close() {} };
     localStorage.setItem('pithagoras.setup', 'done');
   });
+  return updates;
 }
 
 test('Escape in a skill that was rewritten asks before Settings closes; an unchanged skill closes at once', async ({ page }) => {
@@ -41,4 +44,24 @@ test('Escape in a skill that was rewritten asks before Settings closes; an uncha
   await page.keyboard.press('Escape');
   await ask.getByRole('button', { name: 'Discard' }).click();
   await expect(dialog).toBeHidden();
+});
+
+test('Update on an imported skill asks before it replaces local edits, and leaves them alone when it is not confirmed', async ({ page }) => {
+  const updates = await portal(page, { spec: 'team/skills', url: 'https://github.com/team/skills', importedAt: '2026-01-01T00:00:00Z' });
+  await page.goto('/settings/skills');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: /notes/ }).click();
+  const editor = dialog.getByRole('textbox');
+  await editor.fill('My own version, not saved yet');
+  await dialog.getByRole('button', { name: 'Update' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Replace your local edits?' });
+  await expect(ask).toContainText('saved or not');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  expect(updates).toEqual([]);
+  await expect(editor).toHaveValue('My own version, not saved yet');
+
+  await dialog.getByRole('button', { name: 'Update' }).click();
+  await ask.getByRole('button', { name: 'Update' }).click();
+  await expect.poll(() => updates.length).toBe(1);
+  await expect(editor).toHaveValue(/Take the upstream notes/);
 });

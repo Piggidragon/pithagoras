@@ -28,7 +28,9 @@ it can be linked to.
 ### Editing
 
 In the Understory the portal runs, a note can be edited (title, type,
-description, tags, text) or deleted from the pencil and bin over it. After a
+description, tags, text) or deleted from the pencil and bin over it. A note with
+changes in it that are not saved is not left for another note, the log, the graph
+or a refresh without asking **Discard your changes?** first. After a
 change a window says what Understory's checks find — a link to nothing, a note
 nothing links to, an index that misses something — and offers:
 

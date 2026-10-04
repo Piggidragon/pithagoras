@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LuCheck,
   LuChevronLeft,
@@ -400,7 +400,15 @@ function ChannelDetail({
   const [busy, setBusy] = useState(false);
   const [saved, flashSaved] = useFlash();
 
+  // What the form was last filled from: the fields are filled again from the channel
+  // for another channel, after this form's own save, or when nothing typed would be lost.
+  // A change of `updated_at` that is no save of this form (the enable switch saves at
+  // once) must not take a draft away.
+  const filled = useRef({ id: ch.id, own: false });
   useEffect(() => {
+    const was = filled.current;
+    filled.current = { id: ch.id, own: false };
+    if (ch.id === was.id && !was.own && dirty) return;
     setName(ch.name);
     setValues({ ...ch.config });
     setInstructions(ch.instructions ?? "");
@@ -446,6 +454,7 @@ function ChannelDetail({
         relayTools,
         ...(agentId !== ch.agentId ? { agentId } : {}),
       });
+      filled.current.own = true;
       flashSaved();
     });
 
