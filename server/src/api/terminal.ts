@@ -35,18 +35,63 @@ const MAX_SCROLLBACK = 200_000;
  */
 const UNWATCHED_MS = 5 * 60_000;
 
+/** A client of the stream: takes what the shell wrote, and says whether it has room for more. */
+type Listener = (chunk: string) => boolean;
+
 interface Term {
   id: string;
   proc: ChildProcess;
-  /** Replayed to a client that connects late, so a reload keeps the screen. */
-  buffer: string;
-  listeners: Set<(chunk: string) => void>;
+  /**
+   * What was written last, replayed to a client that connects late, so a reload
+   * keeps the screen. In the pieces it came in, with their length: joining and
+   * cutting one string on every piece copied all of it for each.
+   */
+  scrollback: string[];
+  scrolled: number;
+  listeners: Set<Listener>;
+  /** The listeners that did not have room for what they were given, and have not said they have since. */
+  waiting: Set<Listener>;
   exited: boolean;
   /** Set while nobody is attached; ends the shell if nobody comes back. */
   reaper?: NodeJS.Timeout;
 }
 
 const terms = new Map<string, Term>();
+
+/** Keeps `text` as the last of the scrollback, which is cut to MAX_SCROLLBACK from the front. */
+function remember(term: Term, text: string): void {
+  term.scrollback.push(text);
+  term.scrolled += text.length;
+  while (term.scrollback.length > 1 && term.scrolled - term.scrollback[0].length >= MAX_SCROLLBACK) term.scrolled -= term.scrollback.shift()!.length;
+  if (term.scrolled > MAX_SCROLLBACK) {
+    const over = term.scrolled - MAX_SCROLLBACK;
+    term.scrollback[0] = term.scrollback[0].slice(over);
+    term.scrolled -= over;
+  }
+}
+
+/** Gives `text` to everyone watching, and holds the shell back for any that cannot take it yet. */
+function deliver(term: Term, text: string): void {
+  for (const listener of term.listeners) listener(text);
+}
+
+/**
+ * The shell is held while a client is behind: a command that writes faster than
+ * the connection takes it would otherwise be read as fast as it can write, and
+ * queued in the portal's memory, until there is no more of it. Not read, the
+ * pipe fills, and `script` and the command with it wait, as at a terminal.
+ */
+function hold(term: Term, listener: Listener): void {
+  term.waiting.add(listener);
+  term.proc.stdout?.pause();
+  term.proc.stderr?.pause();
+}
+
+function release(term: Term, listener: Listener): void {
+  if (!term.waiting.delete(listener) || term.waiting.size) return;
+  term.proc.stdout?.resume();
+  term.proc.stderr?.resume();
+}
 
 /**
  * Ends the shell, and whatever it started.
@@ -164,28 +209,28 @@ function create(cwd: string): Term {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
-  const term: Term = { id, proc, buffer: "", listeners: new Set(), exited: false };
+  const term: Term = { id, proc, scrollback: [], scrolled: 0, listeners: new Set(), waiting: new Set(), exited: false };
   // A folder that is gone, or no `script` on this machine. Unhandled, the
   // spawn failure is thrown from the process object and takes the portal down.
   proc.on("error", (e) => {
     term.exited = true;
     const text = `\r\nCould not start a shell: ${e.message}\r\n`;
-    term.buffer += text;
-    for (const l of term.listeners) l(text);
+    remember(term, text);
+    deliver(term, text);
   });
 
   const push = (chunk: Buffer) => {
     const text = chunk.toString("utf8");
-    term.buffer = (term.buffer + text).slice(-MAX_SCROLLBACK);
-    for (const l of term.listeners) l(text);
+    remember(term, text);
+    deliver(term, text);
   };
   proc.stdout?.on("data", push);
   proc.stderr?.on("data", push);
   proc.on("exit", () => {
     term.exited = true;
     const text = "\r\n[session ended]\r\n";
-    term.buffer += text;
-    for (const l of term.listeners) l(text);
+    remember(term, text);
+    deliver(term, text);
   });
 
   terms.set(id, term);
@@ -215,16 +260,25 @@ export function terminalRouter(): Router {
       "X-Accel-Buffering": "no",
     });
 
-    const send = (chunk: string) => res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-    // What is already on screen, so reconnecting does not show an empty shell.
-    if (term.buffer) send(term.buffer);
+    const send: Listener = (chunk) => {
+      const room = res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      if (!room && !term.waiting.has(send)) {
+        hold(term, send);
+        res.once("drain", () => release(term, send));
+      }
+      return room;
+    };
     term.listeners.add(send);
+    // What is already on screen, so reconnecting does not show an empty shell.
+    if (term.scrolled) send(term.scrollback.join(""));
     watchUnattended(term);
     // Without traffic a proxy takes an idle shell for a dead connection.
     const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
     req.on("close", () => {
       clearInterval(heartbeat);
       term.listeners.delete(send);
+      // Gone, it will not drain: the shell is not to wait for it.
+      release(term, send);
       watchUnattended(term);
     });
   });
