@@ -32,7 +32,7 @@ import {
   type MemoryTrace,
   type MemoryValidation,
 } from "../api";
-import { bounds, colours, layout } from "../memory-graph";
+import { bounds, colours, layoutKept } from "../memory-graph";
 import { NOTE_LINK, linkNotes } from "../memory-links";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
@@ -966,12 +966,51 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
     api.memoryTraces().then(setTraces, () => {});
   }, []);
 
-  const placed = useMemo(() => (graph ? layout(graph.nodes.map((n) => n.path), graph.edges) : []), [graph]);
+  const placed = useMemo(() => (graph ? layoutKept(graph.nodes.map((n) => n.path), graph.edges) : []), [graph]);
   const where = useMemo(() => new Map(placed.map((p) => [p.path, p])), [placed]);
   const fit = useMemo(() => bounds(placed), [placed]);
   const [box, setBox] = useState(fit);
   useEffect(() => setBox(fit), [fit]);
   const types = useMemo(() => [...new Set((graph?.nodes ?? []).map((n) => n.type).filter((t): t is string => !!t))].sort(), [graph]);
+
+  // The notes and links, kept as they are drawn while the view moves: a pan or a zoom changes the box many times a second, and a thousand notes drawn again each time stutters.
+  const drawn = useMemo(
+    () =>
+      graph && (
+        <>
+          {graph.edges.map((e, i) => {
+            const a = where.get(e.source);
+            const b = where.get(e.target);
+            return a && b ? <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="currentColor" className="text-fg/20" strokeWidth={1.2} /> : null;
+          })}
+          {graph.nodes.map((n) => {
+            const p = where.get(n.path)!;
+            const r = 6 + Math.min(n.links, 10) * 0.8;
+            const title = n.title || n.path;
+            return (
+              <g
+                key={n.path}
+                data-note
+                role="button"
+                tabIndex={0}
+                aria-label={title}
+                onClick={() => onOpen(n.path)}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(n.path))}
+                className="cursor-pointer outline-none [&:focus-visible_circle]:stroke-accent"
+              >
+                <title>{n.description ? `${title} — ${n.description}` : title}</title>
+                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" stroke="#ef4444" strokeWidth={1.5} />}
+                <circle cx={p.x} cy={p.y} r={r} fill={colourOf(n.type)} stroke="transparent" strokeWidth={3} />
+                <text x={p.x} y={p.y + r + 13} textAnchor="middle" className="fill-fg text-[11px]">
+                  {title.length > 32 ? `${title.slice(0, 31)}…` : title}
+                </text>
+              </g>
+            );
+          })}
+        </>
+      ),
+    [graph, where, colourOf, onOpen],
+  );
 
   const svg = useRef<SVGSVGElement>(null);
   /** Zoom by `factor` around a point in the drawing's own units. */
@@ -1036,35 +1075,7 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
               onPointerUp={up}
               onPointerCancel={up}
             >
-              {graph.edges.map((e, i) => {
-                const a = where.get(e.source);
-                const b = where.get(e.target);
-                return a && b ? <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="currentColor" className="text-fg/20" strokeWidth={1.2} /> : null;
-              })}
-              {graph.nodes.map((n) => {
-                const p = where.get(n.path)!;
-                const r = 6 + Math.min(n.links, 10) * 0.8;
-                const title = n.title || n.path;
-                return (
-                  <g
-                    key={n.path}
-                    data-note
-                    role="button"
-                    tabIndex={0}
-                    aria-label={title}
-                    onClick={() => onOpen(n.path)}
-                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(n.path))}
-                    className="cursor-pointer outline-none [&:focus-visible_circle]:stroke-accent"
-                  >
-                    <title>{n.description ? `${title} — ${n.description}` : title}</title>
-                    {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" stroke="#ef4444" strokeWidth={1.5} />}
-                    <circle cx={p.x} cy={p.y} r={r} fill={colourOf(n.type)} stroke="transparent" strokeWidth={3} />
-                    <text x={p.x} y={p.y + r + 13} textAnchor="middle" className="fill-fg text-[11px]">
-                      {title.length > 32 ? `${title.slice(0, 31)}…` : title}
-                    </text>
-                  </g>
-                );
-              })}
+              {drawn}
             </svg>
 
             {(types.length > 0 || graph.nodes.some((n) => n.links === 0)) && (

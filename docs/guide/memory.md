@@ -20,7 +20,9 @@ and links that open other notes here.
 **Graph.** Every note is a point coloured by its type, its links are lines, and
 notes nothing links to are ringed in red. **Query paths** shows the routes
 Understory's own queries took. Drag to move, scroll or the zoom buttons to zoom,
-click a note to open it.
+click a note to open it. A memory of many hundreds of notes is laid out in fewer
+passes, so that the page opens at once: the picture is rougher, and still shows
+what is linked.
 
 What is open is in the address (`/memory?note=…`, `?view=log`, `?view=graph`), so
 it can be linked to.

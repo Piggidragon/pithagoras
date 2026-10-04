@@ -28,7 +28,7 @@ const concepts: Record<string, unknown> = {
 const healthy = { healthy: true, orphans: [], brokenLinks: [], issues: [] };
 const broken1 = { healthy: false, orphans: [], brokenLinks: [{ path: '/deployment/branches.md', target: '/people/owner.md' }], issues: [] };
 
-async function portal(page: Page, { enabled = true, broken = false, conformant = true, writable = true, afterDelete = broken1 as any } = {}) {
+async function portal(page: Page, { enabled = true, broken = false, conformant = true, writable = true, afterDelete = broken1 as any, notes = 0 } = {}) {
   const asked: string[] = [];
   const changes: { method: string; path: string; body?: any }[] = [];
   let logCleared = false;
@@ -77,6 +77,11 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
         { date: '2026-09-28', action: 'Update', summary: 'Linked [Branch Deployment on Test Host](/deployment/branches.md) to its owner.' },
         { date: '2026-09-27', action: 'Creation', summary: 'Added [The owner](/people/owner.md).' },
       ];
+      else if (p === '/api/memory/graph' && notes) body = {
+        // A long memory: every note linked to the one before, and to one a few places back.
+        nodes: Array.from({ length: notes }, (_, i) => ({ path: `/n${i}.md`, title: `Note ${i}`, type: i % 3 ? 'Person' : 'Deployment Process', links: 2 })),
+        edges: Array.from({ length: notes - 1 }, (_, i) => ({ source: `/n${i}.md`, target: `/n${i + 1}.md` })).concat(Array.from({ length: Math.floor(notes / 7) }, (_, i) => ({ source: `/n${i * 7}.md`, target: `/n${(i * 7 + 5) % notes}.md` }))),
+      };
       else if (p === '/api/memory/graph') body = {
         nodes: [
           { path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', type: 'Deployment Process', links: 1 },
@@ -177,6 +182,38 @@ test('the graph draws the notes and their links, says what the colours are, and 
   expect(await graph.getAttribute('viewBox')).toBe(before);
   await graph.getByRole('button', { name: 'The owner' }).click();
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
+});
+
+test('a graph of a long memory opens without freezing the page, and panning it is not drawing every note again', async ({ page }) => {
+  await portal(page, { notes: 1500 });
+  await page.addInitScript(() => {
+    (window as any).longest = 0;
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) (window as any).longest = Math.max((window as any).longest, e.duration);
+    }).observe({ entryTypes: ['longtask'] });
+  });
+  await page.goto('/memory?view=graph');
+  const graph = page.getByRole('img', { name: /1,?500 notes/ });
+  await expect(graph).toBeVisible({ timeout: 30_000 });
+  // The layout of 1,500 notes was several seconds in one piece; it is a fraction of one.
+  expect(await page.evaluate(() => (window as any).longest)).toBeLessThan(1500);
+
+  const box = (await graph.boundingBox())!;
+  const from = { x: box.x + box.width - 5, y: box.y + box.height - 5 };
+  const sweep = async () => {
+    const started = Date.now();
+    await page.mouse.move(from.x - 100, from.y - 100, { steps: 60 });
+    await page.mouse.move(from.x, from.y);
+    return Date.now() - started;
+  };
+  // The same moves with the button up, which move nothing, are what the mouse itself costs.
+  await page.mouse.move(from.x, from.y);
+  const idle = await sweep();
+  await page.mouse.down();
+  const panning = await sweep();
+  await page.mouse.up();
+  // Drawing 1,500 notes again for each of those moves was two seconds more.
+  expect(panning - idle).toBeLessThan(900);
 });
 
 test('the search lists what matches, and says when nothing does', async ({ page }) => {
