@@ -322,6 +322,52 @@ test("the Subagents tab opens whatever Docker's state: it asks nothing of it", a
   await expect(addons(page).getByRole('switch', { name: 'Subagent tool' })).toBeVisible();
 });
 
+test('Escape over the image endpoint that was typed in asks first, and over one that was saved does not', async ({ page }) => {
+  const { sent } = await portal(page);
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await page.goto('/settings/images');
+  await expect(addons(page).getByLabel('API address')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(addons(page)).toBeHidden();
+
+  await page.goto('/settings/images');
+  const address = addons(page).getByLabel('API address');
+  await address.fill('https://images.example.com/v1');
+  await page.keyboard.press('Escape');
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(address).toHaveValue('https://images.example.com/v1');
+  await addons(page).getByLabel('Model', { exact: true }).fill('image-model');
+  await addons(page).getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(addons(page).getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  expect(sent).toHaveLength(1);
+  await page.keyboard.press('Escape');
+  await expect(addons(page)).toBeHidden();
+});
+
+test('Escape over the memory settings that were changed asks first, and over ones that were saved does not', async ({ page }) => {
+  await portal(page, { docker: true });
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  const here = addons(page).getByRole('region', { name: 'Understory run here' });
+  await expect(here.getByRole('radio', { name: 'Never' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(addons(page)).toBeHidden();
+
+  await page.goto('/settings/add-ons');
+  await addons(page).getByRole('tab', { name: 'Memory' }).click();
+  await here.getByRole('radio', { name: 'On an interval' }).click();
+  await page.keyboard.press('Escape');
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(here.getByRole('radio', { name: 'On an interval' })).toBeChecked();
+  await here.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(here.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(addons(page)).toBeHidden();
+});
+
 test('image generation needs an endpoint before it can be switched on, and the key is sent once and never shown again', async ({ page }) => {
   const { sent } = await portal(page);
   await page.goto('/settings/images');

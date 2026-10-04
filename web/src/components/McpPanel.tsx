@@ -335,7 +335,8 @@ function ImportBox({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ added: string[]; skipped: { name: string; reason: string }[] } | null>(null);
-  useUnsavedDraft(!busy && !result && text.trim() !== "");
+  // The text is cleared once something was added; what stays after an import (every server skipped) is the person's to go on with.
+  useUnsavedDraft(!busy && text.trim() !== "");
 
   return (
     <div className="mb-3 rounded-xl border border-line bg-raised/40 p-3">

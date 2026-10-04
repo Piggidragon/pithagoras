@@ -495,6 +495,13 @@ const startedFrom = (c: MemoryConcept): NoteDraft => ({
   body: c.body,
 });
 
+/** A note as an edit of it says it, for the form to be shown over a note that is no longer there. */
+const conceptOf = (path: string, d: NoteDraft): MemoryConcept => ({
+  path,
+  frontmatter: { title: d.title, type: d.type, description: d.description, tags: d.tags.split(",").map((x) => x.trim()).filter(Boolean) },
+  body: d.body,
+});
+
 /** What a draft is started from: the note's words, and the time Understory wrote them, which it sets on every write. */
 const baseOf = (c: MemoryConcept): string => JSON.stringify([startedFrom(c), c.frontmatter?.timestamp ?? null]);
 
@@ -526,8 +533,11 @@ function Note({
   const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What the read said when the note was gone and only an edit it was left with is shown: giving the edit up goes back to that.
+  const missing = useRef<string | null>(null);
   useEffect(() => {
     let current = true;
+    missing.current = null;
     api.memoryConcept(path).then(
       (c) => {
         if (!current) return;
@@ -541,7 +551,19 @@ function Note({
           setChanged(left.base !== baseOf(c));
         }
       },
-      (e: Error) => current && setFailed(e.message),
+      (e: Error) => {
+        if (!current) return;
+        // Deleted while the page was away from it, and an edit was left on it: the edit is not lost with the
+        // note. It is shown as one over a note that was deleted, and "Save mine anyway" writes the note again.
+        const left = e instanceof ApiError && e.status === 404 ? readNoteDraft(path) : null;
+        if (!left) return setFailed(e.message);
+        missing.current = e.message;
+        setConcept(conceptOf(path, left.draft));
+        setDraft(left.draft);
+        setBase(left.base);
+        setGone(true);
+        setChanged(true);
+      },
     );
     return () => {
       current = false;
@@ -557,7 +579,8 @@ function Note({
     setDraft(startedFrom(concept));
     setBase(baseOf(concept));
   };
-  const changedDraft = !!draft && !!concept && JSON.stringify(draft) !== JSON.stringify(startedFrom(concept));
+  // One over a note that is gone is the only copy of it, whatever the note it was started from says.
+  const changedDraft = !!draft && !!concept && (gone || JSON.stringify(draft) !== JSON.stringify(startedFrom(concept)));
   useEffect(() => {
     onEditing(changedDraft);
     return () => onEditing(false);
@@ -574,6 +597,14 @@ function Note({
     setChanged(false);
     setGone(false);
     forgetNoteDraft(path);
+  };
+  /** Cancel: over a note that is gone, what the edit stood in for is not there to be shown. */
+  const cancelEdit = () => {
+    endEdit();
+    if (missing.current === null) return;
+    setConcept(null);
+    setFailed(missing.current);
+    missing.current = null;
   };
 
   /** `anyway` puts the draft over a note that changed since it was started, as the person was told it would. */
@@ -594,7 +625,10 @@ function Note({
           setChanged(true);
           return;
         }
+        // It is there: written again since it was found gone, or never gone.
+        setGone(false);
         if (baseOf(now) !== base) {
+          missing.current = null;
           setConcept(now);
           setChanged(true);
           return;
@@ -609,6 +643,7 @@ function Note({
       // As a read has it, which the answer to the write is not quite: the file it made ends in a newline
       // the answer does not, and the next edit is compared with what is read.
       setConcept(await api.memoryConcept(path).catch(() => r.concept));
+      missing.current = null;
       endEdit();
       onChanged("saved", r.health);
     } catch (e) {
@@ -714,7 +749,7 @@ function Note({
               </label>
               <p className="font-mono text-[10px] text-fg-faint">{path}</p>
               <div className="flex items-center justify-end gap-2">
-                <button type="button" onClick={endEdit} disabled={busy} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
+                <button type="button" onClick={cancelEdit} disabled={busy} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
                   {t("Cancel")}
                 </button>
                 <button

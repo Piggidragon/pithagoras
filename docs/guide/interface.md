@@ -108,8 +108,10 @@ It is kept per browser deliberately: a phone that trips over a delete button is
 not made safer by the laptop having turned the question off.
 
 Closing a dialog with something typed in that is not saved yet — a skill you
-rewrote, a provider, project, MCP server or channel you are setting up, a
-person's notes, a project's instructions, a pasted config — asks **Discard your
+rewrote, a provider (its key, its models and their windows), project, MCP server
+or channel you are setting up, a person's notes, a project's instructions, a
+pasted config, pi's `settings.json` under Advanced, an extension's setting, an
+add-on's form (voice, image generation, memory), the avatar — asks **Discard your
 changes?** first, whether you press Esc, click beside the dialog or use its
 close button. That question is always asked: nothing else holds a copy of a
 draft. A dialog's own **Cancel** button is an answer already,

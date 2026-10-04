@@ -44,7 +44,7 @@ import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
 import { PicturesPanel } from "./PicturesPanel";
 import { PortalExtensions } from "./PortalExtensions";
-import { Modal } from "./Modal";
+import { Modal, useUnsavedDraft } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
@@ -1322,12 +1322,14 @@ function ExtensionPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [savedKey, setSavedKey] = useState<string | null>(null);
 
+  /** A stored value as the field shows it. */
+  const shown = (s: ExtensionInfo["settings"][number]) => (s.value == null ? "" : typeof s.value === "object" ? JSON.stringify(s.value) : String(s.value));
   // Reset when switching between extensions, or the previous one's edits leak.
   useEffect(() => {
-    setValues(
-      Object.fromEntries(ext.settings.map((s) => [s.key, s.value == null ? "" : typeof s.value === "object" ? JSON.stringify(s.value) : String(s.value)]))
-    );
+    setValues(Object.fromEntries(ext.settings.map((s) => [s.key, shown(s)])));
   }, [ext.spec]);
+  // A field with something typed in that its own Save has not stored. (A switch saves as it is flipped.)
+  useUnsavedDraft(ext.settings.some((s) => s.key in values && values[s.key] !== shown(s)));
 
   /** What was typed for a key, as the kind of value it is — told from the text when nothing is set yet. */
   const typedFor = (key: string) => {
@@ -1344,7 +1346,9 @@ function ExtensionPanel({
     setBusy(key);
     try {
       await api.setExtensionSetting(key, value);
-      await onSaved();
+      const now = (await onSaved()).find((e) => e.spec === ext.spec)?.settings.find((s) => s.key === key);
+      // What the field holds is what is stored now, in the form it is stored in: it is not a draft any more.
+      if (now) setValues((was) => ({ ...was, [key]: shown(now) }));
       setSavedKey(key);
       setTimeout(() => setSavedKey(null), 2000);
     } catch (e) {
@@ -1458,12 +1462,16 @@ function AdvancedPanel({
   const [failed, setFailed] = useState<string | null>(null);
   const [saved, flashSaved] = useFlash();
   const [busy, setBusy] = useState(false);
+  // The file as it was read or last saved: what is typed over it and not saved is a draft.
+  const [from, setFrom] = useState("");
+  useUnsavedDraft(!!file && !busy && file.content !== from);
 
   const read = () =>
     api.piSettings().then(
       (f) => {
         setFailed(null);
         setFile(f);
+        setFrom(f.content);
       },
       (e) => setFailed((e as Error).message),
     );
@@ -1495,6 +1503,7 @@ function AdvancedPanel({
                 setBusy(true);
                 try {
                   await api.savePiSettings(file.content);
+                  setFrom(file.content);
                   flashSaved();
                 } catch (e) {
                   onError((e as Error).message);

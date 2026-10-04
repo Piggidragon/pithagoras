@@ -469,6 +469,88 @@ test('a note deleted while it is being edited can still be saved, and writes it 
   }
 });
 
+test('an edit left on a note that was deleted meanwhile is brought back as one over a deleted note', async ({ page }) => {
+  const { changes } = await portal(page);
+  const was = concepts[BRANCHES];
+  try {
+    await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+    await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+    await page.getByRole('button', { name: 'Edit the note' }).click();
+    const form = page.getByRole('form', { name: 'Edit the note' });
+    await form.getByLabel('Title').fill('Branches, my way');
+    await form.getByLabel('Text, in markdown').fill('My rewrite.');
+    await page.goBack();
+    await expect(page).toHaveURL(/note=%2Fpeople%2Fowner.md/);
+    await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
+    // The agent tidies the note away while the person is on another one.
+    delete concepts[BRANCHES];
+    await page.goForward();
+    const alert = page.getByRole('alert').filter({ hasText: 'This note was deleted after you started editing it.' });
+    await expect(alert).toBeVisible();
+    await expect(page.getByText('Concept not found')).toHaveCount(0);
+    await expect(form.getByLabel('Text, in markdown')).toHaveValue('My rewrite.');
+    await expect(alert.getByRole('button', { name: 'Load the new version' })).toHaveCount(0);
+    // It is the only copy, so leaving still asks.
+    await page.getByRole('button', { name: 'Log', exact: true }).click();
+    const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+    await expect(ask).toBeVisible();
+    await ask.getByRole('button', { name: 'Cancel' }).click();
+    await expect(form).toBeVisible();
+    // Giving it up leaves what was there: nothing.
+    await form.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Concept not found' })).toBeVisible();
+    await expect(form).toHaveCount(0);
+    expect(changes).toEqual([]);
+
+    // Saved anyway, it is written again as it was typed.
+    await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+    await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+    concepts[BRANCHES] = was;
+    await page.getByRole('button', { name: 'Edit the note' }).click();
+    await form.getByLabel('Title').fill('Branches, my way');
+    await form.getByLabel('Text, in markdown').fill('My rewrite.');
+    await page.goBack();
+    await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
+    delete concepts[BRANCHES];
+    await page.goForward();
+    await expect(alert).toBeVisible();
+    await alert.getByRole('button', { name: 'Save mine anyway' }).click();
+    await page.getByRole('dialog', { name: 'The note is saved' }).getByRole('button', { name: 'Leave it' }).click();
+    expect(changes.map((c) => [c.method, c.path, c.body.frontmatter.title, c.body.body])).toEqual([['PUT', BRANCHES, 'Branches, my way', 'My rewrite.']]);
+  } finally {
+    concepts[BRANCHES] = was;
+  }
+});
+
+test('a note reported deleted that the agent writes again says it changed, and offers the new version', async ({ page }) => {
+  const { changes } = await portal(page);
+  const was = concepts[BRANCHES];
+  try {
+    await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+    await page.getByRole('button', { name: 'Edit the note' }).click();
+    const form = page.getByRole('form', { name: 'Edit the note' });
+    await form.getByLabel('Text, in markdown').fill('Mine.');
+    delete concepts[BRANCHES];
+    await form.getByRole('button', { name: 'Save' }).click();
+    const deleted = page.getByRole('alert').filter({ hasText: 'This note was deleted after you started editing it.' });
+    await expect(deleted).toBeVisible();
+
+    // It is there again, written by the agent: the next Save finds it, and it is no longer a deleted note.
+    const now = concepts[BRANCHES] = { ...(was as { frontmatter: object }), frontmatter: { ...(was as { frontmatter: object }).frontmatter, timestamp: '2026-09-29T10:00:00.000Z' }, body: 'The agent wrote it again.\n' };
+    await form.getByRole('button', { name: 'Save' }).click();
+    const changed = page.getByRole('alert').filter({ hasText: 'This note changed after you started editing it.' });
+    await expect(changed).toBeVisible();
+    await expect(deleted).toHaveCount(0);
+    expect(changes).toEqual([]);
+    await changed.getByRole('button', { name: 'Load the new version' }).click();
+    await expect(form).toHaveCount(0);
+    await expect(page.getByText('The agent wrote it again.')).toBeVisible();
+    expect(now.body).toBe('The agent wrote it again.\n');
+  } finally {
+    concepts[BRANCHES] = was;
+  }
+});
+
 test('an edit that was saved, cancelled or given up is not brought back', async ({ page }) => {
   const { changes } = await portal(page);
   await page.goto('/memory?note=%2Fpeople%2Fowner.md');

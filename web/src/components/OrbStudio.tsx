@@ -232,7 +232,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
       </div>
 
       {open && (
-      <Modal title={t("Avatar")} subtitle={t("How the agent looks, moves and sounds in voice mode.")} wide onClose={close} footer={footer}>
+      <Modal title={t("Avatar")} subtitle={t("How the agent looks, moves and sounds in voice mode.")} wide onClose={close} footer={footer} unsaved={dirty && !busy}>
       <div className="grid gap-5 sm:grid-cols-[220px_1fr]">
         {/* Stays in view while the options scroll past, so a change is seen as it is made. */}
         <div className="sm:sticky sm:top-0 sm:self-start">

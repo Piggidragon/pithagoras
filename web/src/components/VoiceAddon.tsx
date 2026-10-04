@@ -10,6 +10,7 @@ import { DEFAULT_KOKORO_VOICE } from "../../../server/src/kokoro-voices";
 import { labelOf, languageName, msg, t } from "../i18n";
 import { LoadFailed, btnCls, inputCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
+import { useUnsavedDraft } from "./Modal";
 import { pollWhileVisible } from "../poll";
 
 /** What the voice service is doing, as its badge says it. */
@@ -42,8 +43,10 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const [config, setConfig] = useState<VoiceConfig | null>(null);
   // The providers as typed, commas and all, while they are edited; the list itself is in the config.
   const [providersText, setProvidersText] = useState<string | null>(null);
+  // Something changed on this page that Save has not stored: in no other place, so closing Settings asks first.
+  const [edited, setEdited] = useState(false);
   // Settings from the server replace what was typed, which would otherwise show a list other than the one saved.
-  const fromServer = (value: VoiceConfig) => { setConfig(value); setProvidersText(null); };
+  const fromServer = (value: VoiceConfig) => { setConfig(value); setProvidersText(null); setEdited(false); };
   const [install, setInstall] = useState<VoiceInstallStatus | null>(null);
   // The install writes its connection settings as the service comes up. Only those are taken over, so that what is being typed here is not replaced; a failed poll makes the state flip to unavailable and back, and would otherwise do it every time.
   useEffect(()=>{if(install?.state==='running')void api.voice().then(value=>{setConfig(current=>current?{...current,...managed(value)}:value);window.dispatchEvent(new Event('voice-config-changed'));}).catch(e=>onError(e.message));},[install?.state]);
@@ -94,6 +97,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   };
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  useUnsavedDraft(edited && !busy);
   // A saved voice's description is stored on its own; this saves the edited ones along with the settings.
   const pendingDescriptions = useRef<(() => Promise<void>) | null>(null);
   // Nothing of the page can be drawn without it, so the failure is said where the page would be.
@@ -101,7 +105,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const readConfig = () => api.voice().then(value => { setReadFailed(null); setConfig(value); }, e => setReadFailed((e as Error).message));
   useEffect(() => { void readConfig(); }, []);
   if (!config) return readFailed ? <div className="mt-4"><LoadFailed error={readFailed} onRetry={readConfig} /></div> : null;
-  const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); };
+  const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); setEdited(true); };
   const instructions = config.responseInstructions ?? "";
   const builtIn = config.defaultResponseInstructions ?? "";
   // Text that is still the built-in one this page was given is sent as nothing: the portal may have been updated since, and its newer text is then the one to follow.
@@ -126,7 +130,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     {kokoro
       ? <><div className="block text-xs text-fg-muted">{t("Speaking voice")}<Select aria-label={t("Speaking voice")} className="mt-1.5 w-full" value={config.kokoroVoice ?? DEFAULT_KOKORO_VOICE} onChange={kokoroVoice => update({ kokoroVoice })} options={kokoroVoiceOptions()} /></div>
         <p className="text-xs text-fg-faint">{t("Kokoro speaks with its own voices and reads the text in the language of the voice. Your voice library is kept for the other engines.")}</p></>
-      : <VoiceLibrary value={config.voice || "design"} onChange={voice=>update({voice})} onError={onError} onPending={save=>{pendingDescriptions.current=save;if(save)setSaved(false);}}/>}
+      : <VoiceLibrary value={config.voice || "design"} onChange={voice=>update({voice})} onError={onError} onPending={save=>{pendingDescriptions.current=save;if(save){setSaved(false);setEdited(true);}}}/>}
       {!kokoro && (config.voice||"design") === "design" && <label className="block text-xs text-fg-muted">{t("Describe the speaking voice")}<input className={`mt-1.5 ${inputCls}`} value={config.instruction} onChange={e=>update({instruction:e.target.value})}/></label>}
     </section>}
     <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">

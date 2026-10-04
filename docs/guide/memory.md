@@ -39,7 +39,8 @@ when you open the note. The agent may have written the note meanwhile, so a note
 that changed after you started editing it says so, before a save goes out:
 **Load the new version** gives your edit up, **Save mine anyway** puts it over
 what the agent wrote. A note that was deleted meanwhile says so instead, and
-**Save mine anyway** writes it again. After a
+**Save mine anyway** writes it again; so does one that went while you were away
+from it, which shows your edit instead of "not found". After a
 change a window says what Understory's checks find — a link to nothing, a note
 nothing links to, an index that misses something — and offers:
 

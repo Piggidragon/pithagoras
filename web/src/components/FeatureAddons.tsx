@@ -4,6 +4,7 @@ import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefres
 import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
 import { confirmDialog } from "./ConfirmDialog";
+import { useUnsavedDraft } from "./Modal";
 import { forgetNoteDrafts } from "../note-drafts";
 import { Select } from "./Select";
 import { LoadFailed, SwitchRow, inputCls, primaryCls } from "./SettingsUi";
@@ -290,6 +291,8 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   // Said in the language shown, whenever it is drawn.
   const [note, setNote] = useState<(() => string) | null>(null);
+  // What is changed here and not saved is in no other place.
+  useUnsavedDraft(!!draft);
 
   // While it is installed, and its image pulled, what the daemon says.
   const watching = Boolean(features?.understory.managed.pulling.active) || busy === INSTALLING;
@@ -743,6 +746,8 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   const [busy, setBusy] = useState(false);
   // Said in the language shown, whenever it is drawn.
   const [note, setNote] = useState<(() => string) | null>(null);
+  // What is changed here and not saved is in no other place.
+  useUnsavedDraft(!!draft || !!editDraft);
 
   if (!images) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
   const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, timeout: String(images.timeoutSeconds), apiKey: "" };
