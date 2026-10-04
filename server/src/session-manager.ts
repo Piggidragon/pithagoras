@@ -1258,8 +1258,10 @@ class SessionManager extends EventEmitter {
    * nothing to show for them otherwise.
    *
    * False when a Stop got there first and the message was never sent.
+   * `stopsBefore` is how many Stops the session had had when the caller began to
+   * start pi for it, for one that started it before asking: see askNow.
    */
-  async prompt(sessionId: string, message: string, options?: PromptOptions, insideEdit = false): Promise<boolean> {
+  async prompt(sessionId: string, message: string, options?: PromptOptions, insideEdit = false, stopsBefore?: number): Promise<boolean> {
     // Callers ask first, where there is someone to tell; this is so that one
     // which did not is refused too, before the session is marked as anything.
     const refused = options?.images?.length ? await picturesRefused(message) : undefined;
@@ -1268,7 +1270,7 @@ class SessionManager extends EventEmitter {
     if (!insideEdit) await this.whenEditable(sessionId);
     this.prompting.set(sessionId, (this.prompting.get(sessionId) ?? 0) + 1);
     try {
-      return await this.promptNow(sessionId, message, options, insideEdit);
+      return await this.promptNow(sessionId, message, options, insideEdit, stopsBefore);
     } finally {
       const left = (this.prompting.get(sessionId) ?? 1) - 1;
       if (left) this.prompting.set(sessionId, left);
@@ -1282,7 +1284,7 @@ class SessionManager extends EventEmitter {
    */
   private prompting = new Map<string, number>();
 
-  private async promptNow(sessionId: string, message: string, options: PromptOptions | undefined, insideEdit: boolean): Promise<boolean> {
+  private async promptNow(sessionId: string, message: string, options: PromptOptions | undefined, insideEdit: boolean, stopsBefore?: number): Promise<boolean> {
     this.mark(sessionId, "running");
     // Same reason as in abort(): a session mid-compaction is detached from
     // agent events, and a prompt started there is invisible.
@@ -1293,7 +1295,7 @@ class SessionManager extends EventEmitter {
     this.mark(sessionId, "running");
     const logged = { images: false, queued: false, command: false, failedOnLine: false };
     try {
-      return await this.submit(sessionId, message, options, insideEdit, logged);
+      return await this.submit(sessionId, message, options, insideEdit, logged, stopsBefore);
     } catch (e) {
       const busy = this.live.get(sessionId)?.client.isIdle?.() === false;
       // A command refused: its line in the chat says so, and why. The chat
@@ -1328,8 +1330,8 @@ class SessionManager extends EventEmitter {
     options?: PromptOptions,
     insideEdit = false,
     logged = { images: false, queued: false, command: false, failedOnLine: false },
+    stopsBefore = this.stops.get(sessionId) ?? 0,
   ): Promise<boolean> {
-    const stopsBefore = this.stops.get(sessionId) ?? 0;
     const client = await this.ensureClient(sessionId, insideEdit);
     const images = options?.images ?? [];
     // Stop pressed while pi was still starting for it. There was no run to
@@ -2051,6 +2053,10 @@ class SessionManager extends EventEmitter {
     streamText = true,
     onUi?: (request: any) => void
   ): Promise<string> {
+    // Counted before pi is started here, not in submit: a Stop that comes while
+    // it starts is counted by then, and submit would take it for one that was
+    // there before the message.
+    const stopsBefore = this.stops.get(sessionId) ?? 0;
     await this.ensureClient(sessionId);
     const prepared = typeof message === "function" ? message() : { message };
 
@@ -2180,7 +2186,7 @@ class SessionManager extends EventEmitter {
       finished.catch(() => {});
       // Stopped before it was sent: nothing for the channel to wait on, and what
       // it had to tell the agent is still to be told.
-      if ((await this.prompt(sessionId, prepared.message)) === false) return "";
+      if ((await this.prompt(sessionId, prepared.message, undefined, false, stopsBefore)) === false) return "";
       prepared.onAccepted?.();
       await finished;
       // Already relayed piece by piece; handing it back would post it twice.

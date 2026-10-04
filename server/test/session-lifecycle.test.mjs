@@ -137,6 +137,24 @@ test("a channel's message that a Stop got to is not answered, and what it carrie
   }
 });
 
+test("a message that came through ask() and met a Stop while pi was starting is not sent either", async () => {
+  const id = chat();
+  const release = hold();
+  let accepted = false;
+  // As a channel's message is asked: pi is started for it before it is handed over.
+  const asking = sessions.ask(id, () => ({ message: "delete the branches", onAccepted: () => (accepted = true) }), { timeoutMs: 2000 });
+  await until(() => sessions.starting.has(id), "pi to be starting");
+  assert.equal(sessions.isBusy(id), true, "so the channel's stop has something to stop");
+  await sessions.abort(id);
+  release();
+
+  assert.equal(await asking, "", "nothing to answer");
+  assert.equal(accepted, false, "and what the message carried is not used up");
+  assert.deepEqual(lastPi().prompts, [], "never handed to pi");
+  assert.equal(getSession(id).status, "idle");
+  assert.ok(events(id).some((r) => r.type === "portal_unsent"), "the words go back as not sent");
+});
+
 /** A chat with two turns in pi's file and in the transcript, as an edit finds it. */
 function chatWithFile() {
   const id = chat();
