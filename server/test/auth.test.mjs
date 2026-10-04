@@ -273,6 +273,25 @@ test("when the throttle is full, the oldest entry makes room and a new address s
   assert.deepEqual(attempts(limiter, "10.0.0.1", 10), { through: 10, refused: 0 });
 });
 
+test("a locked address stays locked however many others pass through a full throttle", () => {
+  const limiter = security.loginThrottle();
+  const attacker = "2001:db8:0:1::1";
+  assert.deepEqual(attempts(limiter, attacker, 10), { through: 10, refused: 0 });
+  assert.equal(attempts(limiter, attacker, 1).refused, 1, "locked after ten");
+  // 4096 other blocks fail once each: the map is full and the attacker is its oldest entry.
+  for (let i = 0; i < 4096; i++) attempts(limiter, `2001:db8:1:${i.toString(16)}::1`, 1);
+  assert.equal(attempts(limiter, attacker, 1).refused, 1, "evicting the lock would be ten more guesses for 4096 others");
+  // The ones that failed once are what makes room, so a newcomer still gets in.
+  assert.deepEqual(attempts(limiter, "198.51.100.9", 1), { through: 1, refused: 0 });
+});
+
+test("when every entry of a full throttle is locked, a newcomer is refused rather than a lock dropped", () => {
+  const limiter = security.loginThrottle();
+  for (let i = 0; i < 4096; i++) attempts(limiter, `10.${i >> 8}.${i & 255}.1`, 10);
+  assert.equal(attempts(limiter, "198.51.100.9", 1).refused, 1);
+  assert.equal(attempts(limiter, "10.0.0.1", 1).refused, 1, "and nobody's lock is gone");
+});
+
 // --- the agent's browser ---
 
 /** A request for the upgrade to a stream, as a browser makes it, with `after` as the bytes the page sends first. */

@@ -503,11 +503,29 @@ function unreadable(toolName: string, input: Record<string, unknown>, workspace:
   const open = [root, ...alsoReadable.map((dir) => realPath(dir) ?? path.resolve(dir))];
   if (where === undefined || !open.some((dir) => isWithinText(dir, where))) return "it is outside the folder of this conversation";
   for (const name of PRIVATE_FILES) {
+    // Both the file and where a link at its name leads: `where` has had its
+    // links followed, so a MEMORY.md that points at a note in the same folder is
+    // that note, and the note is what is private then.
     const file = path.join(root, name);
-    if (toolName === "read" && where.toLowerCase() === file.toLowerCase()) return priv;
-    if (toolName === "grep" && isWithinText(where, file) && existsSync(file)) return priv;
+    const real = realPath(file) ?? file;
+    if (toolName === "read" && [file, real].some((own) => where.toLowerCase() === own.toLowerCase())) return priv;
+    if (toolName === "grep" && [file, real].some((own) => isWithinText(where, own)) && existsSync(file)) return priv;
   }
   return undefined;
+}
+
+/**
+ * Why a call that is not a read may not run for somebody who is not the primary
+ * user even where a rule or an approval opens its tool, or undefined. A command
+ * is the agent's own, run as it: its paths cannot be followed through a shell,
+ * so what it names is all that is checked — a place secrets are kept, and the
+ * private files by name.
+ */
+function unrunnable(toolName: string, input: Record<string, unknown>): string | undefined {
+  if (readsCredentials(toolName, input)) return "it reads a place where secrets are kept";
+  if (toolName !== "bash") return undefined;
+  const command = cmd(input).toLowerCase();
+  return PRIVATE_FILES.some((name) => command.includes(name.toLowerCase())) ? "it reads what is private to the primary user" : undefined;
 }
 
 /** The opening of an envelope, as every one of them begins: a fresh id of eight bytes. */
@@ -713,19 +731,27 @@ export function guardExtension(
       // What may be read is not everything a role that can only read could ask
       // for: see unreadable. A heartbeat is the agent looking around for the
       // person it works for, with nobody else speaking, and reads what its
-      // WATCH.md names wherever that is.
-      if (role !== "primary" && role !== HEARTBEAT_ROLE && PATH_READERS.has(event.toolName)) {
-        const why = unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable);
+      // WATCH.md names wherever that is. A rule or an approval opens a tool, not
+      // the secrets and private notes: checked before either is used, so that a
+      // one-off approval is not spent on a call that is refused after all.
+      if (role !== "primary" && role !== HEARTBEAT_ROLE) {
+        const reads = PATH_READERS.has(event.toolName);
+        const why = reads
+          ? unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
+          : READ_ONLY.has(event.toolName) ? undefined : unrunnable(event.toolName, event.input ?? {});
         if (why) {
           console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}, ${why}`);
           note("refused", `Not permitted for a ${role}: ${why}`);
           return {
             block: true,
-            reason:
-              `Refused: ${why}. You are speaking with someone who is not your primary user, and ` +
-              `they may have you read what is in this conversation's folder — not the primary user's ` +
-              `private notes, anything outside it, or anything that holds a secret. Say so rather than ` +
-              `looking for another way to it.`,
+            reason: reads
+              ? `Refused: ${why}. You are speaking with someone who is not your primary user, and ` +
+                `they may have you read what is in this conversation's folder — not the primary user's ` +
+                `private notes, anything outside it, or anything that holds a secret. Say so rather than ` +
+                `looking for another way to it.`
+              : `Refused: ${why}. You are speaking with someone who is not your primary user, and what ` +
+                `was allowed for them does not reach secrets or the primary user's private notes. Say ` +
+                `so rather than looking for another way to them.`,
           };
         }
       }

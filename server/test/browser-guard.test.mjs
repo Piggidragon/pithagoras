@@ -7,7 +7,7 @@ import { inProcessHome, scratch } from "./server-harness.mjs";
 const home = inProcessHome("browser-guard-");
 const { guardExtension, ruleAllows, ruleApplies, taintSession, wrapUntrusted } = await import("../dist/pi/guard.js");
 const { BROWSER_UNTRUSTED_GUIDELINE, browserTools, cleanRef } = await import("../dist/browser/tools.js");
-const { addToolRule, listAudit, listToolRules } = await import("../dist/db.js");
+const { addToolRule, deleteToolRule, listAudit, listToolRules, useGrant } = await import("../dist/db.js");
 const { recordApproval } = await import("../dist/approvals.js");
 
 const guard = () => {
@@ -281,6 +281,61 @@ test("a colleague or a guest reads what is in the conversation's folder, and not
       assert.equal(refused(result), true, `${role} may not ${tool} ${JSON.stringify(input)}`);
       assert.match(lastAudit().reason, new RegExp(`^Not permitted for a ${role}: it (reads|is outside)`));
     }
+  }
+});
+
+test("a rule or an approval that opens bash does not open the secrets or the primary user's notes", () => {
+  const ids = ["cat", "tail", "git"].map((word, i) => {
+    const id = `rule-secret-${i}`;
+    addToolRule({ id, role: "all", tool: "bash", pattern: `${word} *`, note: "", person_key: null });
+    return id;
+  });
+  try {
+    const ruled = [
+      "cat ~/.pi/agent/auth.json", "tail -n 5 /data/.env", "cat /home/me/.ssh/id_ed25519", "git config --get remote.origin.token",
+      "cat MEMORY.md", "cat ./PrimaryUser.md", "tail notes/../memory.md", `cat ${path.join(workspace, "MEMORY.md")}`,
+    ];
+    for (const role of ["colleague", "guest"]) {
+      const h = guardAs({ role, key: "priya", workspace });
+      for (const command of ruled) {
+        const result = call(h, "bash", { command });
+        assert.equal(refused(result), true, `${role}: ${command}`);
+        assert.match(result.reason, /^Refused: it reads (a place where secrets are kept|what is private to the primary user)/);
+        assert.match(lastAudit().reason, new RegExp(`^Not permitted for a ${role}: it reads`));
+      }
+      // What the rule is for still goes through, and is recorded as the rule's.
+      assert.equal(call(h, "bash", { command: "cat notes/a.md" }), undefined, `${role}: the rule's own use`);
+      assert.equal(lastAudit().kind, "allowed-by-rule");
+    }
+    // The primary user's own agent reads its notes, and so does a heartbeat.
+    for (const role of ["primary", "heartbeat"]) assert.equal(call(guardAs({ role, workspace }), "bash", { command: "cat MEMORY.md" }), undefined, role);
+  } finally {
+    for (const id of ids) deleteToolRule(id);
+  }
+
+  // A one-off approval is not spent on a call that is refused: it stays for the command it was given for.
+  recordApproval(asked("echo MEMORY.md"), { id: "grant-session" }, true, false);
+  const h = guardAs({ role: "colleague", key: "priya", workspace, session: "grant-session" });
+  assert.equal(refused(call(h, "bash", { command: "echo MEMORY.md" })), true, "approved, but it names the private file");
+  assert.equal(useGrant("grant-session", "bash", "echo MEMORY.md"), true, "and the approval is still there");
+});
+
+test("a MEMORY.md that is a link to a file in the same folder is that file's privacy", () => {
+  const linked = path.join(folder, "linked");
+  mkdirSync(path.join(linked, "notes"), { recursive: true });
+  writeFileSync(path.join(linked, "notes", "mem.md"), "the notes behind the link");
+  writeFileSync(path.join(linked, "notes", "other.md"), "another note");
+  symlinkSync(path.join("notes", "mem.md"), path.join(linked, "MEMORY.md"));
+  writeFileSync(path.join(linked, "PrimaryUser.md"), "the user");
+  for (const role of ["colleague", "guest"]) {
+    const h = guardAs({ role, key: "priya", workspace: linked });
+    for (const [tool, input] of [
+      ["read", { path: "MEMORY.md" }], ["read", { path: "notes/mem.md" }], ["read", { path: path.join(linked, "notes", "mem.md") }],
+      ["grep", { pattern: "x", path: "notes" }], ["grep", { pattern: "x", path: "notes/mem.md" }], ["grep", { pattern: "x" }],
+      ["read", { path: "PrimaryUser.md" }],
+    ]) assert.equal(refused(call(h, tool, input)), true, `${role}: ${tool} ${JSON.stringify(input)}`);
+    assert.equal(call(h, "read", { path: "notes/other.md" }), undefined, `${role}: the rest of the folder`);
+    assert.equal(call(h, "ls", { path: "notes" }), undefined, `${role}: names are not content`);
   }
 });
 

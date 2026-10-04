@@ -33,15 +33,23 @@ export function loginThrottle(now = Date.now): RequestHandler {
     for (const [key, value] of attempts) if (value.until <= time) attempts.delete(key);
     const key = throttleKey(req.socket.remoteAddress);
     const entry = attempts.get(key) ?? { count: 0, until: time + 15 * 60_000 };
-    if (entry.count >= 10) {
-      res.setHeader('Retry-After', String(Math.ceil((entry.until - time) / 1000)));
+    const refuse = (until: number) => {
+      res.setHeader('Retry-After', String(Math.ceil((until - time) / 1000)));
       res.status(429).json({ error: 'Too many login attempts. Try again later.' });
-      return;
-    }
+    };
+    if (entry.count >= 10) return refuse(entry.until);
     // Full: the entry that runs out first makes room, rather than the newcomer
     // being refused — with enough addresses, that would keep everyone else out.
     // They are in the order they were made, and so in the order they run out.
-    if (!attempts.has(key) && attempts.size >= 4096) attempts.delete(attempts.keys().next().value!);
+    // A locked entry is never the one: dropping it would give its address ten
+    // more guesses for every 4096 others, so only when all of them are locked
+    // is the newcomer refused.
+    if (!attempts.has(key) && attempts.size >= 4096) {
+      let room: string | undefined;
+      for (const [other, value] of attempts) if (value.count < 10) { room = other; break; }
+      if (room === undefined) return refuse(attempts.values().next().value!.until);
+      attempts.delete(room);
+    }
     entry.count++;
     attempts.set(key, entry);
     res.on('finish', () => { if (res.statusCode < 400) attempts.delete(key); });

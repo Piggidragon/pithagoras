@@ -24,7 +24,13 @@ What a colleague or a guest reads is held to the conversation's own folder and
 the agent's skills. A secret (`auth.json`, `.env`, `.ssh/`, tokens) is never
 read, nor is the private context in `PrimaryUser.md` and `MEMORY.md`, and a
 search over a folder that holds them is refused. The same goes for a rule you
-allowed: it opens the tool, not the files the guard keeps from them.
+allowed: it opens the tool, not the files the guard keeps from them, so an
+allowed command that names a secret or one of those two files is refused.
+
+A `bash` rule is the exception to the folder: a command runs as the agent, and
+what a shell makes of `cat *` or of a path built while it runs cannot be
+followed. Allow a command only where you would let that person read anything the
+agent can.
 
 Nor can a colleague or a guest run a **slash command**. An extension's command
 (`/bg`, `/logs`, whatever a package adds) runs in the portal's own process with
