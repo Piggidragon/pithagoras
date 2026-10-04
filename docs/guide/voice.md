@@ -342,6 +342,8 @@ digits; only synthesis sees the words. Each pack knows how its language groups
 thousands, so German "100.000" is spoken as one number rather than as a decimal.
 Dates, clock times, version strings, ranges and anything with a leading zero
 keep their digits: reading them as quantities would be worse than leaving them.
+So do the digits of a name such as `v20.11` or `Qwen3.5`, which are not spoken
+as a number of their own.
 Adding a language is one entry in `server/src/voice-numbers.ts`; a language
 without a pack keeps its digits, and the add-on says so under the language.
 
@@ -445,8 +447,9 @@ models swaps through all of them.
 
 ## First spoken response
 
-On the host executor with a llama.cpp provider, each voice prompt disables
-thinking for its first model call and asks for a brief spoken answer before
+On the host executor with a llama.cpp provider (a llama.cpp server or a
+llama-swap gateway, as set on the Providers page or as its name says), each
+voice prompt disables thinking for its first model call and asks for a brief spoken answer before
 tools. Later calls after tools use the session’s existing thinking setting.
 A conditional rule in the system prompt asks for plain, concise speech when the
 latest user message begins with `[Audio mode]`. The portal adds that prefix to
@@ -687,10 +690,13 @@ enabled at boot. The language model and Whisper do not need to restart.
 `LLAMA_DISK_CACHE_MODELS` names the llama.cpp models, comma-separated, whose
 prompt cache is kept per session. Set it to `my-model` and that model's chats
 get per-session slot snapshots.
-The llama.cpp server needs a `slot-save-path` to write them to, such as
-`/path/to/session-cache/`.
-The portal serializes inference and save/restore operations for its single model
-slot, saves after successful responses, and restores when changing sessions.
+The llama.cpp server has to run with `--parallel 1`, one slot, because a
+snapshot is always of slot 0, and with a `--slot-save-path` to write the
+snapshots to, such as `/path/to/session-cache/`. A server that reports more than
+one slot in its `/props` is left alone: no snapshots are taken, and chats run at
+the same time as they would without the variable.
+The portal serializes inference and save/restore operations for that single
+model slot, saves after successful responses, and restores when changing sessions.
 Filenames hash the model and session ID. Cache files persist on the llama host;
 missing or incompatible files fall back to normal prompt evaluation. These files
 contain model state derived from conversation content and the directory is mode 700.

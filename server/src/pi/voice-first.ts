@@ -1,3 +1,4 @@
+import { isLlamaProvider } from "../providers.js";
 import { isUser, textOf } from "./entries.js";
 
 export const AUDIO_MESSAGE_PREFIX = "[Audio mode]\n";
@@ -114,7 +115,7 @@ export class VoiceFirstTurn {
     pi.on('before_provider_request', (event: any, ctx: any) => {
       if (process.env.VOICE_SKIP_FIRST_THINKING === 'false') return;
       const provider = ctx.model?.provider as string | undefined;
-      if (!this.active || !this.first || !(provider === 'llama.cpp' || provider?.startsWith('llama-server'))) return;
+      if (!this.active || !this.first || !isLlamaProvider(provider)) return;
       const payload = { ...event.payload, chat_template_kwargs: { ...event.payload.chat_template_kwargs, enable_thinking: false } };
       delete payload.thinking_budget_tokens;
       return payload;

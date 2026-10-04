@@ -183,12 +183,25 @@ test("the Understory the portal runs: its model from a provider or an address of
 
   writeFileSync(
     path.join(agentDir, "models.json"),
-    JSON.stringify({ providers: { "llama-swap": { baseUrl: "http://gpu:8080/v1", api: "openai-completions", models: [{ id: "Ornith" }] }, claude: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "CLAUDE_KEY", models: [{ id: "sonnet" }] } } }),
+    JSON.stringify({ providers: { "llama-swap": { baseUrl: "http://gpu:8080/v1", api: "openai-completions", models: [{ id: "Ornith" }] }, claude: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "$CLAUDE_KEY", models: [{ id: "sonnet" }] } } }),
   );
   process.env.CLAUDE_KEY = "sk-from-env";
   assert.deepEqual(service.llmEnv({ source: "provider", provider: "llama-swap", model: "Ornith" }), { baseUrl: "http://gpu:8080/v1", apiKey: "none", model: "Ornith", format: "openai" });
   assert.deepEqual(service.llmEnv({ source: "provider", provider: "claude", model: "sonnet" }), { baseUrl: "https://api.anthropic.com", apiKey: "sk-from-env", model: "sonnet", format: "anthropic" });
   assert.throws(() => service.llmEnv({ source: "provider", provider: "gone", model: "x" }), /no provider "gone"/);
+  // A key is read as pi reads it: "$NAME" and "${NAME}" name a variable, a word in capitals is a key that happens to look like one, and a command is pi's to run.
+  const keyed = (apiKey: string) => {
+    writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: { keyed: { baseUrl: "http://gpu:8080/v1", api: "openai-completions", apiKey, models: [{ id: "m" }] } } }));
+    return service.llmEnv({ source: "provider", provider: "keyed", model: "m" }).apiKey;
+  };
+  assert.equal(keyed("${CLAUDE_KEY}"), "sk-from-env");
+  assert.equal(keyed("CLAUDE_KEY"), "CLAUDE_KEY", "a bare word is the key itself, not the variable of that name");
+  assert.equal(keyed("$NOT_SET_ANYWHERE"), "none", "a variable that is not set is no key, not the text of its name");
+  assert.throws(() => keyed("!pass show llm"), /command pi runs/);
+  writeFileSync(
+    path.join(agentDir, "models.json"),
+    JSON.stringify({ providers: { "llama-swap": { baseUrl: "http://gpu:8080/v1", api: "openai-completions", models: [{ id: "Ornith" }] }, claude: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "$CLAUDE_KEY", models: [{ id: "sonnet" }] } } }),
+  );
 
   const token = service.token();
   assert.equal(service.token(), token, "made once");

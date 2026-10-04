@@ -26,7 +26,7 @@ import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { contextWindowFor, getVoiceInstructions, portalBrowserOn } from "../db.js";
-import { configStamp } from "../providers.js";
+import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE, understoryOn } from "../features.js";
 
@@ -203,30 +203,17 @@ export function builtinSkillsDir(): string | undefined {
  * else is returned untouched, and so is a llama model when there is no proxy —
  * a missed indicator is not a reason to fail to start.
  */
-function viaProgressProxy<T extends { provider?: string; baseUrl?: string }>(
+export function viaProgressProxy<T extends { provider?: string; baseUrl?: string }>(
   model: T | undefined,
   sessionId: string | undefined,
 ): T | undefined {
-  if (!model || !sessionId || !model.baseUrl || !isLlama(model.provider)) return model;
+  if (!model || !sessionId || !model.baseUrl || !isLlamaProvider(model.provider)) return model;
   // Already routed. Wrapping it again would nest one proxy path inside another.
   if (model.baseUrl.includes("/s/" + sessionId)) return model;
   const rerouted = proxyBaseUrl(sessionId, model.baseUrl);
   if (!rerouted) return model;
   console.log(`[portal] prefill progress for ${sessionId}: ${model.baseUrl} -> ${rerouted}`);
   return { ...model, baseUrl: rerouted };
-}
-
-/**
- * The ways a llama.cpp server shows up.
- *
- * pi has a built-in provider called `llama.cpp`, and the `pi-llama-cpp` package
- * registers one per server as `llama-server=<url>`. Behind a llama-swap gateway
- * neither fits — pi-llama-cpp probes `/props?model=<id>` for every model, which
- * llama-swap answers by loading it — so the gateway is a plain provider in
- * models.json named `llama-swap`. It is still llama-server underneath.
- */
-function isLlama(provider: string | undefined): boolean {
-  return provider === "llama.cpp" || provider === "llama-swap" || (provider?.startsWith("llama-server") ?? false);
 }
 
 /**

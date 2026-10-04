@@ -258,6 +258,18 @@ function kindOf(id: string, baseUrl: string | undefined, kinds: Json): ProviderK
   return SERVER_KINDS.has(saved) ? saved : inferKind(id, baseUrl);
 }
 
+/**
+ * Whether a provider is a llama.cpp server, or a llama-swap gateway in front of
+ * one: by the kind saved for it in Settings, else by what its name says. What
+ * reports the progress of a prompt and what thinking is switched off for
+ * go by this, so they agree with the Providers page.
+ */
+export function isLlamaProvider(id: string | undefined): boolean {
+  if (!id) return false;
+  const kind = kindOf(id, readModelsJson().providers?.[id]?.baseUrl, readJson(kindsJsonPath()));
+  return kind === "llama-cpp" || kind === "llama-swap";
+}
+
 export function keyHint(value: unknown): string | undefined {
   if (typeof value !== "string" || !value) return undefined;
   if (value.startsWith("!")) return "from a command";
@@ -365,8 +377,8 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind): string {
 
 const ENV_REF = /^\$\{?([A-Z_][A-Z0-9_]*)\}?$/i;
 
-/** A stored key as pi would read it: an environment variable is looked up, a command is not run here. */
-function resolveKey(key: string | undefined): string | undefined {
+/** A stored key as pi would read it: `$NAME` and `${NAME}` are looked up in the environment, anything else is the key as it stands, and a command is not run here. */
+export function resolveKey(key: string | undefined): string | undefined {
   if (!key || isPlaceholder(key)) return undefined;
   const env = ENV_REF.exec(key);
   if (env) return process.env[env[1]];

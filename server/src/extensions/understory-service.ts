@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { getSetting, putSetting } from "../db.js";
 import { tlsFiles } from "../http-security.js";
-import { readModelsJson, storedKey } from "../providers.js";
+import { readModelsJson, resolveKey, storedKey } from "../providers.js";
 import { containerAction, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
 import { voiceNetworkMode as sharedNetworkMode } from "./voice-service.js";
 
@@ -144,14 +144,13 @@ export function portalLlmBase(): string | undefined {
 }
 
 /**
- * A key as pi keeps it may be the key, or the name of the variable holding
- * it. A command (`!…`) is pi's to run, not ours to hand a container.
+ * The key a provider is saved with, as pi reads it. A command (`!…`) is pi's
+ * to run, not ours to hand a container.
  */
-function resolveKey(key: string | undefined): string | undefined {
-  if (!key) return undefined;
-  if (key.startsWith("!")) throw new Error("That provider's key is a command pi runs; give Understory an address and key of its own instead");
-  if (/^[A-Z_][A-Z0-9_]*$/.test(key) && process.env[key]) return process.env[key];
-  return key;
+function providerKey(provider: string): string | undefined {
+  const key = storedKey(provider);
+  if (key?.startsWith("!")) throw new Error("That provider's key is a command pi runs; give Understory an address and key of its own instead");
+  return resolveKey(key);
 }
 
 /** What Understory is told about its model: the provider's address and key, looked up when the container is made. */
@@ -167,7 +166,7 @@ export function llmEnv(llm: LlmChoice): { baseUrl: string; apiKey: string; model
   return {
     baseUrl: raw.baseUrl,
     // A local server without one still needs something: Understory refuses to start with no key.
-    apiKey: resolveKey(storedKey(llm.provider)) || "none",
+    apiKey: providerKey(llm.provider) || "none",
     model: llm.model,
     format: raw.api === "anthropic-messages" ? "anthropic" : "openai",
   };
