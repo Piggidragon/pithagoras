@@ -70,6 +70,30 @@ test("what changed: staged and not, new files, renames and names with spaces, wi
   assert.deepEqual(by["staged.txt"].staged, { added: 1, removed: 0, binary: false });
 });
 
+test("a status too long to read whole is cut, says so, keeps what is changed, and lists no half of a file", async () => {
+  const dir = repo();
+  writeFileSync(path.join(dir, "a.txt"), "one\nTWO\nthree\n");
+  // Paths of 750 characters: fewer files than are ever listed, and more than a refresh should read.
+  const deep = path.join(dir, "d".repeat(250), "e".repeat(250));
+  mkdirSync(deep, { recursive: true });
+  const made = new Set();
+  for (let i = 0; i < 1500; i++) {
+    const name = `${"f".repeat(240)}${String(i).padStart(10, "0")}`;
+    writeFileSync(path.join(deep, name), "");
+    made.add(path.relative(dir, path.join(deep, name)));
+  }
+  const s = await g.status(await open(dir));
+  assert.equal(s.truncated, true);
+  assert.ok(s.files.length < 1500, `read ${s.files.length}`);
+  // What is changed comes first and is still there, with its counts; every untracked file is a whole one.
+  assert.deepEqual(s.files[0].unstaged, { added: 1, removed: 1, binary: false });
+  assert.equal(s.files.filter((f) => f.kind === "untracked").every((f) => made.has(f.path)), true);
+  // A repository that fits is not said to be cut.
+  const small = repo();
+  writeFileSync(path.join(small, "new.txt"), "x\n");
+  assert.equal((await g.status(await open(small))).truncated, false);
+});
+
 test("diffs of one file: in the tree, in the index, and a new one — and nothing outside what changed", async () => {
   const dir = repo();
   const r = await open(dir);

@@ -422,14 +422,23 @@ function operationIn(gitDir: string): Status["operation"] {
   return null;
 }
 
+/**
+ * How much of `git status` is read. What is listed stops at MAX_FILES, and the
+ * untracked files come last, so a folder with tens of thousands of them (an
+ * unignored node_modules) would otherwise be read whole, and parsed, on every
+ * refresh just to be cut down to a list. What is changed is first, and is kept.
+ */
+const STATUS_MAX = 1024 * 1024;
+
 export async function status(repo: Repo): Promise<Status> {
   const [raw, unstaged, staged, remotes] = await Promise.all([
-    git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=all", "--ignore-submodules=dirty"]),
+    git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=all", "--ignore-submodules=dirty"], { max: STATUS_MAX }),
     git(repo, ["diff", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
     git(repo, ["diff", "--cached", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
     listRemotes(repo),
   ]);
-  const parsed = parseStatus(raw.stdout);
+  // Cut off, its last entry may be half of one: that is not a file.
+  const parsed = parseStatus(raw.cut ? raw.stdout.slice(0, raw.stdout.lastIndexOf("\0") + 1) : raw.stdout);
   const inIndex = parseNumstat(staged.stdout);
   const inTree = parseNumstat(unstaged.stdout);
   const files = parsed.files.slice(0, MAX_FILES).map((file) => ({
@@ -437,7 +446,7 @@ export async function status(repo: Repo): Promise<Status> {
     ...(file.x !== "." && file.x !== "?" && inIndex.has(file.path) ? { staged: inIndex.get(file.path) } : {}),
     ...(file.y !== "." && file.y !== "?" && inTree.has(file.path) ? { unstaged: inTree.get(file.path) } : {}),
   }));
-  return { ...parsed, files, truncated: parsed.files.length > MAX_FILES, operation: operationIn(repo.gitDir), remotes };
+  return { ...parsed, files, truncated: raw.cut || parsed.files.length > MAX_FILES, operation: operationIn(repo.gitDir), remotes };
 }
 
 /** What deleting a folder would lose for good: nothing else holds a copy of these. */
