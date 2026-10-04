@@ -83,6 +83,7 @@ export const FilesPanel = memo(function FilesPanel({
   reveal,
   onRevealed,
   onDirtyChange,
+  keepDraft = false,
 }: {
   sessionId: string;
   folder: string;
@@ -94,11 +95,17 @@ export const FilesPanel = memo(function FilesPanel({
   onRevealed?: () => void;
   /** Told whether there are changes not saved, so that whoever can close the panel can ask first. */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Whether this is the chat's own panel, which brings back the edit it was left
+   * with and keeps the next. One more panel of the same chat — the voice stage's —
+   * would take over an edit that belongs to the first, and then not follow the agent.
+   */
+  keepDraft?: boolean;
 }) {
   // Its text is in the language chosen: it is drawn for that, as it is not for the chat's draws.
   useLanguage();
   // An edit this chat's panel was left with, from before it was unmounted: the chat was switched or left with it open.
-  const [left] = useState(() => readFileDraft(sessionId));
+  const [left] = useState(() => (keepDraft ? readFileDraft(sessionId) : null));
   const [dir, setDir] = useState(() => (left ? parentOf(left.path) : ""));
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -159,10 +166,11 @@ export const FilesPanel = memo(function FilesPanel({
   }, [dirty]);
   // Kept while there are changes, for a panel that is unmounted with them: switching chat or leaving the page.
   useEffect(() => {
+    if (!keepDraft) return;
     keepFileDraft(sessionId, dirty && file ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size } : null);
-  }, [sessionId, dirty, file, draft]);
+  }, [keepDraft, sessionId, dirty, file, draft]);
   // Written before it goes: unmounting must not lose what was typed a moment ago. Closing the panel on purpose forgets it first.
-  useEffect(() => () => flushFileDraft(sessionId), [sessionId]);
+  useEffect(() => (keepDraft ? () => flushFileDraft(sessionId) : undefined), [keepDraft, sessionId]);
   // An edit brought back may be of a file that changed meanwhile: told the way a save would, instead of at the save.
   useEffect(() => {
     if (!left) return;

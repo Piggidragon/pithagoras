@@ -34,6 +34,7 @@ import {
 } from "../api";
 import { bounds, colours, layoutKept } from "../memory-graph";
 import { NOTE_LINK, linkNotes } from "../memory-links";
+import { forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
@@ -81,9 +82,18 @@ export function MemoryPage() {
   const view: View | null = asView === "log" || asView === "graph" || asView === "issues" ? asView : null;
   // Whether the open note is being edited, with something changed in it: it is told by the note.
   const [editing, setEditing] = useState(false);
-  /** Said before what is open is left: its draft is in no other place. */
-  const settled = async () =>
-    !editing || (await confirmDialog({ title: t("Discard your changes?"), message: t("The note you are editing has changes that are not saved."), confirmLabel: t("Discard"), danger: true }));
+  /**
+   * Said before what is open is left by one of the page's own buttons. Back and
+   * Forward, and the links to other pages, cannot be asked: the note keeps its
+   * edit for those, and brings it back when it is opened again.
+   */
+  const settled = async () => {
+    if (!editing) return true;
+    const ok = await confirmDialog({ title: t("Discard your changes?"), message: t("The note you are editing has changes that are not saved."), confirmLabel: t("Discard"), danger: true });
+    // Given up on purpose: nothing is to be brought back when the note is opened again.
+    if (ok && note) keepNoteDraft(note, null);
+    return ok;
+  };
   const openNote = async (path: string) => {
     if (path !== note && (await settled())) setParams({ note: path });
   };
@@ -145,6 +155,7 @@ export function MemoryPage() {
     setWiping(true);
     try {
       await api.wipeMemory();
+      forgetNoteDrafts();
       setParams({});
       // Nothing found is left to show: what it found is gone.
       setQuery("");
@@ -475,14 +486,6 @@ function MemoryMarkdown({ text, from, onOpen }: { text: string; from: string; on
 const reservedNote = (path: string) => /(^|\/)(index|log)\.md$/.test(path);
 
 /** What a note's form holds while it is edited. */
-interface NoteDraft {
-  title: string;
-  type: string;
-  description: string;
-  tags: string;
-  body: string;
-}
-
 function Note({
   path,
   writable,
@@ -508,7 +511,13 @@ function Note({
   useEffect(() => {
     let current = true;
     api.memoryConcept(path).then(
-      (c) => current && setConcept(c),
+      (c) => {
+        if (!current) return;
+        setConcept(c);
+        // The edit this note was left with, if the page was taken away from it.
+        const left = readNoteDraft(path);
+        if (left) setDraft(left);
+      },
       (e: Error) => current && setFailed(e.message),
     );
     return () => {
@@ -534,6 +543,15 @@ function Note({
     onEditing(changedDraft);
     return () => onEditing(false);
   }, [changedDraft]);
+  // Kept as it changes, for a note that goes away with it: Back, Forward, another page. Not before the note is read, which is when a draft left earlier is brought back.
+  useEffect(() => {
+    if (draft && concept) keepNoteDraft(path, changedDraft ? draft : null);
+  }, [path, draft, concept, changedDraft]);
+  /** The edit is over, saved or not: nothing of it is to come back. */
+  const endEdit = () => {
+    setDraft(null);
+    keepNoteDraft(path, null);
+  };
 
   const save = async () => {
     if (!draft || !concept) return;
@@ -547,7 +565,7 @@ function Note({
       if (!tags.length) delete (frontmatter as Record<string, unknown>).tags;
       const r = await api.saveMemoryNote(path, frontmatter, draft.body);
       setConcept(r.concept);
-      setDraft(null);
+      endEdit();
       onChanged("saved", r.health);
     } catch (e) {
       setError((e as Error).message);
@@ -639,7 +657,7 @@ function Note({
               </label>
               <p className="font-mono text-[10px] text-fg-faint">{path}</p>
               <div className="flex items-center justify-end gap-2">
-                <button type="button" onClick={() => setDraft(null)} disabled={busy} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
+                <button type="button" onClick={endEdit} disabled={busy} className="rounded-lg px-3 py-1.5 text-sm text-fg-muted hover:bg-fg/5">
                   {t("Cancel")}
                 </button>
                 <button

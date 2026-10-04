@@ -235,14 +235,16 @@ function PersonDetail({
   const [busy, setBusy] = useState(false);
   const [saved, flashSaved] = useFlash();
 
-  // The fields are filled from the person for another person, after this form's own save
-  // (the server keeps the name and the notes trimmed, so what was typed is not what is
-  // stored), or when nothing typed would be lost.
-  const filled = useRef({ key: person.key, own: false });
+  // The fields are filled from the person for another person, or when nothing typed
+  // would be lost. This form's own save sets them from what the server kept (it keeps
+  // the name and the notes trimmed, so what was typed is not what is stored), which
+  // the reload that follows then finds as they are: there is no change for an effect
+  // to wait for when the trimmed text is what was stored before.
+  const filled = useRef(person.key);
   useEffect(() => {
     const was = filled.current;
-    filled.current = { key: person.key, own: false };
-    if (person.key === was.key && !was.own && dirty) return;
+    filled.current = person.key;
+    if (person.key === was && dirty) return;
     setName(person.name);
     setRole(person.role);
     setNotes(person.notes);
@@ -338,8 +340,13 @@ function PersonDetail({
               const leaving = onlyPrimary && role !== "primary";
               if (leaving && !(await confirmDialog({ title: t("Take away the only primary user's role?"), confirmLabel: t("Save"), ...noPrimaryLeft }))) return;
               act(async () => {
-                await api.updatePerson(person.key, { name, role, notes, force: leaving || undefined });
-                filled.current.own = true;
+                const { person: stored } = await api.updatePerson(person.key, { name, role, notes, force: leaving || undefined });
+                // Not for a person the form has moved on from while this was on its way.
+                if (filled.current === stored.key) {
+                  setName(stored.name);
+                  setRole(stored.role);
+                  setNotes(stored.notes);
+                }
                 flashSaved();
               });
             }}

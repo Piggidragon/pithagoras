@@ -158,6 +158,28 @@ test('tool cards say what came of a call, and open what they are about', async (
   await expect(page.getByLabel('Contents of src/app.ts')).toHaveValue('abc');
 });
 
+test('the Files window of voice mode leaves the edit of the chat\'s own Files panel where it is', async ({ page }) => {
+  await page.goto('/tests/voice.html');
+  // An edit in the chat's Files panel that is not saved.
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: /^app\.ts/ }).click();
+  await page.getByLabel('Contents of app.ts').fill('edited by hand');
+  const kept = () => page.evaluate(() => sessionStorage.getItem('pithagoras.file-draft.test') ?? '');
+  await expect.poll(kept).toContain('edited by hand');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+  // The voice stage's own window opens on the folder, ready to show what the agent does, not on a half-made edit of the other.
+  await page.getByRole('button', { name: 'Show files' }).click();
+  const window = page.locator('.voice-files-window', { has: page.getByRole('button', { name: 'Minimize files' }) });
+  await expect(window.getByRole('button', { name: /^app\.ts/ })).toBeVisible();
+  await expect(window.getByLabel('Contents of app.ts')).toHaveCount(0);
+  await expect(window.getByRole('button', { name: 'Following' })).toBeVisible();
+  // And it did not take the chat's edit with it when it came: that is still kept, for a reload.
+  expect(await kept()).toContain('edited by hand');
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  await expect(page.getByLabel('Contents of app.ts')).toHaveValue('edited by hand');
+});
+
 test('settings, push-to-talk, adding to a running task, the conversation and repeat', async ({ page }) => {
   test.setTimeout(90000);
   // Recognition is asked several times per utterance, so what it hears is set per utterance.

@@ -324,6 +324,86 @@ test('a note being edited is not left for another note, the log, the graph or a 
   await expect(form).toHaveCount(0);
 });
 
+test('a note left by Back, Forward or a link to another page gets its edit back, and still asks before it is left', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+  await expect(page).toHaveURL(/note=%2Fdeployment%2Fbranches.md/);
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  const form = page.getByRole('form', { name: 'Edit the note' });
+  const text = form.getByLabel('Text, in markdown');
+  await text.fill('A long rewrite, not saved yet.');
+  // The browser's Back takes the page away from the note without asking, and Forward comes back to it.
+  await page.goBack();
+  await expect(page).toHaveURL(/note=%2Fpeople%2Fowner.md/);
+  await expect(form).toHaveCount(0);
+  await page.goForward();
+  await expect(text).toHaveValue('A long rewrite, not saved yet.');
+  // It is an edit to be asked about again.
+  await page.getByRole('button', { name: 'Log', exact: true }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  // A link to another page of the portal leaves it as well, and so does coming back.
+  await page.getByRole('button', { name: 'Sessions' }).first().click();
+  await expect(page).toHaveURL(/\/sessions/);
+  await page.goBack();
+  await expect(page).toHaveURL(/note=%2Fdeployment%2Fbranches.md/);
+  await expect(text).toHaveValue('A long rewrite, not saved yet.');
+  expect(changes).toEqual([]);
+});
+
+test('an edit that was saved, cancelled or given up is not brought back', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  const form = page.getByRole('form', { name: 'Edit the note' });
+  // The other note is shown before the page goes back: going back from a note that was never left is no leaving.
+  const shown = () => expect(page.getByRole('article', { name: 'Branch Deployment on Test Host' })).toBeVisible();
+  const away = async () => {
+    await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+    await shown();
+    await page.goBack();
+    await expect(page).toHaveURL(/note=%2Fpeople%2Fowner.md/);
+  };
+  // Cancelled.
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  await form.getByLabel('Text, in markdown').fill('Cancelled.');
+  await form.getByRole('button', { name: 'Cancel' }).click();
+  await away();
+  await expect(form).toHaveCount(0);
+  // Given up, when asked.
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  await form.getByLabel('Text, in markdown').fill('Given up.');
+  await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+  await page.getByRole('alertdialog', { name: 'Discard your changes?' }).getByRole('button', { name: 'Discard' }).click();
+  await shown();
+  await page.goBack();
+  await expect(page).toHaveURL(/note=%2Fpeople%2Fowner.md/);
+  await expect(form).toHaveCount(0);
+  // Saved.
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  await form.getByLabel('Text, in markdown').fill('Saved.');
+  await form.getByRole('button', { name: 'Save' }).click();
+  await page.getByRole('dialog', { name: 'The note is saved' }).getByRole('button', { name: 'Leave it' }).click();
+  await away();
+  await expect(form).toHaveCount(0);
+  expect(changes).toHaveLength(1);
+});
+
+test('clearing the whole memory takes the edits of its notes with it', async ({ page }) => {
+  await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  await page.getByRole('form', { name: 'Edit the note' }).getByLabel('Text, in markdown').fill('Not saved, and then the memory is cleared.');
+  await page.getByRole('button', { name: 'Clear the memory' }).click();
+  await page.getByRole('alertdialog', { name: 'Clear the whole memory?' }).getByRole('button', { name: 'Clear the memory' }).click();
+  await expect(page).toHaveURL(/\/memory$/);
+  // A note of the same path turns up later, and is opened.
+  await page.evaluate(() => { history.pushState(null, '', '/memory?note=%2Fpeople%2Fowner.md'); window.dispatchEvent(new PopStateEvent('popstate')); });
+  await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
+  await expect(page.getByRole('form', { name: 'Edit the note' })).toHaveCount(0);
+});
+
 test('deleting a note asks first, then shows what it broke and offers to put it right', async ({ page }) => {
   const { changes } = await portal(page);
   await page.goto('/memory?note=%2Fpeople%2Fowner.md');

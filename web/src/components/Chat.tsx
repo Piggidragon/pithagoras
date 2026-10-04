@@ -1516,7 +1516,7 @@ export function Chat({
       {kind === "files" && (
         <div className="min-h-0 flex-1 bg-surface">
           {/* Not before the chat's events are here: what it did earlier is not news. */}
-          {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} />}
+          {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} keepDraft />}
         </div>
       )}
       {kind === "git" && (

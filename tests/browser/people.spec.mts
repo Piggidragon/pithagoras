@@ -105,6 +105,23 @@ test('after a save the form is what is stored, so Save goes away even where the 
   await expect(dialog.getByRole('button', { name: 'Save' })).toHaveCount(0);
 });
 
+test('a save that the server trims back to what was stored leaves nothing to save either', async ({ page }) => {
+  const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), { ...person('tg:kim', 'Kim', 'colleague'), notes: 'Reviews the pull requests.' }]);
+  await page.goto('/settings/people');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: /Kim/ }).click();
+  const notes = dialog.getByPlaceholder(/Their role, what they work on/);
+  const name = dialog.getByRole('textbox', { name: 'Name', exact: true });
+  // Only whitespace is added to the notes, and the name is emptied: the server keeps what it had.
+  await notes.fill('Reviews the pull requests.\n');
+  await name.fill('');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  await expect(notes).toHaveValue('Reviews the pull requests.');
+  await expect(name).toHaveValue('Kim');
+  await expect(dialog.getByRole('button', { name: 'Save' })).toHaveCount(0);
+});
+
 test('with another primary user, demoting somebody asks nothing and sends no force', async ({ page }) => {
   const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:deputy', 'Dee', 'primary')]);
   await page.goto('/settings/people');

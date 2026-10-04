@@ -56,8 +56,8 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     try { const state = await api.voiceInstallStatus(); if (alive.current) setInstall(state); } catch (e) { if (alive.current) setInstall({ available: false, state: 'unavailable', busy: false, progress: '', error: (e as Error).message }); } finally { asking.current = false; }
   }, []);
   useEffect(() => { alive.current = true; void poll(); return () => { alive.current = false; }; }, [poll]);
-  // Quickly while something is changing, which is what the page is open for; slowly once it is as it will stay, and not at all in a tab nobody looks at, which asks at once when it is looked at again.
-  const changing = !install || install.busy || install.state === 'starting' || !!install.progress;
+  // Quickly while something is changing, which is what the page is open for; slowly once it is as it will stay, and not at all in a tab nobody looks at, which asks at once when it is looked at again. The state says it: `progress` is the container's log once there is a container, so it is never empty for a service that is up.
+  const changing = !install || install.busy || install.state === 'installing' || install.state === 'starting';
   const every = changing ? 2500 : install?.state === 'unavailable' ? 10_000 : 30_000;
   useEffect(() => pollWhileVisible(() => void poll(), every), [poll, every]);
   // The GPU as nvidia-smi reports it, for the engine choice. Where it cannot be read the install reads it, so a failure here is no error.

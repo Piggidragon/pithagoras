@@ -30,7 +30,8 @@ const uninstallPage = async (page: any, state = 'running') => {
  let config: any = { enabled: true, whisperUrl: 'http://127.0.0.1:7862/v1/audio/transcriptions', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'audio-cpp', sttModel: 'qwen3-asr', language: 'auto' };
  await page.route('**/api/voice/presets', (r: any) => r.fulfill({ json: [] }));
  await page.route('**/api/voice', (r: any) => r.fulfill({ json: config }));
- await page.route('**/api/voice/install', (r: any) => { if (r.request().method() === 'GET') reads++; return r.fulfill({ json: { available: true, state: status, busy: false, progress: '', error: '', connected, choice: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } } }); });
+ // As the server answers: once there is a container, `progress` is its log, so a steady service has lines in it too.
+ await page.route('**/api/voice/install', (r: any) => { if (r.request().method() === 'GET') reads++; return r.fulfill({ json: { available: true, state: status, busy: false, progress: status === 'absent' ? '' : 'INFO: Uvicorn running on http://0.0.0.0:7862', error: '', connected, choice: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } } }); });
  await page.route('**/api/voice/uninstall', (r: any) => {
   requests.push(r.request().postDataJSON()); status = 'absent'; connected = false;
   config = { ...config, enabled: false, runtime: 'breeze', whisperUrl: 'http://stt.example.test:9000/inference', breezeUrl: 'http://tts.example.test:9001/v1/audio/speech', sttModel: '' };

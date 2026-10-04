@@ -32,7 +32,10 @@ it can be linked to.
 In the Understory the portal runs, a note can be edited (title, type,
 description, tags, text) or deleted from the pencil and bin over it. A note with
 changes in it that are not saved is not left for another note, the log, the graph
-or a refresh without asking **Discard your changes?** first. After a
+or a refresh without asking **Discard your changes?** first. The browser's Back
+and Forward, and a link to another page of the portal, cannot be asked: the note
+keeps what you typed for as long as the portal stays open, and shows it again
+when you open the note. After a
 change a window says what Understory's checks find — a link to nothing, a note
 nothing links to, an index that misses something — and offers:
 

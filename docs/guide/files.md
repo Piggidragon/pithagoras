@@ -71,7 +71,9 @@ while you have unsaved changes, the agent's next file does not replace them.
 
 In [voice mode](/guide/voice) it opens on its own the first time the agent touches
 a file, in the same way as the browser and the terminal, and there is a folder
-button in the top right to open it yourself.
+button in the top right to open it yourself. That window is its own: it follows
+the agent from the start, and an edit that is not saved in the chat's Files stays
+with the chat until voice mode is over.
 
 ## Panels
 
