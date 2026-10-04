@@ -4,6 +4,7 @@ import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefres
 import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
 import { confirmDialog } from "./ConfirmDialog";
+import { forgetNoteDrafts } from "../note-drafts";
 import { Select } from "./Select";
 import { LoadFailed, SwitchRow, inputCls, primaryCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
@@ -606,7 +607,12 @@ export function MemoryAddon({ onError }: { onError: (e: string) => void }) {
                       danger: true,
                       deletes: true,
                     });
-                    if (ok) await act(msg("Removing…"), () => api.removeUnderstory(true));
+                    // The notes are gone with it: an edit kept for one would come back over a note made again at its path.
+                    if (ok) await act(msg("Removing…"), async () => {
+                      const removed = await api.removeUnderstory(true);
+                      forgetNoteDrafts();
+                      return removed;
+                    });
                   }}
                   className="rounded-lg px-3 py-1.5 text-xs text-fg-subtle transition hover:bg-danger/10 hover:text-danger"
                 >

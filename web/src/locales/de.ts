@@ -1003,6 +1003,7 @@ const de: Locale = {
     "default": "Standard",
     // components/MemoryPage.tsx
     "The note you are editing has changes that are not saved.": "An der Notiz, die du bearbeitest, gibt es ungespeicherte Änderungen.",
+    "This note changed after you started editing it.": "Diese Notiz hat sich geändert, nachdem du angefangen hast, sie zu bearbeiten.",
     "Clear the whole memory?": "Das ganze Gedächtnis leeren?",
     "Every note and folder is deleted, and the index and log start empty, as in a new memory. The agent forgets everything it kept here. This cannot be undone.": "Jede Notiz und jeder Ordner wird gelöscht, und Index und Log beginnen leer, wie bei einem neuen Gedächtnis. Der Agent vergisst alles, was er hier behalten hat. Das lässt sich nicht rückgängig machen.",
     "Clear the memory": "Das Gedächtnis leeren",

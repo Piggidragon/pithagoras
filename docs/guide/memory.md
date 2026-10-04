@@ -35,7 +35,10 @@ changes in it that are not saved is not left for another note, the log, the grap
 or a refresh without asking **Discard your changes?** first. The browser's Back
 and Forward, and a link to another page of the portal, cannot be asked: the note
 keeps what you typed for as long as the portal stays open, and shows it again
-when you open the note. After a
+when you open the note. The agent may have written the note meanwhile, so a note
+that changed after you started editing it says so, before a save goes out:
+**Load the new version** gives your edit up, **Save mine anyway** puts it over
+what the agent wrote. After a
 change a window says what Understory's checks find — a link to nothing, a note
 nothing links to, an index that misses something — and offers:
 

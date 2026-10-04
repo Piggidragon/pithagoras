@@ -290,7 +290,8 @@ test('a note is edited in place: its title, type, tags and text, and saving says
   await form.getByLabel('Tags, separated by commas').fill('people, host');
   await form.getByLabel('Text, in markdown').fill('Runs the test host, and pays for it.');
   await form.getByRole('button', { name: 'Save' }).click();
-  expect(changes).toEqual([{ method: 'PUT', path: '/people/owner.md', body: { path: '/people/owner.md', frontmatter: { title: 'The owner of the host', type: 'Person', description: '', tags: ['people', 'host'] }, body: 'Runs the test host, and pays for it.' } }]);
+  // After the note is read once more, to see that nobody wrote it meanwhile.
+  await expect.poll(() => changes).toEqual([{ method: 'PUT', path: '/people/owner.md', body: { path: '/people/owner.md', frontmatter: { title: 'The owner of the host', type: 'Person', description: '', tags: ['people', 'host'] }, body: 'Runs the test host, and pays for it.' } }]);
   const after = page.getByRole('dialog', { name: 'The note is saved' });
   await expect(after.getByText('Every link leads somewhere and every note is linked in.')).toBeVisible();
   await expect(after.getByRole('button', { name: 'Repair with the model' })).toBeDisabled();
@@ -360,6 +361,64 @@ test('a note left by Back, Forward or a link to another page gets its edit back,
   await expect(page).toHaveURL(/note=%2Fdeployment%2Fbranches.md/);
   await expect(text).toHaveValue('A long rewrite, not saved yet.');
   expect(changes).toEqual([]);
+});
+
+const BRANCHES = '/deployment/branches.md';
+/** The agent writes the note while the person is elsewhere, or reading: Understory sets a new time on every write. */
+const rewritten = () => {
+  const was = concepts[BRANCHES] as { frontmatter: object; body: string };
+  concepts[BRANCHES] = { ...was, frontmatter: { ...was.frontmatter, timestamp: '2026-09-29T10:00:00.000Z' }, body: 'Branches go out with `deploy-branch.sh`.\n\nThe agent learnt: deploys need an approval now.' };
+  return () => void (concepts[BRANCHES] = was);
+};
+
+test('an edit brought back over a note the agent wrote meanwhile says so, and Save does not go out unasked', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fpeople%2Fowner.md');
+  await notes(page).getByRole('button', { name: /Branch Deployment/ }).click();
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  const form = page.getByRole('form', { name: 'Edit the note' });
+  await form.getByLabel('Text, in markdown').fill('Branches go out with `deploy-branch.sh`.\nMy addition.');
+  await page.goBack();
+  await expect(page).toHaveURL(/note=%2Fpeople%2Fowner.md/);
+  await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
+  const restore = rewritten();
+  try {
+    await page.goForward();
+    // The edit is back, built on the old text, and the person is told before they can save it over what the agent learnt.
+    await expect(form.getByLabel('Text, in markdown')).toHaveValue(/My addition/);
+    const alert = page.getByRole('alert').filter({ hasText: 'This note changed after you started editing it.' });
+    await expect(alert).toBeVisible();
+    await form.getByRole('button', { name: 'Save' }).click();
+    await expect(alert).toBeVisible();
+    expect(changes).toEqual([]);
+    // Giving it up shows the note as the agent left it.
+    await alert.getByRole('button', { name: 'Load the new version' }).click();
+    await expect(form).toHaveCount(0);
+    await expect(page.getByText('The agent learnt: deploys need an approval now.')).toBeVisible();
+    expect(changes).toEqual([]);
+  } finally {
+    restore();
+  }
+});
+
+test('a save over a note the agent wrote since the edit began asks first, and goes out when told to', async ({ page }) => {
+  const { changes } = await portal(page);
+  await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+  await page.getByRole('button', { name: 'Edit the note' }).click();
+  const form = page.getByRole('form', { name: 'Edit the note' });
+  await form.getByLabel('Text, in markdown').fill('Mine.');
+  const restore = rewritten();
+  try {
+    await form.getByRole('button', { name: 'Save' }).click();
+    const alert = page.getByRole('alert').filter({ hasText: 'This note changed after you started editing it.' });
+    await expect(alert).toBeVisible();
+    expect(changes).toEqual([]);
+    await alert.getByRole('button', { name: 'Save mine anyway' }).click();
+    await page.getByRole('dialog', { name: 'The note is saved' }).getByRole('button', { name: 'Leave it' }).click();
+    expect(changes.map((c) => [c.method, c.path, c.body.body])).toEqual([['PUT', BRANCHES, 'Mine.']]);
+  } finally {
+    restore();
+  }
 });
 
 test('an edit that was saved, cancelled or given up is not brought back', async ({ page }) => {

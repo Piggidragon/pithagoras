@@ -34,7 +34,7 @@ import {
 } from "../api";
 import { bounds, colours, layoutKept } from "../memory-graph";
 import { NOTE_LINK, linkNotes } from "../memory-links";
-import { forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
+import { forgetNoteDraft, forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
 import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
@@ -91,7 +91,7 @@ export function MemoryPage() {
     if (!editing) return true;
     const ok = await confirmDialog({ title: t("Discard your changes?"), message: t("The note you are editing has changes that are not saved."), confirmLabel: t("Discard"), danger: true });
     // Given up on purpose: nothing is to be brought back when the note is opened again.
-    if (ok && note) keepNoteDraft(note, null);
+    if (ok && note) forgetNoteDraft(note);
     return ok;
   };
   const openNote = async (path: string) => {
@@ -485,6 +485,18 @@ function MemoryMarkdown({ text, from, onOpen }: { text: string; from: string; on
 /** Understory's own index and log: written by it, never by hand. */
 const reservedNote = (path: string) => /(^|\/)(index|log)\.md$/.test(path);
 
+/** The draft of a note as it starts, from the note as it is. */
+const startedFrom = (c: MemoryConcept): NoteDraft => ({
+  title: String(c.frontmatter?.title ?? ""),
+  type: String(c.frontmatter?.type ?? ""),
+  description: String(c.frontmatter?.description ?? ""),
+  tags: (Array.isArray(c.frontmatter?.tags) ? c.frontmatter.tags : []).map(String).join(", "),
+  body: c.body,
+});
+
+/** What a draft is started from: the note's words, and the time Understory wrote them, which it sets on every write. */
+const baseOf = (c: MemoryConcept): string => JSON.stringify([startedFrom(c), c.frontmatter?.timestamp ?? null]);
+
 /** What a note's form holds while it is edited. */
 function Note({
   path,
@@ -506,6 +518,9 @@ function Note({
   const [concept, setConcept] = useState<MemoryConcept | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [draft, setDraft] = useState<NoteDraft | null>(null);
+  // What the draft was started from, and whether the note is something else by now.
+  const [base, setBase] = useState("");
+  const [changed, setChanged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -514,9 +529,14 @@ function Note({
       (c) => {
         if (!current) return;
         setConcept(c);
-        // The edit this note was left with, if the page was taken away from it.
+        // The edit this note was left with, if the page was taken away from it. The note may have been
+        // written meanwhile, by the agent: said, before a save puts the old text over what it learnt.
         const left = readNoteDraft(path);
-        if (left) setDraft(left);
+        if (left) {
+          setDraft(left.draft);
+          setBase(left.base);
+          setChanged(left.base !== baseOf(c));
+        }
       },
       (e: Error) => current && setFailed(e.message),
     );
@@ -529,38 +549,48 @@ function Note({
   const title = f?.title || path.split("/").pop();
   const canChange = writable && !reservedNote(path) && !!concept;
 
-  /** The draft as it starts, from the note as it is. */
-  const started = (c: MemoryConcept): NoteDraft => ({
-    title: String(c.frontmatter?.title ?? ""),
-    type: String(c.frontmatter?.type ?? ""),
-    description: String(c.frontmatter?.description ?? ""),
-    tags: (Array.isArray(c.frontmatter?.tags) ? c.frontmatter.tags : []).map(String).join(", "),
-    body: c.body,
-  });
-  const edit = () => concept && setDraft(started(concept));
-  const changedDraft = !!draft && !!concept && JSON.stringify(draft) !== JSON.stringify(started(concept));
+  const edit = () => {
+    if (!concept) return;
+    setDraft(startedFrom(concept));
+    setBase(baseOf(concept));
+  };
+  const changedDraft = !!draft && !!concept && JSON.stringify(draft) !== JSON.stringify(startedFrom(concept));
   useEffect(() => {
     onEditing(changedDraft);
     return () => onEditing(false);
   }, [changedDraft]);
   // Kept as it changes, for a note that goes away with it: Back, Forward, another page. Not before the note is read, which is when a draft left earlier is brought back.
   useEffect(() => {
-    if (draft && concept) keepNoteDraft(path, changedDraft ? draft : null);
-  }, [path, draft, concept, changedDraft]);
+    if (!draft || !concept) return;
+    if (changedDraft) keepNoteDraft(path, draft, base);
+    else forgetNoteDraft(path);
+  }, [path, draft, concept, changedDraft, base]);
   /** The edit is over, saved or not: nothing of it is to come back. */
   const endEdit = () => {
     setDraft(null);
-    keepNoteDraft(path, null);
+    setChanged(false);
+    forgetNoteDraft(path);
   };
 
-  const save = async () => {
+  /** `anyway` puts the draft over a note that changed since it was started, as the person was told it would. */
+  const save = async (anyway = false) => {
     if (!draft || !concept) return;
     setBusy(true);
     setError(null);
     try {
+      let now = concept;
+      if (!anyway) {
+        // Read again: the agent may have written the note since the edit began, and nothing else would say so.
+        now = await api.memoryConcept(path);
+        if (baseOf(now) !== base) {
+          setConcept(now);
+          setChanged(true);
+          return;
+        }
+      }
       const tags = draft.tags.split(",").map((t) => t.trim()).filter(Boolean);
       // Whatever else its frontmatter says is kept as it was; Understory sets the time.
-      const { timestamp: _t, ...rest } = concept.frontmatter;
+      const { timestamp: _t, ...rest } = now.frontmatter;
       const frontmatter = { ...rest, title: draft.title.trim(), type: draft.type.trim(), description: draft.description.trim(), ...(tags.length ? { tags } : {}) };
       if (!tags.length) delete (frontmatter as Record<string, unknown>).tags;
       const r = await api.saveMemoryNote(path, frontmatter, draft.body);
@@ -611,6 +641,17 @@ function Note({
       <article aria-label={title} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto max-w-3xl">
           {error && <p role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+          {changed && draft && (
+            <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
+              <span className="min-w-0 flex-1">{t("This note changed after you started editing it.")}</span>
+              <button type="button" onClick={endEdit} className="rounded px-1.5 py-0.5 underline hover:text-fg">
+                {t("Load the new version")}
+              </button>
+              <button type="button" onClick={() => void save(true)} disabled={busy} className="rounded px-1.5 py-0.5 underline hover:text-fg disabled:opacity-40">
+                {t("Save mine anyway")}
+              </button>
+            </div>
+          )}
           {failed ? (
             <p role="alert" className="text-sm text-warn">{failed}</p>
           ) : !concept ? (
