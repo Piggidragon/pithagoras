@@ -830,7 +830,7 @@ function Shell({
       )}
 
       {/* Their code is fetched when one opens, and a file that is gone must not take the portal with it. */}
-      <ErrorBoundary resetKey={`${settings}:${setup}`} fallback={<DialogFailed onClose={() => { setSetup(false); if (settings) closeSettings(); }} />}>
+      <ErrorBoundary resetKey={`${settings}:${setup}`} fallback={(error) => <DialogFailed error={error} onClose={() => { setSetup(false); if (settings) closeSettings(); }} />}>
       <Suspense fallback={null}>
         {settings && (
           <ConfigModal

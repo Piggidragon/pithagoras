@@ -31,6 +31,7 @@ import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { useChatPictures } from "./ChatPictures";
 import { confirmDialog } from "./ConfirmDialog";
+import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
 import { lazyComponent } from "../lazy";
@@ -980,6 +981,13 @@ export function Chat({
   // A screen reader is told when a run ends, with the start of the reply it ended on: once, and not
   // as the words stream in, which a live region over the transcript would read out a few at a time.
   const [heard, setHeard] = useState<{ id: string; text: string } | null>(null);
+  // Not kept: back on the chat it was said in, it would be put into the region again, and read out as a run that had just ended.
+  useEffect(() => {
+    if (!heard) return;
+    const timer = setTimeout(() => setHeard(null), 10_000);
+    return () => clearTimeout(timer);
+  }, [heard]);
+  useEffect(() => setHeard(null), [session.id]);
   const wasRunning = useRef({ id: session.id, running });
   useEffect(() => {
     const before = wasRunning.current;
@@ -1536,9 +1544,12 @@ export function Chat({
           </div>
           {shellStarted && (
             <div className={terminalTab === "shell" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-              <Suspense fallback={null}>
-                <TerminalPanel sessionId={session.id} />
-              </Suspense>
+              {/* Its code is fetched when the tab is first opened: a file that is gone must not take the chat with it. */}
+              <ErrorBoundary resetKey={session.id} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
+                <Suspense fallback={null}>
+                  <TerminalPanel sessionId={session.id} />
+                </Suspense>
+              </ErrorBoundary>
             </div>
           )}
         </div>

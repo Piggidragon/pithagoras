@@ -7,6 +7,7 @@ import { test, expect, mockPortal, reply } from './portal-mock';
  */
 
 const session = { id: 'demo', title: 'A chat', workspace: '/workspaces/demo', status: 'idle', kind: 'task', pinned: false };
+const other = { ...session, id: 'other', title: 'Another chat' };
 const commands = [
   { name: 'compact', description: 'Summarise the conversation', source: 'builtin', where: 'server' },
   { name: 'settings', description: 'Open settings', source: 'builtin', where: 'client' },
@@ -21,8 +22,9 @@ async function portal(page: Page, opts: { password?: boolean } = {}) {
   await mockPortal(page, ({ path: p, method }) => {
     if (opts.password && p === '/api/auth/status') return { authRequired: true, authed: false };
     if (opts.password && p === '/api/auth/login') return reply(401, { error: 'Wrong password' });
-    if (p === '/api/sessions') return { sessions: [{ ...session, status: live.status }], executor: 'host' };
+    if (p === '/api/sessions') return { sessions: [{ ...session, status: live.status }, other], executor: 'host' };
     if (p === `/api/sessions/${session.id}`) return { ...session, status: live.status };
+    if (p === `/api/sessions/${other.id}`) return other;
     if (p.endsWith('/commands')) return { commands };
     if (p.endsWith('/config')) return { live: false, state: { model: { id: 'test', name: 'Test', provider: 'local' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: [] }, models: { models: [] } };
     if (p.endsWith('/canvases')) return [];
@@ -58,6 +60,26 @@ test('a run that ends is announced once, with the start of what it answered', as
   // The status comes at once, and the reply is drawn a frame later: it is the reply that is said, not the lack of one.
   await say(page, { type: 'portal_status', payload: { status: 'idle' } }, 3);
   await expect(announcer(page)).toHaveText('The build is green.');
+});
+
+test('a run that ended is not announced again when its chat is opened again', async ({ page }) => {
+  await portal(page);
+  await opened(page);
+  await say(page, { type: 'portal_status', payload: { status: 'running' } }, 1);
+  await say(page, { type: 'message_end', payload: { streamId: 'r1', message: { role: 'assistant', content: [{ type: 'text', text: 'The build is green.' }] } } }, 2);
+  await say(page, { type: 'portal_status', payload: { status: 'idle' } }, 3);
+  await expect(announcer(page)).toHaveText('The build is green.');
+
+  // Another chat, and back by the browser's own way, which keeps the page and its state.
+  const go = (to: string) => page.evaluate((url) => { history.pushState({}, '', url); dispatchEvent(new PopStateEvent('popstate')); }, to);
+  await go('/s/other');
+  await expect(page.getByRole('heading', { name: 'Another chat' }).first()).toBeVisible();
+  await go('/s/demo');
+  await expect(page.getByRole('heading', { name: 'A chat' }).first()).toBeVisible();
+  // Said once. What was said then is not said as news now, and not a moment later either.
+  await expect(announcer(page)).toHaveText('');
+  await page.waitForTimeout(400);
+  await expect(announcer(page)).toHaveText('');
 });
 
 test('a run that ends without a reply says so', async ({ page }) => {

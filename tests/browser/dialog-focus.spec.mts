@@ -80,6 +80,28 @@ test("an extension's question takes focus, keeps Tab inside, and gives focus bac
   await expect(composer).toBeFocused();
 });
 
+test("after two questions that came together, focus goes back to the composer, as after one", async ({ page }) => {
+  const { answered } = await portal(page);
+  await page.goto('/s/a');
+  const composer = page.getByLabel('Message', { exact: true });
+  await composer.focus();
+  await caughtUp(page);
+  await page.evaluate(() => {
+    const stream = (window as any).streams.filter((s: any) => !s.closed).at(-1);
+    stream.emit('message', { seq: -1, type: 'extension_ui_request', payload: { id: 'q1', method: 'confirm', title: 'First?', message: 'one' } });
+    stream.emit('message', { seq: -2, type: 'extension_ui_request', payload: { id: 'q2', method: 'confirm', title: 'Second?', message: 'two' } });
+  });
+  await page.getByRole('dialog', { name: 'First?' }).getByRole('button', { name: 'Yes' }).click();
+  // The second is drawn in the commit that removes the first, from the button that answered it.
+  const second = page.getByRole('dialog', { name: 'Second?' });
+  await expect(second).toBeVisible();
+  await expect.poll(() => focusIn(page, 'Second?')).toBe(true);
+  await second.getByRole('button', { name: 'Yes' }).click();
+  await expect(second).toBeHidden();
+  expect(answered).toEqual([{ id: 'q1', value: true }, { id: 'q2', value: true }]);
+  await expect(composer).toBeFocused();
+});
+
 test('the phone drawer is a dialog that keeps the keyboard, and is only that while it covers the page', async ({ page }) => {
   await portal(page);
   await page.setViewportSize({ width: 375, height: 812 });
