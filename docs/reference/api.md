@@ -88,7 +88,7 @@ out of it, by `..` or by a link, is refused with 400.
 | `GET /api/sessions/:id/file?path=` | `{ binary: false, size, mtime, content }`, or `{ binary: true, size, mtime }` for what is not text or is over 1 MB |
 | `GET /api/sessions/:id/file?path=&download=1` | The file, as a download |
 | `GET /api/sessions/:id/picture?path=` | A PNG, JPEG, GIF or WebP in the folder, to be drawn in the page, with the type its first bytes say it is and a `sandbox` content security policy. 400 for anything that is not one of those four, whatever its name; 413 over 25 MB. The Files panel, canvases and `show_image` use it |
-| `PUT /api/sessions/:id/file?path=` | `{ content, mtime? }` → saves it. With `mtime`, the time it was read at, the save is refused with 409 if the file has changed since. 413 over 1 MB |
+| `PUT /api/sessions/:id/file?path=` | `{ content, mtime? }` → saves it. With `mtime`, the time it was read at, the save is refused with 409 and `code: "conflict"` if the file has changed since. 413 over 1 MB. Every refusal of the file routes answers `{ error, code }` with `code` one of `invalid`, `missing`, `conflict`, `exists`, `too_large`, `failed` and `unsaved-work` |
 | `PUT /api/sessions/:id/file?path=` with `create: true` | `{ content, create: true }` → makes the file, and refuses with 409 if something already has the name |
 | `POST /api/sessions/:id/folder?path=` | `{ name }` → makes a folder in the folder at `path`, answers `{ path }`. 409 if the name is taken |
 | `POST /api/sessions/:id/upload?path=&name=` | The file as the request body, sent as `application/octet-stream` → put in the folder at `path` as `name`, or `name (2)` and so on if that is taken; answers `{ path, size }`. Streamed to disk and put in place only once complete. 413 over 2 GB |
@@ -105,7 +105,7 @@ out of it, by `..` or by a link, is refused with 400.
 | `GET /api/sessions/:id/images/:name` | A picture sent with a message; `portal_prompt` events name them in `payload.images` |
 | `POST /api/sessions/:id/abort` | Stop the current run |
 | `POST /api/sessions/:id/ui-response` | `{ id, value?, cancelled? }` — answer an extension dialog |
-| `GET /api/tools` | `{ tools, off }` — every tool the portal has seen, and which are off by default |
+| `GET /api/tools` | `{ tools, off }` — every tool the portal has seen, and which are off by default. With `EXECUTOR=container` this and the other tool routes answer 400 with `code: "tools-unsupported"` |
 | `PUT /api/tools` | `{ off: string[] }` — the default for every conversation; applied to the running ones too. A [project](#projects) can bend it with `PUT /api/projects/:name/tools`, and a conversation then holds its exceptions against that |
 | `GET /api/sessions/:id/tools` | `{ tools, live, off }` — every tool the conversation could use and whether it is on. `live` is false when pi is not running to be asked |
 | `PUT /api/sessions/:id/tools` | `{ off: string[] }` — switch tools off by name; everything not named is on |
@@ -249,7 +249,7 @@ See [Models and providers](/guide/models).
 | | |
 | --- | --- |
 | `GET /api/browser` | State, connection and settings |
-| `POST /api/browser/install` · `/start` · `/stop` | Lifecycle of the managed container |
+| `POST /api/browser/install` · `/start` · `/stop` | Lifecycle of the managed container. A second install while one is running is refused with 409. Installing wires the agent to the browser and removing unwires it |
 | `DELETE /api/browser/install` | Remove it; `?profile=forget` drops the logins too |
 | `POST /api/browser/connect` · `DELETE /api/browser/connect` | Give the agent the browser's tools, or take them away |
 | `PUT /api/browser/config` · `GET /api/browser/suggest-password` | The login of the browser view; a suggestion |
@@ -435,7 +435,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | Route | Purpose |
 | --- | --- |
 | `GET /api/mcp` | Read configured servers and settings. |
-| `PUT /api/mcp/servers/:name` | Add or update a server. |
+| `PUT /api/mcp/servers/:name` | Add or update a server. `{ entry, from? }`: with `from` it is a rename. A name that another server has is refused with 409 and `code: "exists"`. |
 | `DELETE /api/mcp/servers/:name` | Remove a server. |
 | `PUT /api/mcp/settings` | Update MCP settings. |
 | `POST /api/mcp/import` | Import server configuration. |
