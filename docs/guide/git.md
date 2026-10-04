@@ -77,6 +77,21 @@ The button says what it will do:
 
 Committing is refused while files are in conflict.
 
+A commit needs a name and an email, which git reads from its own configuration.
+In the container nothing has set them, and its host name has no domain for git to
+guess an address from, so the first **Commit** on a fresh install is refused with
+git's *Author identity unknown*. Set them once, in [your shell](/guide/terminal#your-shell)
+in the portal:
+
+```sh
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+They are kept in `/data/home`, the portal's home folder on the data volume, so
+they stay across updates. A repository with its own identity (`git config` there,
+without `--global`) keeps it.
+
 ### Stashes
 
 When there are stashes, a line at the bottom of Changes counts them. Open it for

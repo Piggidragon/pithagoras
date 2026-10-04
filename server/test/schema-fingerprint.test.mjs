@@ -103,6 +103,14 @@ test("the fixtures are kept without a write-ahead log, so that looking into one 
   }
 });
 
+// A fixture is made on somebody's machine, and ships with the repository: nothing in it may say whose, or where.
+test("the fixtures carry no folder of the machine they were made on", () => {
+  for (const name of ["portal-v2.db", "portal-unversioned.db"]) {
+    const bytes = readFileSync(new URL(`./fixtures/${name}`, import.meta.url)).toString("latin1");
+    assert.doesNotMatch(bytes, /\/(?:home|tmp|Users|root)\/[\w.-]/, name);
+  }
+});
+
 // fixtures/portal-v2.db was made by the code of the release before this one (d2b6fcc, SCHEMA_VERSION 2): a chat with two
 // messages and their answers, a stored canvas, two pictures of which one is an edit of the other, a person with notes, and a saved voice.
 test("a database at the schema before this one is checked and backed up, brought to the pinned schema, and keeps what it held", async () => {
@@ -138,6 +146,7 @@ test("a database at the schema before this one is checked and backed up, brought
   assert.deepEqual(d.prepare("SELECT id, source_id FROM images ORDER BY id").all(), [{ id: "img1", source_id: null }, { id: "img2", source_id: "img1" }]);
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM events WHERE session_id = 'chat1'").get().n, 4);
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM voice_presets").get().n, 1);
+  assert.deepEqual(d.prepare("SELECT id, home FROM agents").all(), [{ id: "home", home: "/data/home" }], "the agent's folder is a neutral one");
   d.close();
 
   // And the portal reads it.

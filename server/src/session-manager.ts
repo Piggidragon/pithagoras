@@ -2141,7 +2141,9 @@ class SessionManager extends EventEmitter {
         // An extension is blocking on an answer. Handed straight over: whoever
         // is asking has to put the question somewhere a human will see it.
         case "extension_ui_request":
-          flush();
+          // Only a question ends the text so far. A status line or a widget
+          // lands anywhere, mid-word included, and cut the reply there.
+          if (isDialog(payload.method)) flush();
           onUi?.(payload);
           break;
 
