@@ -13,11 +13,14 @@ import { fileURLToPath } from "node:url";
 // in it.
 
 const root = mkdtempSync(path.join(tmpdir(), "pithagoras-web-static-"));
-const dist = path.join(root, "dist");
-const outside = path.join(root, "secret.txt");
+// Below a dot folder, as a build kept under `~/.pithagoras` is: Express takes a
+// file with one in its path for hidden and answers 404, unless it is told the root.
+const dist = path.join(root, ".pithagoras", "web", "dist");
+const outside = path.join(root, ".pithagoras", "secret.txt");
 mkdirSync(path.join(dist, "assets"), { recursive: true });
 mkdirSync(path.join(dist, "voice-assets"));
 writeFileSync(outside, "not for the web");
+writeFileSync(path.join(dist, ".hidden.js"), "export const secret = 1;\n".repeat(200));
 const script = "export const answer = 42;\n".repeat(200);
 const wasm = Buffer.alloc(20_000, 7);
 writeFileSync(path.join(dist, "assets", "app-AbC123.js"), script);
@@ -138,4 +141,21 @@ test("nothing outside the built files is reached by a path that climbs out of th
     assert.notEqual(res.body.toString(), "x".repeat(2000), url);
     assert.ok(!res.body.toString().includes("not for the web"), url);
   }
+});
+
+test("a build below a dot folder is served, and a hidden file inside it still is not", async () => {
+  // The compressed copy is the proof: sent as a copy, not as the plain file a failed copy falls back to.
+  const res = await get("/voice-assets/model.wasm", { "accept-encoding": "br" });
+  assert.equal(res.headers["content-encoding"], "br");
+  const hidden = await get("/.hidden.js", { "accept-encoding": "br" });
+  const body = hidden.headers["content-encoding"] === "br" ? brotliDecompressSync(hidden.body) : hidden.body;
+  assert.ok(!body.toString().includes("secret"));
+});
+
+test("an address that is no file is the page, and a built file that is gone is not", async () => {
+  const route = await get("/sessions/abc");
+  assert.equal(route.status, 200);
+  assert.match(route.body.toString(), /<title>app<\/title>/);
+  assert.equal((await get("/assets/removed-Zz9.js")).status, 404);
+  assert.equal((await get("/api/nothing")).status, 404);
 });

@@ -877,7 +877,9 @@ app.get("/api/sessions/:id/images/:name", (req, res) => {
   res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.type(mimeOf(req.params.name)!);
-  res.sendFile(file);
+  // The name was checked and the file looked at above, so a dot folder further up
+  // (`~/.local/share`) is no reason for Express to treat it as hidden and answer 404.
+  res.sendFile(file, { dotfiles: "allow" });
 });
 
 /** The browser answering a dialog an extension is waiting on. */
@@ -1369,10 +1371,6 @@ const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 if (existsSync(webDist)) {
   app.use(portalSecurityHeaders);
   serveWeb(app, webDist);
-  // A built file that is not there is a 404, not the page: a tab from before a
-  // deploy asking for a chunk the deploy removed would otherwise be handed
-  // HTML under a script's name, and the service worker would keep it.
-  app.get(/^(?!\/api|\/assets\/).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }
 
 /**

@@ -44,7 +44,7 @@ const HASHED = "/assets/";
 /**
  * Serves the built web app: each file as its `.br` or `.gz` copy where the build left
  * one and the browser takes it, and a long-lived cache for what is named by its
- * content.
+ * content. An address that is no file (and no `/api` one) is the page itself.
  *
  * Served as they were, a portal on plain HTTP — where no service worker keeps a
  * copy — sent about two megabytes of script on every cold load, and the voice
@@ -74,7 +74,10 @@ export function serveWeb(app: express.Application, root: string): void {
     // Of the file, not of its copy.
     res.type(path.extname(file));
     const hashed = asked.startsWith(HASHED);
-    res.sendFile(file + copy.ext, {
+    // Named from the root, so that a dot folder above the build (`~/.pithagoras`)
+    // is not taken for a hidden file, which Express answers with a 404.
+    res.sendFile(path.relative(root, file) + copy.ext, {
+      root,
       maxAge: hashed ? "1y" : 0,
       immutable: hashed,
       // A range of what is sent is a range of the compressed bytes.
@@ -88,4 +91,8 @@ export function serveWeb(app: express.Application, root: string): void {
   });
   app.use(HASHED.slice(0, -1), express.static(path.join(root, "assets"), { immutable: true, maxAge: "1y", index: false }));
   app.use(express.static(root));
+  // A built file that is not there is a 404, not the page: a tab from before a
+  // deploy asking for a chunk the deploy removed would otherwise be handed
+  // HTML under a script's name, and the service worker would keep it.
+  app.get(/^(?!\/api|\/assets\/).*/, (_req, res) => res.sendFile("index.html", { root }));
 }

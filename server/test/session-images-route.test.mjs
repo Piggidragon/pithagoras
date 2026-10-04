@@ -9,7 +9,11 @@ import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs
  * served while the chat exists, and not after it is gone, whatever a failed
  * clean-up left on the disk.
  */
-const home = testHome("pithagoras-image-route-");
+// The data folder is below a dot folder, as it is for `~/.pithagoras` or
+// `~/.local/share/...`: Express takes a file under one for hidden and answers 404.
+const home = path.join(testHome("pithagoras-image-route-"), ".pithagoras");
+mkdirSync(path.join(home, "agent"), { recursive: true });
+mkdirSync(path.join(home, "agent-home"), { recursive: true });
 process.env.DATA_DIR = home;
 const { createSession, getDb } = await import("../dist/db.js");
 
