@@ -17,7 +17,7 @@ curl -s -b jar localhost:4100/api/sessions
 
 | | |
 | --- | --- |
-| `GET /api/auth/status` | `{ authRequired, authed }` |
+| `GET /api/auth/status` | `{ authRequired, authed, shortPassword? }`. `shortPassword: true` is sent only to a signed-in caller, and only when the portal runs on a password shorter than 8 characters that it kept from before the minimum |
 | `POST /api/auth/login` | `{ password }` → sets the cookie |
 | `POST /api/auth/logout` | clears the cookie, and refuses the login it held from then on |
 

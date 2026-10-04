@@ -42,6 +42,9 @@ async function openShell(t) {
   return id;
 }
 
+/** What the page is first sent on a connection that has output to replay: a full reset (ESC c) of its screen. */
+const RESET = "\x1bc";
+
 /** Waits until `value()` has not changed for `quietMs`: a command that is held back has stopped writing. */
 async function settled(value, quietMs = 300) {
   let last = value();
@@ -212,7 +215,18 @@ test("the scrollback a client that connects late is given is the end of what was
   await read(id, /00029\r?\nDONE-WRITING/);
   const text = await read(id, /00029\r?\nDONE-WRITING/);
   assert.match(text, /00029\r?\nDONE-WRITING/);
-  assert.equal(text.length, 200_000);
+  assert.equal(text.length, RESET.length + 200_000);
+});
+
+test("a page that connects again is given the screen to start over from, so what it showed is not drawn twice", async (t) => {
+  const id = await openShell(t);
+  await post(`/terminal/${id}/input`, { data: "echo SHOWN-$((6*7))\n" });
+  const first = await read(id, /SHOWN-42\r?\n/);
+  assert.match(first, /SHOWN-42/, "the first connection showed it");
+  // The page's EventSource reconnects by itself, to the same address, and writes what it is sent into the screen it has.
+  const again = await read(id, /SHOWN-42\r?\n/);
+  assert.ok(again.startsWith(RESET), "the replay begins with a full reset, which clears that screen");
+  assert.equal(again.split("SHOWN-42").length - 1, 1, "and the output is in it once");
 });
 
 test("closing a terminal ends what it started, even what ignores the hangup", async (t) => {

@@ -278,7 +278,7 @@ export function terminalRouter(): Router {
     });
 
     let stall: NodeJS.Timeout | undefined;
-    /** Ends this client's stream; its page opens a new one, and is given the scrollback. */
+    /** Ends this client's stream; its page opens a new one, and is given the scrollback to start over from. */
     const drop = () => res.destroy();
     const send: Listener = (chunk) => {
       const room = res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -296,8 +296,10 @@ export function terminalRouter(): Router {
       return false;
     };
     term.listeners.add(send);
-    // What is already on screen, so reconnecting does not show an empty shell.
-    if (term.scrolled) send(term.scrollback.join(""));
+    // What is already on screen, so reconnecting does not show an empty shell. After a full reset (ESC c): a
+    // page that reconnects still has what it showed, and the replay, which can start in the middle of an
+    // escape sequence, is the whole screen, not more of it.
+    if (term.scrolled) send("\x1bc" + term.scrollback.join(""));
     watchUnattended(term);
     // Without traffic a proxy takes an idle shell for a dead connection.
     const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
