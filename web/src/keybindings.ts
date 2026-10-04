@@ -193,9 +193,9 @@ export function matches(binding: Binding | null, e: { code: string; ctrlKey?: bo
   return same(binding, bindingOf(e) ?? null);
 }
 
+/** The keys that are a symbol, the same in every language: the ones with a word for a name are in SPOKEN. */
 const NAMES: Record<string, string> = {
-  Space: "Space", Escape: "Esc", Enter: "Enter", Backspace: "Backspace", Tab: "Tab", Delete: "Del",
-  ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Home: "Home", End: "End", PageUp: "Page up", PageDown: "Page down",
+  ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
   Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'", BracketLeft: "[", BracketRight: "]", Backslash: "\\", Minus: "-", Equal: "=", Backquote: "`",
 };
 

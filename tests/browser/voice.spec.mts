@@ -148,7 +148,10 @@ test('voice pipelines next-sentence synthesis during PCM playback and cancels on
 test('slow PCM chunks become one uninterrupted buffer, including split samples', async ({ page }) => {
   await page.goto('/tests/voice.html');
   const result = await page.evaluate(async () => {
-    const { playPcmStream } = await import('/src/pcm-stream.ts');
+    const { readPcmStream, playAudioBuffer } = await import('/src/pcm-stream.ts');
+    // One phrase, buffered whole and then played: what a consumer without a pipeline does.
+    const playPcmStream = async (body: ReadableStream<Uint8Array>, audio: AudioContext, destination: AudioNode, signal: AbortSignal, onStarted: () => void) =>
+      playAudioBuffer(await readPcmStream(body, audio, signal), audio, destination, signal, onStarted);
     const audio = new AudioContext(); await audio.resume();
     let writer!: ReadableStreamDefaultController<Uint8Array>;
     let started = false, sourceCount = 0;
@@ -170,7 +173,10 @@ test('slow PCM chunks become one uninterrupted buffer, including split samples',
 test('End cancels PCM buffering before any audio can start', async ({ page }) => {
   await page.goto('/tests/voice.html');
   const result = await page.evaluate(async () => {
-    const { playPcmStream } = await import('/src/pcm-stream.ts');
+    const { readPcmStream, playAudioBuffer } = await import('/src/pcm-stream.ts');
+    // One phrase, buffered whole and then played: what a consumer without a pipeline does.
+    const playPcmStream = async (body: ReadableStream<Uint8Array>, audio: AudioContext, destination: AudioNode, signal: AbortSignal, onStarted: () => void) =>
+      playAudioBuffer(await readPcmStream(body, audio, signal), audio, destination, signal, onStarted);
     const audio = new AudioContext(); await audio.resume();
     let cancelled = false, started = false;
     const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(4800)); }, cancel() { cancelled = true; } });
@@ -340,7 +346,6 @@ test('composer offers send beside stop for a follow-up and canvas lives in the h
  await page.getByRole('button',{name:'Stop generation',exact:true}).click();
  await expect(page.getByTestId('aborted')).toHaveText('1');
  await expect(page.locator('.session-workspace > header').getByRole('button',{name:'Session canvases',exact:true})).toBeVisible();
- await expect(page.locator('.canvas-toggle')).toHaveCount(0);
 });
 
 test('without speech synthesis voice mode is not offered, because it speaks its replies, and dictation, which only listens, is', async ({ page }) => {

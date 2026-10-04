@@ -1,6 +1,6 @@
 // Development-only fixture: the places that count a running time, shown with nothing running until "Start".
 // Start makes an agent and a job that began three seconds ago, so each must say "3s" the moment it is drawn.
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RunningTray } from '../src/components/RunningTray';
 import { SubagentPanel } from '../src/components/SubagentPanel';

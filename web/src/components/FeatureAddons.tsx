@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuWandSparkles } from "react-icons/lu";
-import { api, type AvailableModel, type Features, type ImagesFeature, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
 import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";

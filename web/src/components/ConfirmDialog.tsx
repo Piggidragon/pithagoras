@@ -13,7 +13,7 @@ import { t } from "../i18n";
  *
  *   if (await confirmDialog({ title: "Delete it?", danger: true })) …
  */
-export interface ConfirmOptions {
+interface ConfirmOptions {
   title: string;
   message?: ReactNode;
   /** What the button says. "OK" tells nobody what it is about to do. */

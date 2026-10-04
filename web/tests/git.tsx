@@ -11,7 +11,7 @@
 // anyway, ?branch=<name> for another branch checked out. window.stateFails = true makes reading the repository
 // fail, as a portal that cannot be reached would. window.moveHead() moves HEAD, as a commit in the shell would.
 // What the panel asked for is in window.gitCalls; window.agentWrote() changes a file the way the agent would.
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../src/styles';
 import { GIT_TABS, GitPanel, type GitTab } from '../src/components/git/GitPanel';

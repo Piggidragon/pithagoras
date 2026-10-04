@@ -4,7 +4,7 @@ import { followPointer } from "../pointer-drag";
 import { STEP, arrowSteps } from "../resize-keys";
 
 import { t } from "../i18n";
-export type Edge = "e" | "w" | "s" | "se" | "sw";
+type Edge = "e" | "w" | "s" | "se" | "sw";
 
 /**
  * Where a window sits is decided by the voice stage's layout — centred, at
@@ -17,7 +17,7 @@ export type Edge = "e" | "w" | "s" | "se" | "sw";
  * its own corner, so it is only given a size: its left edge and its bottom
  * move, and the corner stays.
  */
-export type ResizeMode = "pin" | "anchored";
+type ResizeMode = "pin" | "anchored";
 
 /**
  * Sized by hand, and how: `data-sized` holds the ResizeMode — whether the
@@ -50,7 +50,7 @@ export function openWindows(root: ParentNode): HTMLElement[] {
 /** The chat's workspace: the voice stage's windows and the canvas are all in it. */
 export const workspaceOf = (el: Element) => el.closest<HTMLElement>(".session-workspace");
 /** The chat's voice stage, for a window in it or for the canvas, which hangs beside it. */
-export const stageOf = (el: Element) => el.closest<HTMLElement>(".voice-stage") ?? workspaceOf(el)?.querySelector<HTMLElement>(".voice-stage") ?? null;
+const stageOf = (el: Element) => el.closest<HTMLElement>(".voice-stage") ?? workspaceOf(el)?.querySelector<HTMLElement>(".voice-stage") ?? null;
 
 /**
  * How far a window's edges may go, in the page's coordinates: inside the area

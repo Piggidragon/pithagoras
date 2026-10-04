@@ -167,7 +167,6 @@ export const GitPanel = memo(function GitPanel({
     return {
       id: sessionId,
       repo: { ...state, gh },
-      reload: () => reload(),
       act,
       busy,
       show: (view) => setStack((s) => [...s, view]),

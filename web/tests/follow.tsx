@@ -1,7 +1,7 @@
 // Development-only fixture: a box kept at its end by useFollowBottom, on its own. Its entries are its own
 // children, as the terminal's runs are, not a list inside it; `window.redraw()` draws the box again as another
 // element, as a component that shows something else for a while does, and `window.grow(px)` adds to its end.
-import React, { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useFollowBottom } from '../src/use-follow-bottom';
 

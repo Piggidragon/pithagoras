@@ -1,17 +1,6 @@
 import { t } from "./i18n";
 import type { Item } from "./transcript";
 
-/** Only new completed replies, even when older history is paged into view. */
-export function newSpeech(items: Item[], afterSeq: number, seen: Set<string>): string[] {
-  const chunks: string[] = [];
-  for (const item of items) {
-    if (item.kind !== "assistant" || !item.done || Number(item.id.slice(1)) <= afterSeq || seen.has(item.id)) continue;
-    seen.add(item.id);
-    chunks.push(...speechChunks(item.text));
-  }
-  return chunks;
-}
-
 /** Keep code blocks and link destinations out of speech; split without losing text. */
 export function speechChunks(text: string): string[] {
   const plain = text.replace(/```[\s\S]*?(?:```|$)/g, () => ` ${t("Code is shown in the transcript.")} `)

@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { LIMITS, OUTPUT_FORMATS, appendPage, fieldsText, madeButNotListed, mergeTop, noFields, readFilter, readForm, sameList, settingsBody, sizeParts, tiles, viewerList, viewerPicture } from "../web/src/images-gallery.ts";
+import { LIMITS, OUTPUT_FORMATS, appendPage, fieldsText, madeButNotListed, mergeTop, readFilter, readForm, sameList, settingsBody, sizeParts, tiles, viewerList, viewerPicture } from "../web/src/images-gallery.ts";
 import { LIMITS as portalLimits, OUTPUT_FORMATS as portalFormats } from "../server/src/image-settings.ts";
 import type { GalleryPicture, PictureJob } from "../web/src/api.ts";
+
+/** Every field empty, as a form that was kept nothing starts. */
+const noFields = () => readForm(null, 1).make;
 
 let n = 0;
 const picture = (over: Partial<GalleryPicture> = {}): GalleryPicture => {

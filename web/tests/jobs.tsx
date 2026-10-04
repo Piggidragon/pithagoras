@@ -1,5 +1,4 @@
 // Development-only fixture: one running background job whose output is read over the network, so that a test can answer it as it likes.
-import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BackgroundJobs } from '../src/components/BackgroundJobs';
 import type { BackgroundJob } from '../src/api';

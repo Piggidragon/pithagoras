@@ -18,7 +18,7 @@
  */
 export type Dock = "right" | "left" | "bottom" | "float";
 
-export const DOCKS: Dock[] = ["right", "left", "bottom", "float"];
+const DOCKS: Dock[] = ["right", "left", "bottom", "float"];
 
 export const isDock = (value: unknown): value is Dock => DOCKS.includes(value as Dock);
 
@@ -55,7 +55,7 @@ export function dockedSize(want: { width: number; height: number }, area: { w: n
 export type Frame = { x: number; y: number; w: number; h: number };
 
 /** Smaller than this a panel is no use: a header and a few lines. */
-export const FRAME_MIN = { w: 320, h: 200 };
+const FRAME_MIN = { w: 320, h: 200 };
 /** Kept clear around a floating window placed for the first time. */
 const MARGIN = 16;
 

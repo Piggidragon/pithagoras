@@ -642,11 +642,6 @@ function summarizeToolInput(p: any): string | undefined {
   return argsSummary(input);
 }
 
-/** Highest seq seen, so a reconnect resumes exactly where the stream left off. */
-export function lastSeq(events: PortalEvent[]): number {
-  return events.length ? events[events.length - 1].seq : 0;
-}
-
 /**
  * Which phase the agent is in. These are ids that the status line, the voice
  * stage and the progress card compare against, not wording: each of them says

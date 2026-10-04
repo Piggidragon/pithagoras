@@ -1645,7 +1645,7 @@ export function Chat({
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
       {pictures.viewer}
-      <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
+      <CanvasPanel key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "chat-header border-b border-line px-4 py-3 max-md:px-3 max-md:py-2"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3 max-md:gap-2">

@@ -484,7 +484,7 @@ function ArgValue({ value, depth }: { value: unknown; depth: number }): ReactNod
  * short, is not. Nor is one with a number too long for JavaScript to hold —
  * an id, most often — which read back would be shown as another number.
  */
-export function jsonOutput(output: string): object | undefined {
+function jsonOutput(output: string): object | undefined {
   const t = output.trim();
   // Sixteen digits or more in a row, a point or two among them: more than a
   // JavaScript number holds, whole or after the point. A string with as many

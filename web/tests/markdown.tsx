@@ -1,6 +1,6 @@
 // Development-only fixture: the portal's markdown, drawn the way a reply is, inside a page that can be drawn again.
 // Open /tests/markdown.html?text=<markdown>. `Redraw` draws the page again with what it passes unchanged; `window.drawn` counts the draws of the markdown and of Streamdown in it (see the html).
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Streamdown } from 'streamdown';
 import { Markdown } from '../src/components/Markdown';

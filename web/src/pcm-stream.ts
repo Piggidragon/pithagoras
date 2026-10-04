@@ -101,12 +101,6 @@ export async function playAudioBuffer(buffer: AudioBuffer, audio: AudioContext, 
   });
 }
 
-/** Combined helper for consumers that only have one phrase. */
-export async function playPcmStream(body: ReadableStream<Uint8Array>, audio: AudioContext, destination: AudioNode, signal: AbortSignal, onStarted: (scheduledAt?:number) => void, options: SpeechOptions = {}): Promise<void> {
-  const buffer = await readPcmStream(body, audio, signal, options);
-  await playAudioBuffer(buffer, audio, destination, signal, onStarted);
-}
-
 /** Start from a small PCM cushion while the producer continues generating. */
 export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: AudioContext, signal: AbortSignal, options: SpeechOptions = {}) {
   const reader = body.getReader();

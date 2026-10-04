@@ -87,7 +87,7 @@ export function History() {
   );
 }
 
-export function CommitList({ commits }: { commits: Commit[] }) {
+function CommitList({ commits }: { commits: Commit[] }) {
   const { show } = useGit();
   return (
     <ul>

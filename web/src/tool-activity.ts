@@ -126,7 +126,7 @@ export function describeCall(payload: any, folder: string): ToolCall {
 }
 
 /** What a tool said back, as text. */
-export function resultText(payload: any): string {
+function resultText(payload: any): string {
   const content = payload?.result?.content;
   if (Array.isArray(content)) return content.filter((c: any) => c?.type === "text").map((c: any) => text(c.text)).join("\n");
   return text(payload?.result) || text(payload?.error);

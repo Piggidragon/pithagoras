@@ -186,8 +186,6 @@ export interface Fields {
 
 export type FieldName = keyof Fields;
 
-export const noFields = (): Fields => ({ model: "", width: "", height: "", negativePrompt: "", outputFormat: "", outputCompression: "", seed: "", sampleSteps: "", strength: "", fromNoise: false });
-
 /** What is wrong with a setting, as a code that the form says in words. */
 export type Problem = "size-pair" | "size-range" | "compression-range" | "seed" | "steps" | "strength" | "negative-long";
 

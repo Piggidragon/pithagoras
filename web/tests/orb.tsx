@@ -1,6 +1,6 @@
 // Development-only fixture: avatars as the app shows them (the canvas overscans its box by 43%): one large, one the size of a thumbnail, and one far below the
 // page's first screen (scroll to #away to bring it in). See orb.html for how the frames are counted.
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { VoiceOrb } from '../src/components/VoiceOrb';
 import { DEFAULT_ORB } from '../../server/src/orb-style';

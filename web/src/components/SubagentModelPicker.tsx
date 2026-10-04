@@ -4,7 +4,7 @@ import { load, peek, useCached } from "../settings-cache";
 import { Select } from "./Select";
 import { t } from "../i18n";
 
-export interface SubagentChoice {
+interface SubagentChoice {
   /** The subagent tool is on: there is something to decide. */
   on: boolean;
   /** This chat's own choice (null follows `default`), once known. */

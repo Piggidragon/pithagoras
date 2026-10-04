@@ -228,8 +228,6 @@ export function Segments<T extends string>({
   );
 }
 
-export const LEVELS = EFFORT_LEVELS;
-
 /**
  * How hard a model thinks, as a row of levels. `inherited` is the level that
  * applies when none is picked; clicking the picked one again hands it back.
@@ -237,7 +235,7 @@ export const LEVELS = EFFORT_LEVELS;
 export function EffortPicker({ value, inherited, onChange, label }: { value: string; inherited?: string; onChange: (level: string) => void; label?: string }) {
   return (
     <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={label ?? t("Effort")}>
-      {LEVELS.map((lvl) => {
+      {EFFORT_LEVELS.map((lvl) => {
         const on = value === lvl;
         const fallback = !value && inherited === lvl;
         return (

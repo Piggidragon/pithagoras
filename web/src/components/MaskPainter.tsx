@@ -27,21 +27,14 @@ async function base64(blob: Blob): Promise<string> {
  * Painting is with a pointer or a finger; the mask is optional, and without it
  * the whole picture may change.
  */
-export const MaskPainter = forwardRef<MaskHandle, { src: string; onPainted?: (painted: boolean) => void }>(function MaskPainter({ src, onPainted }, ref) {
+export const MaskPainter = forwardRef<MaskHandle, { src: string }>(function MaskPainter({ src }, ref) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const last = useRef<{ x: number; y: number } | null>(null);
-  const painted = useRef(false);
   const [brush, setBrush] = useState(10);
   const [erase, setErase] = useState(false);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-
-  const say = (value: boolean) => {
-    if (painted.current === value) return;
-    painted.current = value;
-    onPainted?.(value);
-  };
 
   // The paint is as large as the picture's shape and `LONGEST` allow, and as large on the screen as the picture is.
   const size = (el: HTMLImageElement) => {
@@ -49,7 +42,6 @@ export const MaskPainter = forwardRef<MaskHandle, { src: string; onPainted?: (pa
     const c = canvas.current!;
     c.width = Math.max(1, Math.round(el.naturalWidth * scale));
     c.height = Math.max(1, Math.round(el.naturalHeight * scale));
-    say(false);
     setReady(true);
   };
 
@@ -83,7 +75,6 @@ export const MaskPainter = forwardRef<MaskHandle, { src: string; onPainted?: (pa
     last.current = p;
     // A tap is a dot.
     stroke(p, p);
-    if (!erase) say(true);
   };
   const move = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!last.current) return;
@@ -98,7 +89,6 @@ export const MaskPainter = forwardRef<MaskHandle, { src: string; onPainted?: (pa
   const clear = () => {
     const c = canvas.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
-    say(false);
   };
 
   useImperativeHandle(ref, () => ({

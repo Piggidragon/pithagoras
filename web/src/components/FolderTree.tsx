@@ -223,7 +223,7 @@ const SORTS: { value: FolderSort; label: string }[] = [
 ];
 
 /** How the chats are listed: by folder or as one list, and the folders in which order. */
-export function FolderControls({
+function FolderControls({
   grouping,
   sort,
   onGrouping,

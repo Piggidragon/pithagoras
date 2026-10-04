@@ -47,9 +47,6 @@ const de: Locale = {
     "Conversation compaction": "Komprimierung des Chats",
     "Prompt processing": "Prompt-Verarbeitung",
     "{done} / {total} tokens": "{done} / {total} Tokens",
-    "{n} cached": "{n} aus dem Cache",
-    "Summarizing earlier messages to make room. Your conversation will continue when ready.": "Frühere Nachrichten werden zusammengefasst, um Platz zu schaffen. Der Chat geht weiter, sobald das fertig ist.",
-    "Reading the conversation before replying. This can take longer with a large history.": "Der Chat wird gelesen, bevor die Antwort kommt. Bei einem langen Verlauf kann das dauern.",
     // components/AgentPage.tsx
     "What to keep an eye on": "Worauf du ein Auge haben sollst",
     "The open pull requests on the project: tell me about one waiting more than three days.": "Die offenen Pull Requests des Projekts: Sag mir Bescheid, wenn einer länger als drei Tage wartet.",
