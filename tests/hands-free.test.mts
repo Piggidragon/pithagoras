@@ -152,10 +152,14 @@ test('response audio plays while the send acknowledgement is still pending', asy
   accepted.resolve(); await tick(); voice.stop();
 });
 
-test('thinking gets one short queued phrase; fast replies suppress it', async () => {
+// The cue comes after a pause the voice sets itself. The test moves the clock past it instead of waiting it out.
+const PAST_THE_PAUSE = 1900;
+
+test('thinking gets one short queued phrase; fast replies suppress it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const { voice, spoken } = setup({ agentRunning: () => true });
   voice.observe([reply('a10')]);
-  await new Promise(r => setTimeout(r, 1900)); await tick();
+  t.mock.timers.tick(PAST_THE_PAUSE); await tick();
   assert.equal(spoken.length, 1);
   assert.match(spoken[0], /think|consider|moment/i);
   voice.observe([reply('a10')]); await tick();
@@ -168,14 +172,15 @@ test('thinking gets one short queued phrase; fast replies suppress it', async ()
   assert.deepEqual(fast.spoken, ['A spoken answer.']);
 });
 
-test('compaction replaces thinking cues once and returns to normal status after ending', async () => {
+test('compaction replaces thinking cues once and returns to normal status after ending', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const phases: string[] = [];
   const { voice, spoken } = setup({ agentRunning: () => true, phase: phase => phases.push(phase) });
   voice.observe([reply('a10')]);
   voice.setCompacting(true);
   voice.setCompacting(true);
   await tick();
-  await new Promise(r => setTimeout(r, 1900));
+  t.mock.timers.tick(PAST_THE_PAUSE); await tick();
   assert.equal(spoken.length, 1);
   assert.match(spoken[0], /context/i);
   assert.equal(phases.at(-1), 'Compacting context');
@@ -186,7 +191,8 @@ test('compaction replaces thinking cues once and returns to normal status after 
   voice.stop();
 });
 
-test('compaction aborts an in-flight thinking cue', async () => {
+test('compaction aborts an in-flight thinking cue', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   let cueSignal: AbortSignal | undefined;
   const { voice } = setup({ agentRunning: () => true, synthesize: async (text, signal) => {
     if (!text.includes('context')) {
@@ -196,7 +202,7 @@ test('compaction aborts an in-flight thinking cue', async () => {
     return async () => {};
   } });
   voice.observe([reply('a10')]);
-  await new Promise(r => setTimeout(r, 1900));
+  t.mock.timers.tick(PAST_THE_PAUSE); await tick();
   assert.ok(cueSignal);
   voice.setCompacting(true);
   assert.equal(cueSignal.aborted, true);
