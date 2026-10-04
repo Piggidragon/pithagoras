@@ -14,6 +14,7 @@ import { LoadFailed, Segments, inputCls, primaryCls } from "./SettingsUi";
 import { labelOf, msg, t, tp, tx } from "../i18n";
 import { useFlash } from "../use-flash";
 import { confirmDialog } from "./ConfirmDialog";
+import { useUnsavedDraft } from "./Modal";
 
 
 const ROLES: { id: Role; label: string; hint: string }[] = [
@@ -251,6 +252,7 @@ function PersonDetail({
   }, [person.key, person.name, person.role, person.notes]);
 
   const dirty = name !== person.name || role !== person.role || notes !== person.notes;
+  useUnsavedDraft(dirty);
   /** Said when this would leave nobody primary, which opens every channel to anybody. */
   const noPrimaryLeft = {
     message: t("This is the only primary user. With none, every channel lets anybody in with a primary user's rights, until you name another."),

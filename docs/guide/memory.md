@@ -38,7 +38,8 @@ keeps what you typed for as long as the portal stays open, and shows it again
 when you open the note. The agent may have written the note meanwhile, so a note
 that changed after you started editing it says so, before a save goes out:
 **Load the new version** gives your edit up, **Save mine anyway** puts it over
-what the agent wrote. After a
+what the agent wrote. A note that was deleted meanwhile says so instead, and
+**Save mine anyway** writes it again. After a
 change a window says what Understory's checks find — a link to nothing, a note
 nothing links to, an index that misses something — and offers:
 

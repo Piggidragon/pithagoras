@@ -41,8 +41,10 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
     if (p === '/api/memory/concept' && method === 'PUT') {
       const sent = json();
       changes.push({ method: 'PUT', path: sent.path, body: sent });
-      concepts[sent.path] = { path: sent.path, frontmatter: { ...sent.frontmatter, timestamp: '2026-09-28T14:00:00.000Z' }, body: sent.body };
-      return { concept: concepts[sent.path], health: healthy };
+      const stamped = { ...sent.frontmatter, timestamp: '2026-09-28T14:00:00.000Z' };
+      // As Understory has it: the write answers the text as it was sent, and the file it made ends in a newline, which every read then shows.
+      concepts[sent.path] = { path: sent.path, frontmatter: stamped, body: sent.body.endsWith('\n') ? sent.body : `${sent.body}\n` };
+      return { concept: { path: sent.path, frontmatter: stamped, body: sent.body }, health: healthy };
     }
     if (p === '/api/memory/concept' && method === 'DELETE') {
       changes.push({ method: 'DELETE', path: url.searchParams.get('path')! });
@@ -418,6 +420,52 @@ test('a save over a note the agent wrote since the edit began asks first, and go
     expect(changes.map((c) => [c.method, c.path, c.body.body])).toEqual([['PUT', BRANCHES, 'Mine.']]);
   } finally {
     restore();
+  }
+});
+
+test('a note that was saved can be edited and saved again: the note is compared as it is read, not as the write answered', async ({ page }) => {
+  const { changes } = await portal(page);
+  const was = concepts[BRANCHES];
+  try {
+    await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+    const saved = page.getByRole('dialog', { name: 'The note is saved' });
+    for (const text of ['First line.\nAnd a second.', 'First line.\nAnd a second.\nA typo fixed.']) {
+      await page.getByRole('button', { name: 'Edit the note' }).click();
+      const form = page.getByRole('form', { name: 'Edit the note' });
+      await form.getByLabel('Text, in markdown').fill(text);
+      await form.getByRole('button', { name: 'Save' }).click();
+      await expect(saved).toBeVisible();
+      await saved.getByRole('button', { name: 'Leave it' }).click();
+      await expect(saved).toBeHidden();
+    }
+    await expect(page.getByRole('alert').filter({ hasText: 'This note changed after you started editing it.' })).toHaveCount(0);
+    expect(changes.map((c) => c.body.body)).toEqual(['First line.\nAnd a second.', 'First line.\nAnd a second.\nA typo fixed.']);
+  } finally {
+    concepts[BRANCHES] = was;
+  }
+});
+
+test('a note deleted while it is being edited can still be saved, and writes it again', async ({ page }) => {
+  const { changes } = await portal(page);
+  const was = concepts[BRANCHES];
+  try {
+    await page.goto('/memory?note=%2Fdeployment%2Fbranches.md');
+    await page.getByRole('button', { name: 'Edit the note' }).click();
+    const form = page.getByRole('form', { name: 'Edit the note' });
+    await form.getByLabel('Text, in markdown').fill('Written again.');
+    delete concepts[BRANCHES];
+    await form.getByRole('button', { name: 'Save' }).click();
+    const alert = page.getByRole('alert').filter({ hasText: 'This note was deleted after you started editing it.' });
+    await expect(alert).toBeVisible();
+    expect(changes).toEqual([]);
+    // What the edit has to say is still in the form, and there is nothing newer to load.
+    await expect(form.getByLabel('Text, in markdown')).toHaveValue('Written again.');
+    await expect(alert.getByRole('button', { name: 'Load the new version' })).toHaveCount(0);
+    await alert.getByRole('button', { name: 'Save mine anyway' }).click();
+    await page.getByRole('dialog', { name: 'The note is saved' }).getByRole('button', { name: 'Leave it' }).click();
+    expect(changes.map((c) => [c.method, c.path, c.body.body])).toEqual([['PUT', BRANCHES, 'Written again.']]);
+  } finally {
+    concepts[BRANCHES] = was;
   }
 });
 

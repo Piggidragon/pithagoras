@@ -272,6 +272,7 @@ function NewSkill({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  useUnsavedDraft(!busy && (!!name.trim() || !!description.trim()));
 
   const create = async () => {
     setBusy(true);

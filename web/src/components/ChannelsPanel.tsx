@@ -17,6 +17,7 @@ import { api, type Agent, type BrokenChannelPackage, type Channel, type ChannelK
 import { Select } from "./Select";
 import { LoadFailed, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
+import { useUnsavedDraft } from "./Modal";
 import { pollWhileVisible } from "../poll";
 import { isEnter } from "../shortcuts";
 import { formatTime, labelOf, msg, t, tp, tx } from "../i18n";
@@ -450,6 +451,7 @@ function ChannelDetail({
     agentId !== ch.agentId ||
     instructions !== (ch.instructions ?? "") ||
     kind?.fields.some((f) => (values[f.key] ?? "") !== (ch.config[f.key] ?? ""));
+  useUnsavedDraft(!!dirty);
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -727,6 +729,7 @@ function NewChannelForm({
   const [name, setName] = useState(kind.label);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  useUnsavedDraft(!busy && (name !== kind.label || Object.values(values).some((v) => v.trim() !== "")));
 
   useEffect(() => {
     setName(kind.label);

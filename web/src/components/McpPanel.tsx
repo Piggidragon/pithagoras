@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Select } from "./Select";
 import { confirmDialog } from "./ConfirmDialog";
+import { useUnsavedDraft } from "./Modal";
 import {
   LuChevronLeft,
   LuChevronRight,
@@ -334,6 +335,7 @@ function ImportBox({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ added: string[]; skipped: { name: string; reason: string }[] } | null>(null);
+  useUnsavedDraft(!busy && !result && text.trim() !== "");
 
   return (
     <div className="mb-3 rounded-xl border border-line bg-raised/40 p-3">
@@ -428,6 +430,10 @@ function ServerForm({
   const [disabled, setDisabled] = useState(e.disabled === true);
   const [saving, setSaving] = useState(false);
   const nameTaken = taken.includes(name.trim());
+  // Whatever it was opened with is not a draft; the first look at the fields is what they are compared with.
+  const fields = JSON.stringify([name, transport, command, args, env, cwd, url, headers, auth, tokenEnv, socket, lifecycle, includeTools, excludeTools, directTools, debug, disabled]);
+  const opened = useRef(fields);
+  useUnsavedDraft(!saving && fields !== opened.current);
 
   const submit = async () => {
     if (!name.trim()) return onError(t("Give the server a name"));
@@ -672,6 +678,7 @@ function GlobalSettings({
   const [idle, setIdle] = useState(shown(settings.idleTimeout));
   const [request, setRequest] = useState(shown(settings.requestTimeoutMs));
   const [dirty, setDirty] = useState(false);
+  useUnsavedDraft(dirty);
 
   // The fields follow the file when it changes elsewhere (the raw editor, another
   // window), unless something is typed in them: that is saved, or not, as it is.
@@ -761,6 +768,7 @@ function RawEditor({
   /** What `text` started from: it is changed once it is not that. */
   const [from, setFrom] = useState(seeded(initial));
   const [saving, setSaving] = useState(false);
+  useUnsavedDraft(!saving && text !== from);
 
   // The file as it is now, unless the text has been typed in: a toggle in the list
   // above rewrites the file, and saving the old text would undo it.

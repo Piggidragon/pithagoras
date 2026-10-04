@@ -23,6 +23,7 @@ import {
 } from "react-icons/lu";
 import {
   api,
+  ApiError,
   type MemoryChange,
   type MemoryConcept,
   type MemoryGraph,
@@ -521,6 +522,8 @@ function Note({
   // What the draft was started from, and whether the note is something else by now.
   const [base, setBase] = useState("");
   const [changed, setChanged] = useState(false);
+  // The note is not there any more, rather than written differently.
+  const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -569,6 +572,7 @@ function Note({
   const endEdit = () => {
     setDraft(null);
     setChanged(false);
+    setGone(false);
     forgetNoteDraft(path);
   };
 
@@ -581,7 +585,15 @@ function Note({
       let now = concept;
       if (!anyway) {
         // Read again: the agent may have written the note since the edit began, and nothing else would say so.
-        now = await api.memoryConcept(path);
+        try {
+          now = await api.memoryConcept(path);
+        } catch (e) {
+          // Deleted meanwhile: the edit is not lost with it, and "Save mine anyway" writes the note again.
+          if (!(e instanceof ApiError && e.status === 404)) throw e;
+          setGone(true);
+          setChanged(true);
+          return;
+        }
         if (baseOf(now) !== base) {
           setConcept(now);
           setChanged(true);
@@ -594,7 +606,9 @@ function Note({
       const frontmatter = { ...rest, title: draft.title.trim(), type: draft.type.trim(), description: draft.description.trim(), ...(tags.length ? { tags } : {}) };
       if (!tags.length) delete (frontmatter as Record<string, unknown>).tags;
       const r = await api.saveMemoryNote(path, frontmatter, draft.body);
-      setConcept(r.concept);
+      // As a read has it, which the answer to the write is not quite: the file it made ends in a newline
+      // the answer does not, and the next edit is compared with what is read.
+      setConcept(await api.memoryConcept(path).catch(() => r.concept));
       endEdit();
       onChanged("saved", r.health);
     } catch (e) {
@@ -643,10 +657,12 @@ function Note({
           {error && <p role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
           {changed && draft && (
             <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
-              <span className="min-w-0 flex-1">{t("This note changed after you started editing it.")}</span>
-              <button type="button" onClick={endEdit} className="rounded px-1.5 py-0.5 underline hover:text-fg">
-                {t("Load the new version")}
-              </button>
+              <span className="min-w-0 flex-1">{gone ? t("This note was deleted after you started editing it.") : t("This note changed after you started editing it.")}</span>
+              {!gone && (
+                <button type="button" onClick={endEdit} className="rounded px-1.5 py-0.5 underline hover:text-fg">
+                  {t("Load the new version")}
+                </button>
+              )}
               <button type="button" onClick={() => void save(true)} disabled={busy} className="rounded px-1.5 py-0.5 underline hover:text-fg disabled:opacity-40">
                 {t("Save mine anyway")}
               </button>
