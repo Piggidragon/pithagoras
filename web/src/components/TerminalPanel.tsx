@@ -6,6 +6,7 @@ import { orderedInput } from "../ordered-input";
 import { api } from "../api";
 
 import { t } from "../i18n";
+
 /**
  * A shell in the workspace of the session you are looking at.
  *
@@ -18,6 +19,9 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (!host.current) return;
+    // What xterm says to a screen reader, in the language of the page: the name of the input, and what it says when too much came at once.
+    Terminal.strings.promptLabel = t("Terminal input");
+    Terminal.strings.tooMuchOutput = t("Too much output to read out; move through the lines to read it.");
     const term = new Terminal({
       fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -26,6 +30,8 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
       theme: { background: "#0b0b0d", foreground: "#d4d4d8" },
       cursorBlink: true,
       scrollback: 5000,
+      // The screen is drawn in a canvas, which a screen reader cannot read: this adds the rows and a live region it can.
+      screenReaderMode: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

@@ -162,8 +162,10 @@ test('the log lists the changes newest first, and its links open the notes', asy
 test('the graph draws the notes and their links, says what the colours are, and a note opens from it', async ({ page }) => {
   await portal(page);
   await page.goto('/memory?view=graph');
-  const graph = page.getByRole('img', { name: /3 notes, 1 link/ });
+  // A group and not a picture: its notes are buttons that Tab reaches, which a picture would make presentational.
+  const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph).toBeVisible();
+  await expect(page.getByRole('img', { name: /3 notes, 1 link/ })).toHaveCount(0);
   await expect(graph.locator('line')).toHaveCount(1);
   const legend = page.getByRole('list', { name: 'What the colours are' });
   await expect(legend).toContainText('Deployment Process');
@@ -188,7 +190,7 @@ test('a graph of a long memory opens without freezing the page, and panning it i
     }).observe({ entryTypes: ['longtask'] });
   });
   await page.goto('/memory?view=graph');
-  const graph = page.getByRole('img', { name: /1,?500 notes/ });
+  const graph = page.getByRole('group', { name: /1,?500 notes/ });
   await expect(graph).toBeVisible({ timeout: 30_000 });
   // The layout of 1,500 notes was several seconds in one piece; it is a fraction of one.
   expect(await page.evaluate(() => (window as any).longest)).toBeLessThan(1500);
@@ -265,7 +267,7 @@ test('on a phone the notes and what is open take turns', async ({ page }) => {
   await page.getByRole('button', { name: 'Back to the notes' }).click();
   await expect(notes(page)).toBeVisible();
   await page.getByRole('button', { name: 'Graph', exact: true }).click();
-  await expect(page.getByRole('img', { name: /3 notes/ })).toBeVisible();
+  await expect(page.getByRole('group', { name: /3 notes/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 

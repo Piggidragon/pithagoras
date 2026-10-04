@@ -44,27 +44,37 @@ export const DiffView = memo(function DiffView({ file, truncated }: { file: Diff
   }
   return (
     <div className="git-diff min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-[1.55]" role="table" aria-label={t("Changes to {path}", { path: file.path })}>
-      <div className="min-w-max">
+      <div role="rowgroup" className="min-w-max">
+        {/* Said once, for a screen reader to name the cells by: the two numbers alone are "42" and "42". */}
+        <div role="row" className="sr-only">
+          <span role="columnheader">{t("Line before")}</span>
+          <span role="columnheader">{t("Line after")}</span>
+          <span role="columnheader">{t("Kind of change")}</span>
+          <span role="columnheader">{t("Text")}</span>
+        </div>
         {file.rows.slice(0, limit).map((row, i) =>
           row.kind === "hunk" ? (
             <div key={i} role="row" className={`sticky left-0 px-2 py-0.5 ${ROW.hunk}`}>
-              {row.text}
+              <span role="cell">{row.text}</span>
             </div>
           ) : (
             <div key={i} role="row" data-kind={row.kind} className={`flex ${ROW[row.kind]}`}>
-              <span className="shrink-0 select-none pl-1 pr-1 text-right text-fg-faint" style={{ width }}>
+              <span role="cell" className="shrink-0 select-none pl-1 pr-1 text-right text-fg-faint" style={{ width }}>
                 {row.old ?? ""}
               </span>
-              <span className="shrink-0 select-none pr-1 text-right text-fg-faint" style={{ width }}>
+              <span role="cell" className="shrink-0 select-none pr-1 text-right text-fg-faint" style={{ width }}>
                 {row.new ?? ""}
               </span>
               <span
-                aria-hidden
+                role="cell"
                 className={`min-w-4 shrink-0 select-none whitespace-pre px-0.5 text-center ${row.kind === "add" ? "text-ok" : row.kind === "del" ? "text-danger" : "text-fg-faint"}`}
               >
-                {row.mark ?? MARK[row.kind]}
+                <span aria-hidden>{row.mark ?? MARK[row.kind]}</span>
+                {/* The sign is a picture; whether the line was added or removed is also said in words. */}
+                {row.kind === "add" && <span className="sr-only">{t("added")}</span>}
+                {row.kind === "del" && <span className="sr-only">{t("removed")}</span>}
               </span>
-              <span className="whitespace-pre pr-4 text-fg">{(row.kind === "note" ? t(row.text) : row.text) || " "}</span>
+              <span role="cell" className="whitespace-pre pr-4 text-fg">{(row.kind === "note" ? t(row.text) : row.text) || " "}</span>
             </div>
           ),
         )}

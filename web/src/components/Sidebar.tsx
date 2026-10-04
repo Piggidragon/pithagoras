@@ -231,7 +231,7 @@ export const Sidebar = memo(function Sidebar({
       </div>
 
       {/* Destinations, above the session lists. */}
-      <nav className="px-2 pb-2">
+      <nav className="px-2 pb-2" aria-label={t("Destinations")}>
         <NavItem icon={<LuPlus />} label={t("New")} onClick={() => newChat()} active={starting} isNew />
         {destinations.map((d) => (
           <NavItem key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} active={view === d.to} />
@@ -393,6 +393,7 @@ function NavItem({
   return (
     <button
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       data-new={isNew || undefined}
       className={`nav-item group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
         active ? "bg-fg/[0.07] text-fg" : "text-fg-muted hover:bg-fg/5 hover:text-fg"

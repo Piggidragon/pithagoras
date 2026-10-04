@@ -1071,7 +1071,8 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
           <>
             <svg
               ref={svg}
-              role="img"
+              // A group, not a picture: the notes in it are links, which a picture would hide from a screen reader while Tab still lands on them.
+              role="group"
               aria-label={t("The memory's notes and their links: {notes}, {links}", { notes: tp(graph.nodes.length, "{n} note", "{n} notes"), links: tp(graph.edges.length, "{n} link", "{n} links") })}
               viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
               className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"

@@ -1474,6 +1474,8 @@ const de: Locale = {
     "Message for {name}": "Nachricht an {name}",
     "Send to the subagent": "An den Subagent senden",
     // components/TerminalPanel.tsx
+    "Terminal input": "Terminal-Eingabe",
+    "Too much output to read out; move through the lines to read it.": "Zu viel Ausgabe zum Vorlesen; geh die Zeilen einzeln durch, um sie zu lesen.",
     "Connection to the shell lost — close this panel and open it again": "Verbindung zur Shell verloren — schließ diesen Bereich und öffne ihn erneut",
     "Could not open a shell: {error}": "Konnte keine Shell öffnen: {error}",
     // components/ThemeSwitcher.tsx
@@ -2085,6 +2087,12 @@ const de: Locale = {
     "Drop": "Verwerfen",
     "Dropping the stash": "Der Stash wird verworfen",
     // components/git/DiffView.tsx
+    "Line before": "Zeile vorher",
+    "Line after": "Zeile nachher",
+    "Kind of change": "Art der Änderung",
+    "Text": "Text",
+    "added": "hinzugefügt",
+    "removed": "entfernt",
     "{shown} of {total} lines shown": "{shown} von {total} Zeilen gezeigt",
     "A binary file — its changes are not shown here.": "Eine Binärdatei — ihre Änderungen werden hier nicht gezeigt.",
     "Renamed, with nothing in it changed.": "Umbenannt, ohne dass sich darin etwas geändert hat.",

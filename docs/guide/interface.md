@@ -179,3 +179,9 @@ buttons), and a field that a tab or a list belongs to points at it.
   delete (in the sidebar and on [Sessions](/guide/sessions)), a wrong password,
   a failed load, a message under a field. An error that is a banner has a
   Dismiss button, and goes away by itself once the next try works.
+- **Where you are:** the sidebar's navigation is named and marks the page that
+  is open; the Memory graph is a group of notes, each one a button.
+- **A diff** is a table with named columns, and a line that was added or removed
+  says so in words as well as with its sign.
+- **The terminal** is readable: its screen is also drawn as text for a screen
+  reader, and its input has a name in the language of the page.

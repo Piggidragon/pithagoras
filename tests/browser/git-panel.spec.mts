@@ -46,6 +46,10 @@ test("a file's diff is shown with the lines numbered where they were and where t
   await expect(table.locator('[data-kind="add"]')).toHaveCount(4);
   await expect(table.locator('[data-kind="del"]')).toContainText('11');
   await expect(table.locator('[data-kind="add"]').first()).toContainText('if (!stored) throw');
+  // Said in words as well as drawn: of two lines numbered alike, which one was removed, and what each cell is.
+  await expect(table.getByRole('columnheader')).toHaveText(['Line before', 'Line after', 'Kind of change', 'Text']);
+  await expect(table.locator('[data-kind="del"]').getByRole('cell').nth(2)).toHaveText('−removed');
+  await expect(table.locator('[data-kind="add"]').first().getByRole('cell').nth(2)).toHaveText('+added');
 
   await page.getByRole('button', { name: 'Stage', exact: true }).click();
   // Back on the list, with it staged.
@@ -179,8 +183,9 @@ test("a file in conflict is shown a column per side: ours, theirs, and git's mar
   const ours = table.locator('[role=row]', { hasText: 'TWO main' });
   await expect(ours).toHaveAttribute('data-kind', 'add');
   // Ours: line 2 before, line 3 now — not a line of context that reads "+TWO main".
-  await expect(ours).toHaveText(/^2\s*3\s*\+TWO main$/);
-  await expect(table.locator('[role=row]', { hasText: 'TWO side' })).toHaveText(/^\s*5\s*\+\s+TWO side$/);
+  // The sign is drawn, and said in words as well.
+  await expect(ours).toHaveText(/^2\s*3\s*\+\s*addedTWO main$/);
+  await expect(table.locator('[role=row]', { hasText: 'TWO side' })).toHaveText(/^\s*5\s*\+\s*added\s*TWO side$/);
   await expect(table.locator('[data-kind=add]')).toHaveCount(6);
 });
 
@@ -417,13 +422,14 @@ test('a large diff shows its first rows, and the rest as asked', async ({ page }
   await page.goto('/tests/git.html?bigdiff=1');
   await row(page, 'session.ts').click();
   const table = page.getByRole('table', { name: 'Changes to src/auth/session.ts' });
-  // The hunk header is a row too.
-  await expect(table.locator('[role=row]')).toHaveCount(3000);
+  // The hunk header is a row too; the one that names the columns for a screen reader is not drawn.
+  const rows = table.locator('[role=row]:not(.sr-only)');
+  await expect(rows).toHaveCount(3000);
   await expect(page.getByText('3000 of 6501 lines shown')).toBeVisible();
   await page.getByRole('button', { name: 'Show more' }).click();
-  await expect(table.locator('[role=row]')).toHaveCount(6000);
+  await expect(rows).toHaveCount(6000);
   await page.getByRole('button', { name: 'Show more' }).click();
-  await expect(table.locator('[role=row]')).toHaveCount(6501);
+  await expect(rows).toHaveCount(6501);
   await expect(page.getByRole('button', { name: 'Show more' })).toHaveCount(0);
 });
 
