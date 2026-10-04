@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { realPath } from "./within.js";
 import { piAgentDir, piSettingsPath, readPiSettings } from "./pi-settings.js";
-import { mcpConfigPath, readMcpFile, type McpFile } from "./api/mcp.js";
+import { mcpAdapter, mcpConfigPath, readMcpFile, type McpFile } from "./api/mcp.js";
 
 /**
  * Optional capabilities the portal ships and leaves off: a subagent tool, and
@@ -144,15 +144,6 @@ export function understoryEntry(url: string, auth: { tokenEnv?: string; token?: 
 export function understoryTokenOf(entry: Record<string, unknown> | undefined): string | undefined {
   if (typeof entry?.bearerToken === "string" && entry.bearerToken) return entry.bearerToken;
   if (typeof entry?.bearerTokenEnv === "string") return process.env[entry.bearerTokenEnv] || undefined;
-  return undefined;
-}
-
-/** pi-mcp-adapter as pi's settings list it, if they do: without it, no MCP server is a tool. */
-export function mcpAdapter(packages: unknown = readPiSettings().packages): { source: string; enabled: boolean } | undefined {
-  for (const entry of Array.isArray(packages) ? packages : []) {
-    const source = sourceOf(entry);
-    if (source && /(^|[:/])pi-mcp-adapter(@[^/]*)?$/.test(source)) return { source, enabled: !isSwitchedOff(entry) };
-  }
   return undefined;
 }
 

@@ -1,13 +1,10 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
 import { writeFileAtomic } from "../atomic-write.js";
-import { piAgentDir } from "../pi-settings.js";
+import { isSwitchedOff, sourceOf } from "../extension-switch.js";
+import { piAgentDir, readPiSettings } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
-
-const run = promisify(execFile);
 
 /**
  * MCP servers, as configured for `pi-mcp-adapter`.
@@ -179,14 +176,18 @@ export function writeMcpFile(config: McpFile): void {
   writeMcpText(JSON.stringify(config, null, 2));
 }
 
-/** Is the adapter installed? Without it, none of this configuration does anything. */
-async function adapterInstalled(): Promise<boolean> {
-  try {
-    const { stdout } = await run("pi", ["list"], { timeout: 60_000 });
-    return stdout.includes(ADAPTER);
-  } catch {
-    return false;
+/**
+ * pi-mcp-adapter as pi's settings list it, if they do: without it, none of this
+ * configuration does anything, and no MCP server is a tool. Read from the
+ * settings, not by asking `pi list`: that starts pi, which takes a second or
+ * more, and this is asked each time the panel opens or something in it changes.
+ */
+export function mcpAdapter(packages: unknown = readPiSettings().packages): { source: string; enabled: boolean } | undefined {
+  for (const entry of Array.isArray(packages) ? packages : []) {
+    const source = sourceOf(entry);
+    if (source && /(^|[:/])pi-mcp-adapter(@[^/]*)?$/.test(source)) return { source, enabled: !isSwitchedOff(entry) };
   }
+  return undefined;
 }
 
 /** stdio, http and socket are mutually exclusive in the adapter. */
@@ -224,7 +225,7 @@ export function mcpRouter(): Router {
       res.json({
         path: mcpConfigPath(),
         exists: existsSync(mcpConfigPath()),
-        adapterInstalled: await adapterInstalled(),
+        adapterInstalled: mcpAdapter() !== undefined,
         adapterSpec: ADAPTER_SPEC,
         servers,
         settings: config.settings ?? {},

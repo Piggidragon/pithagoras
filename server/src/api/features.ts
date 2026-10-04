@@ -7,7 +7,6 @@ import {
   bundledSubagentDir,
   isModelChoice,
   localPackagePath,
-  mcpAdapter,
   subagentModelOf,
   subagentState,
   understoryDefaultUrl,
@@ -20,7 +19,7 @@ import { ImageGenerationError, imageEditingMultiple, imageEditingReady, imageGen
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { switchPackage } from "./extensions.js";
-import { ADAPTER_SPEC, readMcpFile, writeMcpFile } from "./mcp.js";
+import { ADAPTER_SPEC, mcpAdapter, readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/understory-service.js";
 import { readModelsJson } from "../providers.js";
 import { pi } from "./packages.js";
