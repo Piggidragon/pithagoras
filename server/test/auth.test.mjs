@@ -292,6 +292,30 @@ test("when every entry of a full throttle is locked, a newcomer is refused rathe
   assert.equal(attempts(limiter, "10.0.0.1", 1).refused, 1, "and nobody's lock is gone");
 });
 
+test("addresses that stop at nine and let 4096 others push them out are held to the window's budget", () => {
+  const limiter = security.loginThrottle();
+  // 4097 addresses take turns, each with nine wrong logins and then out of the way: none is ever locked, and
+  // each comes back to a count of nothing. Without a budget for the window every round is as free as the first.
+  let through = 0;
+  for (let round = 0; round < 5; round++) {
+    for (let i = 0; i < 4097; i++) through += attempts(limiter, `2001:db8:${(i + 1).toString(16)}::1`, 9).through;
+  }
+  // The window's budget, the last attempt of each one in the map at that moment, and the nine of the one that found it spent.
+  assert.ok(through <= 4096 * 10 + 4096 + 9, `${through} guesses in one window`);
+  // And a newcomer is told to wait, which the window's end undoes.
+  assert.equal(attempts(limiter, "198.51.100.9", 1).refused, 1);
+});
+
+test("the window's budget is a fresh one when the window is over", () => {
+  let clock = 1_000_000;
+  const limiter = security.loginThrottle(() => clock);
+  for (let i = 0; i < 4097; i++) attempts(limiter, `10.${i >> 8}.${i & 255}.1`, 9);
+  for (let i = 0; i < 500; i++) attempts(limiter, `172.16.${i >> 8}.${i & 255}`, 9);
+  assert.equal(attempts(limiter, "198.51.100.9", 1).refused, 1, "the budget is spent");
+  clock += 15 * 60_000 + 1;
+  assert.deepEqual(attempts(limiter, "198.51.100.9", 1), { through: 1, refused: 0 }, "and it is new once the window is over");
+});
+
 // --- the agent's browser ---
 
 /** A request for the upgrade to a stream, as a browser makes it, with `after` as the bytes the page sends first. */

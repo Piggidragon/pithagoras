@@ -21,11 +21,16 @@ An allowlist rather than a blocklist because the right default for a list whose
 job is to be conservative is that new things start outside it.
 
 What a colleague or a guest reads is held to the conversation's own folder and
-the agent's skills. A secret (`auth.json`, `.env`, `.ssh/`, tokens) is never
-read, nor is the private context in `PrimaryUser.md` and `MEMORY.md`, and a
-search over a folder that holds them is refused. The same goes for a rule you
-allowed: it opens the tool, not the files the guard keeps from them, so an
-allowed command that names a secret or one of those two files is refused.
+the agent's skills. A secret (`auth.json`, `.env`, `.ssh/`, a file called
+`token` or `credentials`) is never read, nor is the private context in
+`PrimaryUser.md` and `MEMORY.md`, and a search over a folder that holds them is
+refused. Secrets are told by the name of the file, so a `tokenizer.ts` or a page
+about credentials is read like any other. The same goes for a rule you allowed:
+it opens the tool, not the files the guard keeps from them, so an allowed
+command that names a secret or one of those two files is refused, and so is a
+`write` or `edit` rule that reaches `SOUL.md`, `PrimaryUser.md` or `MEMORY.md`:
+they are loaded into your own conversations in that folder as the agent's words,
+and a colleague's text there would be an instruction to it.
 
 A `bash` rule is the exception to the folder: a command runs as the agent, and
 what a shell makes of `cat *` or of a path built while it runs cannot be

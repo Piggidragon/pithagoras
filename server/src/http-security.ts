@@ -25,12 +25,20 @@ export function throttleKey(address: string | undefined): string {
   return all.slice(0, 4).map((g) => parseInt(g || '0', 16).toString(16)).join(':') + '::/64';
 }
 
+/** Attempts a window lets through before a newcomer, who would have to push another out, is refused. */
+const WINDOW_BUDGET = 4096 * 10;
+
 /** Bound memory and attempts without trusting client-supplied forwarding headers. */
 export function loginThrottle(now = Date.now): RequestHandler {
   const attempts = new Map<string, { count: number; until: number }>();
+  // What the window has counted, those that were pushed out of the map included: an address that stops at nine
+  // and comes back after 4096 others would otherwise start at nought each time, and the limits above it never bind.
+  let spent = 0;
+  let windowEnds = 0;
   return (req, res, next) => {
     const time = now();
     for (const [key, value] of attempts) if (value.until <= time) attempts.delete(key);
+    if (time >= windowEnds) { spent = 0; windowEnds = time + 15 * 60_000; }
     const key = throttleKey(req.socket.remoteAddress);
     const entry = attempts.get(key) ?? { count: 0, until: time + 15 * 60_000 };
     const refuse = (until: number) => {
@@ -43,14 +51,17 @@ export function loginThrottle(now = Date.now): RequestHandler {
     // They are in the order they were made, and so in the order they run out.
     // A locked entry is never the one: dropping it would give its address ten
     // more guesses for every 4096 others, so only when all of them are locked
-    // is the newcomer refused.
+    // is the newcomer refused. Nor is anybody let in without end by pushing
+    // others out: once the window's budget is spent, a newcomer waits for the next.
     if (!attempts.has(key) && attempts.size >= 4096) {
       let room: string | undefined;
       for (const [other, value] of attempts) if (value.count < 10) { room = other; break; }
       if (room === undefined) return refuse(attempts.values().next().value!.until);
+      if (spent >= WINDOW_BUDGET) return refuse(windowEnds);
       attempts.delete(room);
     }
     entry.count++;
+    spent++;
     attempts.set(key, entry);
     res.on('finish', () => { if (res.statusCode < 400) attempts.delete(key); });
     next();

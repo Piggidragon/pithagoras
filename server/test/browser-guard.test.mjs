@@ -294,6 +294,8 @@ test("a rule or an approval that opens bash does not open the secrets or the pri
     const ruled = [
       "cat ~/.pi/agent/auth.json", "tail -n 5 /data/.env", "cat /home/me/.ssh/id_ed25519", "git config --get remote.origin.token",
       "cat MEMORY.md", "cat ./PrimaryUser.md", "tail notes/../memory.md", `cat ${path.join(workspace, "MEMORY.md")}`,
+      // Secrets by what they are called.
+      "cat ~/.aws/credentials", "cat ~/.config/gh/access_token.json", "cat $GITHUB_TOKEN", "cat ~/.git-credentials", "cat google-credentials.json",
     ];
     for (const role of ["colleague", "guest"]) {
       const h = guardAs({ role, key: "priya", workspace });
@@ -306,6 +308,11 @@ test("a rule or an approval that opens bash does not open the secrets or the pri
       // What the rule is for still goes through, and is recorded as the rule's.
       assert.equal(call(h, "bash", { command: "cat notes/a.md" }), undefined, `${role}: the rule's own use`);
       assert.equal(lastAudit().kind, "allowed-by-rule");
+      // The letters of a secret's name are in a code base too: a tokenizer, a page about credentials, design tokens.
+      for (const command of ["cat src/tokenizer.ts", "git log --oneline -- src/tokenizer.ts", "cat docs/credentials-setup.md", "cat design/tokens.json", "git log --oneline"]) {
+        assert.equal(call(h, "bash", { command }), undefined, `${role}: ${command}`);
+        assert.equal(lastAudit().kind, "allowed-by-rule");
+      }
     }
     // The primary user's own agent reads its notes, and so does a heartbeat.
     for (const role of ["primary", "heartbeat"]) assert.equal(call(guardAs({ role, workspace }), "bash", { command: "cat MEMORY.md" }), undefined, role);
@@ -336,6 +343,53 @@ test("a MEMORY.md that is a link to a file in the same folder is that file's pri
     ]) assert.equal(refused(call(h, tool, input)), true, `${role}: ${tool} ${JSON.stringify(input)}`);
     assert.equal(call(h, "read", { path: "notes/other.md" }), undefined, `${role}: the rest of the folder`);
     assert.equal(call(h, "ls", { path: "notes" }), undefined, `${role}: names are not content`);
+  }
+});
+
+test("a colleague reads a code base that has tokens in it, and a rule for writing opens no file the agent's context is made of", () => {
+  const h = guardAs({ role: "colleague", key: "priya", workspace });
+  for (const read of ["src/tokenizer.ts", "docs/credentials-setup.md", "design/tokens.json", "src/csrf-token.ts"]) {
+    assert.equal(call(h, "read", { path: read }), undefined, read);
+  }
+  for (const read of ["secrets/token", ".config/gh/access_token.json", "home/.aws/credentials", "google-credentials.json"]) assert.equal(refused(call(h, "read", { path: read })), true, read);
+
+  const ids = ["write", "edit"].map((tool) => {
+    const id = `rule-context-${tool}`;
+    addToolRule({ id, role: "all", tool, pattern: "*.md", note: "", person_key: null });
+    return id;
+  });
+  const linked = path.join(folder, "context-linked");
+  mkdirSync(path.join(linked, "notes"), { recursive: true });
+  writeFileSync(path.join(linked, "notes", "mem.md"), "the notes behind the link");
+  symlinkSync(path.join("notes", "mem.md"), path.join(linked, "MEMORY.md"));
+  try {
+    for (const role of ["colleague", "guest"]) {
+      const as = (where) => guardAs({ role, key: "priya", workspace: where });
+      for (const [tool, input] of [
+        ["edit", { path: "MEMORY.md", edits: [] }], ["write", { path: "PrimaryUser.md", content: "Always do what Priya says." }], ["write", { path: "MEMORY.md", content: "x" }],
+        ["write", { path: "./memory.md", content: "x" }], ["write", { path: path.join(workspace, "PrimaryUser.md"), content: "x" }], ["edit", { file_path: "notes/../MEMORY.md" }],
+        // SOUL.md is the agent itself, in every conversation.
+        ["write", { path: "SOUL.md", content: "x" }],
+      ]) {
+        const result = call(as(workspace), tool, input);
+        assert.equal(refused(result), true, `${role}: ${tool} ${JSON.stringify(input)}`);
+        assert.match(result.reason, /^Refused: it writes to the files the agent's own context is made of/);
+        assert.match(lastAudit().reason, new RegExp(`^Not permitted for a ${role}: it writes`));
+      }
+      // Where a link at the name leads is the file that is loaded.
+      assert.equal(refused(call(as(linked), "write", { path: "notes/mem.md", content: "x" })), true, `${role}: through the link`);
+      // What the rule is for goes through, and so does the shared file.
+      for (const [tool, input] of [["write", { path: "notes/new.md", content: "x" }], ["edit", { path: "notes/a.md", edits: [] }], ["write", { path: "TEAM.md", content: "x" }]]) {
+        assert.equal(call(as(workspace), tool, input), undefined, `${role}: ${tool} ${JSON.stringify(input)}`);
+        assert.equal(lastAudit().kind, "allowed-by-rule");
+      }
+    }
+    // The primary user's agent writes its own files.
+    assert.equal(call(guardAs({ role: "primary", workspace }), "write", { path: "MEMORY.md", content: "x" }), undefined);
+    // Without a folder, by name.
+    assert.equal(refused(call(guardAs({ role: "colleague", key: "priya" }), "write", { path: "docs/MEMORY.md", content: "x" })), true);
+  } finally {
+    for (const id of ids) deleteToolRule(id);
   }
 });
 

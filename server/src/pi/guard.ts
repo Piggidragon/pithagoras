@@ -11,7 +11,7 @@ import { UNDERSTORY } from "../features.js";
 import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
 import { isWithinText, realPath } from "../within.js";
-import { PRIVATE_FILES } from "./context-files.js";
+import { CONTEXT_FILES, PRIVATE_FILES } from "./context-files.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 
@@ -101,10 +101,19 @@ const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/lo
 const PERSIST_PATHS = /(?:\/etc\/(?:cron\.[a-z]+|systemd\/system)|(?:~|\/[^\s]+)\/\.config\/(?:autostart|systemd\/user)|(?:~|\/[^\s]+)\/\.(?:bashrc|bash_profile|zshrc|zprofile|profile))(?=\/|[\s'"]|$)/;
 const writesFiles = (command: string) => /(>|\b(?:cp|mv|install|tee)\b)/.test(command);
 
+/**
+ * What a token or a credentials file is called, by its name and not by the
+ * letters: a path or a command that merely has them in it — a tokenizer, a
+ * page on credentials, design tokens — is no secret. A name can be one of
+ * `$GITHUB_TOKEN`, `.token`, `remote.origin.token`, `access_token.json`,
+ * `credentials`, `.git-credentials`, `google-credentials.yml`.
+ */
+const SECRET_NAMES = /(?:^|[/\s'"=*$.{])\.?(?:\w*[_-])?(?:token|(?:[\w-]*[_-])?credentials)(?:\.(?:json|txt|ya?ml))?(?=$|[\s'"*}])/i;
+
 /** Whether a call reads a place where secrets are kept: the command, or the path. */
 function readsCredentials(tool: string, input: Record<string, unknown>): boolean {
   const where = tool === "bash" ? cmd(input) : target(input);
-  return /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|credentials|\.netrc|token)/i.test(where);
+  return /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|\.netrc)/i.test(where) || SECRET_NAMES.test(where);
 }
 
 const RULES: Rule[] = [
@@ -519,11 +528,26 @@ function unreadable(toolName: string, input: Record<string, unknown>, workspace:
  * user even where a rule or an approval opens its tool, or undefined. A command
  * is the agent's own, run as it: its paths cannot be followed through a shell,
  * so what it names is all that is checked — a place secrets are kept, and the
- * private files by name.
+ * private files by name. A tool that writes to a path is held to the files the
+ * agent's own context is made of (CONTEXT_FILES), where a link at their name
+ * leads as well: they are loaded into the primary user's conversations in the
+ * folder as the agent's own words, so a write there is an instruction to it.
  */
-function unrunnable(toolName: string, input: Record<string, unknown>): string | undefined {
+function unrunnable(toolName: string, input: Record<string, unknown>, workspace: string | undefined): string | undefined {
   if (readsCredentials(toolName, input)) return "it reads a place where secrets are kept";
-  if (toolName !== "bash") return undefined;
+  if (toolName !== "bash") {
+    const asked = target(input);
+    if (!asked) return undefined;
+    const reach = "it writes to the files the agent's own context is made of";
+    if (workspace === undefined) return CONTEXT_FILES.some((name) => path.basename(asked).toLowerCase() === name.toLowerCase()) ? reach : undefined;
+    const root = realPath(workspace) ?? path.resolve(workspace);
+    const where = whereToolsLook(asked, workspace);
+    if (where === undefined) return undefined;
+    return CONTEXT_FILES.some((name) => {
+      const file = path.join(root, name);
+      return [file, realPath(file) ?? file].some((own) => where.toLowerCase() === own.toLowerCase());
+    }) ? reach : undefined;
+  }
   const command = cmd(input).toLowerCase();
   return PRIVATE_FILES.some((name) => command.includes(name.toLowerCase())) ? "it reads what is private to the primary user" : undefined;
 }
@@ -738,7 +762,7 @@ export function guardExtension(
         const reads = PATH_READERS.has(event.toolName);
         const why = reads
           ? unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
-          : READ_ONLY.has(event.toolName) ? undefined : unrunnable(event.toolName, event.input ?? {});
+          : READ_ONLY.has(event.toolName) ? undefined : unrunnable(event.toolName, event.input ?? {}, workspace);
         if (why) {
           console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}, ${why}`);
           note("refused", `Not permitted for a ${role}: ${why}`);
