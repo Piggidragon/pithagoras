@@ -4,7 +4,7 @@ import { packageIndex, packageKey, packageLabel, toolAvailability } from "./exte
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
 import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
-import { browserServers, mcpServerNames } from "./api/mcp.js";
+import { browserServers, mcpServerNames, serversAndBrowsers } from "./api/mcp.js";
 import { mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
@@ -384,6 +384,16 @@ function schema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_images_created ON images(created_at DESC, id DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_images_chat_file ON images(session_id, path) WHERE session_id IS NOT NULL;
 
+    -- The voices saved in the settings, for speech to be told to sound like (see voice-presets.ts).
+    CREATE TABLE IF NOT EXISTS voice_presets (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      instruction TEXT NOT NULL,
+      transcript TEXT NOT NULL,
+      audio BLOB
+    );
+
     -- Logins signed out before they ran out, by the signature of their cookie.
     -- The cookie carries no state of its own, so without this a copy of one
     -- would go on working for the rest of its thirty days.
@@ -597,6 +607,8 @@ function migrate(d: Database.Database): void {
   const imageCols = (d.prepare("PRAGMA table_info(images)").all() as { name: string }[]).map((c) => c.name);
   if (imageCols.length && !imageCols.includes("folder")) d.exec("ALTER TABLE images ADD COLUMN folder TEXT");
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_images_folder_file ON images(folder, path) WHERE folder IS NOT NULL");
+  // What was made of a picture, looked for whenever a picture is forgotten: without it each of them is a pass over the whole gallery.
+  d.exec("CREATE INDEX IF NOT EXISTS idx_images_source ON images(source_id) WHERE source_id IS NOT NULL");
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");
@@ -611,6 +623,11 @@ function migrate(d: Database.Database): void {
   d.exec(
     `CREATE INDEX IF NOT EXISTS idx_events_settled ON events(session_id, seq)
        WHERE type IN ('portal_taken', 'portal_unsent')`,
+  );
+  // The messages a chat has sent, listed when its stream opens and for every edit: see sentMessages.
+  d.exec(
+    `CREATE INDEX IF NOT EXISTS idx_events_prompts ON events(session_id, seq)
+       WHERE type = 'portal_prompt'`,
   );
   // Commands and their ends, looked for at startup: see unansweredCommands.
   d.exec(
@@ -1713,23 +1730,52 @@ function browserAdoptionPending(): boolean {
  * the schema and read by nothing.
  */
 export function browserAllowed(session: SessionRow): boolean {
+  return browserAllowedWith(session, browserPolicy());
+}
+
+/**
+ * What the answer is worked out from apart from the conversation asked about:
+ * the browser's tools as far as they have been seen, the defaults, and whether
+ * the old column decides. A pass over many conversations asks for it once. Each
+ * of them used to read the MCP file three times and the settings table twice.
+ */
+export interface BrowserPolicy {
+  names: string[];
+  /** With none of its tools seen: whether the old column is what answers. */
+  columnDecides: boolean;
+  defaultsOff: string[];
+  /** The defaults of a project, worked out the first time a conversation of it is asked about. */
+  projects: Map<string, string[]>;
+}
+
+export function browserPolicy(): BrowserPolicy {
+  const names = seenBrowserTools();
+  return { names, columnDecides: names.length ? false : browserColumnDecides(), defaultsOff: toolDefaultsOff(), projects: new Map() };
+}
+
+/** `browserAllowed`, against a policy asked for once; `exceptions` are the conversation's own, where the caller has them already. */
+export function browserAllowedWith(session: SessionRow, policy: BrowserPolicy, exceptions?: SessionTools): boolean {
   if (session.kind === "routine" && session.routine_slug) {
     const row = getDb().prepare("SELECT browser FROM routines WHERE slug = ?").get(
       session.routine_slug
     ) as { browser: number } | undefined;
     return row ? row.browser === 1 : false;
   }
-  const browserNames = seenBrowserTools();
-  if (!browserNames.length) return session.browser === 1 || !browserColumnDecides();
-  const defaults = toolDefaultsFor(session.workspace);
-  const exceptions = sessionTools(session.id);
-  return browserNames.some((name) => toolEnabled(name, defaults, exceptions));
+  if (!policy.names.length) return session.browser === 1 || !policy.columnDecides;
+  const project = projectOf(session.workspace);
+  let defaults = policy.defaultsOff;
+  if (project) {
+    let found = policy.projects.get(project);
+    if (!found) policy.projects.set(project, (found = defaultsFor(policy.defaultsOff, projectTools(project))));
+    defaults = found;
+  }
+  const own = exceptions ?? sessionTools(session.id);
+  return policy.names.some((name) => toolEnabled(name, defaults, own));
 }
 
 /** The browser's tools, as far as any session has registered them. */
 function seenBrowserTools(): string[] {
-  const servers = mcpServerNames();
-  const browsers = browserServers();
+  const { servers, browsers } = serversAndBrowsers();
   return knownTools()
     .map((t) => t.name)
     .filter((name) => browserTool(name, servers, browsers));
@@ -1807,16 +1853,23 @@ export function browserExceptions(): SessionRow[] {
     }
     rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
   }
-  const byDefault = browserByDefault();
-  return rows.filter((row) => browserAllowed(row) !== byDefault);
+  // The policy once for all of them, and what each says about tools from the row that was read.
+  const policy = browserPolicy();
+  const byDefault = browserByDefaultWith(policy);
+  return rows.filter(
+    (row) => browserAllowedWith(row, policy, { off: parseToolsOff(row.tools_off), on: parseToolsOff(row.tools_on) }) !== byDefault
+  );
 }
 
 /** Is the browser on for a conversation that has never said anything about it? */
 export function browserByDefault(): boolean {
-  const names = seenBrowserTools();
-  if (!names.length) return !browserColumnDecides();
-  const off = new Set(toolDefaultsOff());
-  return names.some((name) => !off.has(name));
+  return browserByDefaultWith(browserPolicy());
+}
+
+function browserByDefaultWith(policy: BrowserPolicy): boolean {
+  if (!policy.names.length) return !policy.columnDecides;
+  const off = new Set(policy.defaultsOff);
+  return policy.names.some((name) => !off.has(name));
 }
 
 /**

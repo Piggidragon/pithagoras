@@ -62,7 +62,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `UNDERSTORY_PORT` | `3800` | The port the Understory the portal runs listens on (host network). |
 | `NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the package catalogue in Settings → Extensions searches. |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the managed add-ons use. |
-| `PORTAL_CONTAINER_NAME` | — (Compose: `pithagoras`) | The portal's own container name; managed voice joins its network, and the container executor finds its mounts through it. |
+| `PORTAL_CONTAINER_NAME` | — (Compose: `pithagoras`) | The portal's own container name; managed voice joins its network, the container executor finds its mounts through it, and the database repair steps shown by the upgrade page use it. |
 | `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file. |
 | `ALLOW_OPEN` | — | `1` lets a portal with no password listen on the network; without one it binds `127.0.0.1` only. |
 | `GIT_SSH_COMMAND` | `ssh -o BatchMode=yes` | What the Git panel's fetch, pull and push run ssh with. |

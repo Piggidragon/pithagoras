@@ -1,6 +1,5 @@
 import express, { type Router } from "express";
 import {
-  browserAllowed,
   browserAllowlist,
   browserByDefault,
   browserConfigured,
@@ -194,6 +193,7 @@ export function browserRouter(): Router {
     // may drive it: the browser is on unless switched off, so "all of them"
     // is the answer almost always and it tells nobody anything.
     const sessions = browserExceptions();
+    const byDefault = browserByDefault();
     const routines = getDb()
       .prepare("SELECT slug, name FROM routines WHERE browser = 1")
       .all() as { slug: string; name: string }[];
@@ -215,13 +215,14 @@ export function browserRouter(): Router {
       config: { user: service.config().user, hasPassword: Boolean(service.config().password) },
       // Whether a conversation that has never said anything about it has it,
       // and the ones that said otherwise.
-      byDefault: browserByDefault(),
+      byDefault,
       configured: browserConfigured(),
       sessions: sessions.map((s) => ({
         id: s.id,
         title: s.title,
         kind: s.kind,
-        allowed: browserAllowed(s),
+        // They are the ones that differ from the default, so this is the other answer: not worked out again for each.
+        allowed: !byDefault,
       })),
       routines,
     });

@@ -7,7 +7,7 @@ Upgrading Pithagoras is pulling a newer version and starting it. When the new ve
 The database records its schema version. A new version that needs a newer schema does this before the portal opens:
 
 1. **Checks the database** with SQLite's `quick_check`, which reads every page. On a large database this can take a few minutes.
-2. **Backs it up** with SQLite's online backup, to `backups/` in the data folder (`/data/backups` in the image). The file is named after the schema version it came from, for example `portal-v0-20261001-142914.db`. The two newest backups are kept and older ones are removed.
+2. **Backs it up** with SQLite's online backup, to `backups/` in the data folder (`/data/backups` in the image). The file is named after the schema version it came from, for example `portal-v2-20261001-142914.db`. It is written as `<name>.partial` and renamed when it is whole, so an upgrade that is cut off, by a full disk or a restart, leaves no file that could be taken for a backup; the next start removes what it left. The two newest backups are kept and older ones are removed.
 3. **Upgrades it** in one transaction. Either every change is made or none is, so a failure leaves the database as it was, at its old version.
 
 Meanwhile the portal's address shows an **Upgrading** page that reloads itself, and API calls answer `503` with a message saying so. The portal opens on its own when the upgrade is done.
@@ -17,6 +17,8 @@ A new install has nothing to upgrade. A database already at the current version 
 ## When it cannot upgrade
 
 If the database is damaged, or there is no room for the backup, nothing is changed. The portal stays up showing the page with the reason, and the log says the same. It doesn't exit, which in Docker would only restart it into the same failure.
+
+The same goes for a database that a **newer** version of the portal has upgraded: this version doesn't open it, because the newer one may have renamed or dropped what this one reads. The page says which version the database is at. Start the newer version again, or put back the backup from before it upgraded the database (see [Going back](#going-back)).
 
 ### No room for the backup
 
@@ -30,7 +32,7 @@ PORTAL_UPGRADE_BACKUP=skip
 
 ### A damaged database
 
-SQLite can recover everything still readable into a new file. Both shipped Compose files name the container `pithagoras`; the volume holding its data is read from it, since the Compose files name it differently:
+SQLite can recover everything still readable into a new file. Both shipped Compose files name the container `pithagoras` and set `PORTAL_CONTAINER_NAME` to it; the page and the log show these steps with the name your portal has been told. The volume holding its data is read from the container, since the Compose files name it differently:
 
 ```sh
 docker stop pithagoras
@@ -48,6 +50,14 @@ docker start pithagoras
 ```
 
 With `PORTAL_DATA_DIR` set to a folder on the host, `DATA` comes out as that folder.
+
+A portal that doesn't run in a container has no volume to find: stop it and run the same two steps on the data folder, which needs the `sqlite3` command line tool:
+
+```sh
+cd /path/to/data
+sqlite3 portal.db .recover | sqlite3 portal-recovered.db
+mv portal.db portal-damaged.db && rm -f portal.db-wal portal.db-shm && mv portal-recovered.db portal.db
+```
 
 The portal checks the recovered database before upgrading it. Rows on damaged pages can't be recovered, which usually means part of the event history of some conversations. Once you're happy with the result, delete `portal-damaged.db`.
 
@@ -70,4 +80,4 @@ Run a release rather than `latest`, so that going back is changing one value. Ea
    - Portainer: set `PITHAGORAS_VERSION` to the release before.
    - Built from source: `docker tag pithagoras-portal:previous pithagoras-portal:latest`, then `docker compose up -d --no-build portal`.
 
-An older version starts on a newer database too, because upgrades only add tables and columns. Restoring the backup is the way to be sure nothing differs.
+An older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.

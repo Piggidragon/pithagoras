@@ -120,16 +120,21 @@ export function mcpServerNames(): string[] {
 /** Where the agent's browser listens for the debugging protocol. */
 export const BROWSER_CDP = process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
 
-/** The servers configured to attach to our browser, whatever they are called. */
-function connectedServers(): string[] {
+/** The servers of a configuration that attach to our browser, whatever they are called. */
+function connectedIn(config: McpFile): string[] {
   const names: string[] = [];
-  for (const [name, entry] of Object.entries(readMcpFile().config.mcpServers ?? {})) {
+  for (const [name, entry] of Object.entries(config.mcpServers ?? {})) {
     const args = (entry as { args?: unknown }).args;
     if (Array.isArray(args) && args.includes("--cdp-endpoint") && args.includes(BROWSER_CDP)) {
       names.push(name);
     }
   }
   return names;
+}
+
+/** The servers configured to attach to our browser, whatever they are called. */
+function connectedServers(): string[] {
+  return connectedIn(readMcpFile().config);
 }
 
 /** Is some MCP server pointed at our browser, whatever it is called? */
@@ -147,9 +152,16 @@ export function findConnection(): string | null {
  * too — it is the name the rest of the portal has always looked for.
  */
 export function browserServers(): string[] {
-  const names = new Set(connectedServers());
-  if (mcpServerNames().includes(BROWSER_MCP)) names.add(BROWSER_MCP);
-  return [...names];
+  return serversAndBrowsers().browsers;
+}
+
+/** The servers configured and which of them are the browser, from one read of the file: what a pass over many conversations asks once. */
+export function serversAndBrowsers(): { servers: string[]; browsers: string[] } {
+  const config = readMcpFile().config;
+  const servers = Object.keys(config.mcpServers ?? {});
+  const browsers = new Set(connectedIn(config));
+  if (servers.includes(BROWSER_MCP)) browsers.add(BROWSER_MCP);
+  return { servers, browsers: [...browsers] };
 }
 
 /**

@@ -319,7 +319,12 @@ link followed out of it, and what its bytes say it is.
   list, are shown again when it is back, and a delete of one says it could not reach the
   file. A picture that was found has no chat to keep it, so it is dropped with its
   folder and found again when the folder is back, and a delete of one says the same while
-  the folder cannot be reached.
+  the folder cannot be reached. One that has what it was asked for, because its chat was
+  deleted, or an edit that was made of it, is not dropped while its folder is out of
+  reach, such as on a morning when the drive is not mounted: it is the same picture,
+  with its description and its link to the original, when the folder is back. When the
+  portal itself removes the folder, by deleting a project or an agent with its folder,
+  these go with it.
 - **Deleting an agent** does the same with its chats' pictures. With **Keep its folder**
   they stay in the gallery, with what they were asked for, as pictures of that folder
   (named by its folder, as no agent has it), and an agent made under the same name takes

@@ -264,13 +264,21 @@ function locate(row: Row, folders: Map<string, string | FileError> = new Map()):
 }
 
 /**
- * Whether a picture's folder is only out of reach for the moment: a chat's
- * folder on a drive that is not mounted. Its pictures are not gone, and what
- * looks at them leaves them in the list. A chat that is gone is another thing.
- * A picture that was found has no chat to lose it with, and is found again
- * when its folder is back, so it is not kept: only what was recorded is.
+ * Whether a picture's folder is only out of reach for the moment: a folder on a
+ * drive that is not mounted, or one that was renamed away. Its pictures are not
+ * gone, and what looks at them leaves them in the list. A chat that is gone is
+ * another thing. A picture that was found has no chat to lose it with, and is
+ * found again when its folder is back, so it is not kept: only what was recorded
+ * is, and with it what a kept picture was asked for, which a scan cannot give it
+ * back, or the edits that were made of it (see forgetPicturesIn for a folder the
+ * portal removed). A folder that is there and has lost the file is a picture that
+ * is gone.
  */
-const unreachable = (row: Row, e: unknown): boolean => row.origin === "chat" && e instanceof FileError && e.code === "missing" && !(e instanceof ChatGone);
+function unreachable(row: Row, e: unknown): boolean {
+  if (!(e instanceof FileError) || e.code !== "missing" || e instanceof ChatGone) return false;
+  if (row.origin === "chat") return true;
+  return row.origin === "folder" && (row.prompt !== "" || row.params !== "{}" || row.source_id !== null || !!getDb().prepare("SELECT 1 FROM images WHERE source_id = ? LIMIT 1").get(row.id));
+}
 
 /** Whether a picture is still to be shown: its file is there as a plain file, or its folder is out of reach and it may be. */
 function isThere(row: Row, folders: Map<string, string | FileError>): boolean {
@@ -396,7 +404,14 @@ export function pruneMissing(): number {
     if (!isThere(row, folders)) {
       gone.push(row.id);
     } else if (row.origin === "folder" && row.folder) {
-      const real = foundFolder(row.folder, folders);
+      let real: string;
+      try {
+        real = foundFolder(row.folder, folders);
+      } catch (e) {
+        // Kept for a folder that is out of reach for the moment: there is no real place to put it under.
+        if (e instanceof FileError) continue;
+        throw e;
+      }
       // Taken from the list when the same file is already a picture of that folder.
       if (real !== row.folder && !d.prepare("UPDATE OR IGNORE images SET folder = ? WHERE id = ?").run(real, row.id).changes) gone.push(row.id);
     }
@@ -559,10 +574,13 @@ export function scanFolders(): number {
 /** Takes pictures from the list, and what pointed at them from the edits made of them. The files are not touched. */
 function forget(ids: string[]): void {
   const d = getDb();
+  // Each statement once for all the pictures: what was made of a picture is found by its index, not by a pass over the gallery.
+  const remove = d.prepare("DELETE FROM images WHERE id = ?");
+  const unlink = d.prepare("UPDATE images SET source_id = NULL WHERE source_id = ?");
   d.transaction(() => {
     for (const id of ids) {
-      d.prepare("DELETE FROM images WHERE id = ?").run(id);
-      d.prepare("UPDATE images SET source_id = NULL WHERE source_id = ?").run(id);
+      remove.run(id);
+      unlink.run(id);
     }
   })();
 }
@@ -570,15 +588,23 @@ function forget(ids: string[]): void {
 /**
  * Takes the pictures of a folder that was removed from the list: those of every
  * chat that worked in it, routine runs included, which are kept when a project
- * is deleted. A folder that is gone for good cannot be told from a drive that
- * is not mounted, which keeps its pictures, so the portal says it when it is
- * the one that removed the folder. The files went with the folder.
+ * is deleted, and those that were found in it, or kept from a chat that is gone.
+ * A folder that is gone for good cannot be told from a drive that is not
+ * mounted, which keeps its pictures, so the portal says it when it is the one
+ * that removed the folder. The files went with the folder.
  */
 export function forgetPicturesIn(dir: string): number {
-  const rows = getDb()
+  const d = getDb();
+  // The folder is gone, so it cannot be followed: where it led is its parent's, and its name.
+  const parent = realPath(path.dirname(dir));
+  const places = parent ? [dir, path.join(parent, path.basename(dir))] : [dir];
+  const rows = d
     .prepare("SELECT images.id AS id, sessions.workspace AS workspace FROM images JOIN sessions ON sessions.id = images.session_id WHERE images.origin = 'chat'")
     .all() as { id: string; workspace: string }[];
   const gone = rows.filter((row) => isWithinText(dir, row.workspace)).map((row) => row.id);
+  for (const row of d.prepare("SELECT id, folder FROM images WHERE origin = 'folder' AND folder IS NOT NULL").all() as { id: string; folder: string }[]) {
+    if (places.some((place) => isWithinText(place, row.folder))) gone.push(row.id);
+  }
   if (gone.length) forget(gone);
   return gone.length;
 }
