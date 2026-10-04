@@ -56,6 +56,7 @@ import { packageName, webLink } from "../package-names";
 import { prefetchSettings, refreshFailed, useCached } from "../settings-cache";
 import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
+import { local } from "../safe-storage";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
 import { useTheme, type Theme } from "../theme";
 import { humanKey, typed } from "../setting-values";
@@ -116,7 +117,7 @@ const TABS = GROUPS.flatMap((g) => g.tabs);
 const RAIL_KEY = "pithagoras.settings.extension-rail";
 function railSnapshot(): { spec: string; name: string }[] {
   try {
-    const list = JSON.parse(localStorage.getItem(RAIL_KEY) ?? "[]");
+    const list = JSON.parse(local.get(RAIL_KEY) ?? "[]");
     return Array.isArray(list) ? list.filter((e) => e && typeof e.spec === "string" && typeof e.name === "string") : [];
   } catch {
     return [];
@@ -161,11 +162,8 @@ export const ConfigModal = memo(function ConfigModal({
   const configurable = exts.value ? extensions.filter((e) => e.settings.length > 0) : railSnapshot().map((e) => ({ ...e, settings: [] as ExtensionInfo["settings"], placeholder: true }));
   useEffect(() => {
     if (!exts.value) return;
-    try {
-      localStorage.setItem(RAIL_KEY, JSON.stringify(configurable.map((e) => ({ spec: e.spec, name: e.name }))));
-    } catch {
-      // Only a head start for next time.
-    }
+    // Only a head start for next time.
+    local.set(RAIL_KEY, JSON.stringify(configurable.map((e) => ({ spec: e.spec, name: e.name }))));
   }, [exts.value]);
   const activeExt =
     nav.kind === "ext" ? extensions.find((e) => e.spec === nav.spec) : undefined;

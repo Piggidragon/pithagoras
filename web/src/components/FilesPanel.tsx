@@ -21,6 +21,7 @@ import {
 import { ApiError, api, type FileEntry, type Unsaved } from "../api";
 import type { FileActivity } from "../file-activity";
 import { flushFileDraft, keepFileDraft, readFileDraft } from "../file-drafts";
+import { local } from "../safe-storage";
 import { confirmDialog } from "./ConfirmDialog";
 import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
@@ -43,13 +44,7 @@ const sizeOf = (bytes: number): string =>
 
 const HIDDEN_KEY = "filesShowHidden";
 /** Whether names that start with a dot are shown. Off unless it was turned on: they are mostly settings and tools' own folders. */
-const savedShowHidden = (): boolean => {
-  try {
-    return localStorage.getItem(HIDDEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
+const savedShowHidden = (): boolean => local.get(HIDDEN_KEY) === "1";
 
 /** By its name only: whether it is one is the server's to say, from its bytes, and a refusal falls back to the note. */
 const looksLikePicture = (p: string) => /\.(png|jpe?g|gif|webp)$/i.test(p);
@@ -333,11 +328,8 @@ export const FilesPanel = memo(function FilesPanel({
   const toggleHidden = () => {
     const next = !showHidden;
     setShowHidden(next);
-    try {
-      localStorage.setItem(HIDDEN_KEY, next ? "1" : "0");
-    } catch {
-      // Not remembered, but it works for now.
-    }
+    // Not remembered where storage fails, but it works for now.
+    local.set(HIDDEN_KEY, next ? "1" : "0");
   };
 
   const startRename = (entry: FileEntry) => {

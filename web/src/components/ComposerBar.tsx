@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
+import { local } from "../safe-storage";
 import { cacheModels, cachedModels, catalogueFresh, forgetModels } from "../model-catalogue";
 import { ContextPill } from "./ContextPill";
 import { SwitchTrack } from "./SettingsUi";
@@ -38,7 +39,7 @@ const levelsKey = (provider: string | undefined, model: string | undefined) => `
 
 function readLevels(): Record<string, string[]> {
   try {
-    const raw = JSON.parse(localStorage.getItem(LEVELS_KEY) || "{}");
+    const raw = JSON.parse(local.get(LEVELS_KEY) || "{}");
     return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   } catch {
     return {};
@@ -64,7 +65,7 @@ const FOLLOWS_KEY = "pithagoras.thinkingLevelsFollow";
 
 function readFollows(): Record<string, string> {
   try {
-    const raw = JSON.parse(localStorage.getItem(FOLLOWS_KEY) || "{}");
+    const raw = JSON.parse(local.get(FOLLOWS_KEY) || "{}");
     return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   } catch {
     return {};
@@ -89,16 +90,13 @@ function levelsModel(provider: string | null | undefined, model: string | null |
 function cacheLevels(provider: string, model: string, levels: string[], named?: PiConfig["named"]) {
   if (!model || !levels.length) return;
   const follows = named && !named.model ? levelsKey(named.provider ?? "", "") : undefined;
-  try {
-    localStorage.setItem(LEVELS_KEY, JSON.stringify({
-      ...readLevels(),
-      [levelsKey(provider, model)]: levels,
-      ...(follows ? { [follows]: levels } : {}),
-    }));
-    if (follows) localStorage.setItem(FOLLOWS_KEY, JSON.stringify({ ...readFollows(), [follows]: levelsKey(provider, model) }));
-  } catch {
-    // Same as the catalogue: a full quota is not worth failing the pill over.
-  }
+  // Same as the catalogue: storage that will not take it is not worth failing the pill over.
+  local.set(LEVELS_KEY, JSON.stringify({
+    ...readLevels(),
+    [levelsKey(provider, model)]: levels,
+    ...(follows ? { [follows]: levels } : {}),
+  }));
+  if (follows) local.set(FOLLOWS_KEY, JSON.stringify({ ...readFollows(), [follows]: levelsKey(provider, model) }));
 }
 
 const RECENTS_KEY = "pithagoras.recentModels";
@@ -117,7 +115,7 @@ const sameModel = (a: { provider: string; id: string }, b: { provider: string; i
 
 function readRecents(): string[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]");
+    const raw = JSON.parse(local.get(RECENTS_KEY) || "[]");
     return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
   } catch {
     return [];
@@ -126,11 +124,8 @@ function readRecents(): string[] {
 
 function pushRecent(id: string): string[] {
   const next = [id, ...readRecents().filter((x) => x !== id)].slice(0, MAX_RECENTS);
-  try {
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
-  } catch {
-    // Private mode or full storage — recents are a convenience, not a feature.
-  }
+  // Private mode or full storage: recents are a convenience, not a feature.
+  local.set(RECENTS_KEY, JSON.stringify(next));
   return next;
 }
 

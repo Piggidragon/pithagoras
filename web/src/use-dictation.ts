@@ -5,6 +5,7 @@ import { cleanTranscript } from "./dictation";
 import { LiveTranscription } from "./live-transcription";
 import { t } from "./i18n";
 import { micError } from "./mic-error";
+import { local } from "./safe-storage";
 
 /** Where dictated words go: into the message box to be edited, or straight to the agent. */
 export type DictationMode = "review" | "send";
@@ -14,13 +15,7 @@ const MODE_KEY = "dictationMode";
 /** A single recording is cut here and listening carries on, as in voice mode. */
 const MAX_TURN_MS = 60000;
 
-const readMode = (): DictationMode => {
-  try {
-    return localStorage.getItem(MODE_KEY) === "send" ? "send" : "review";
-  } catch {
-    return "review";
-  }
-};
+const readMode = (): DictationMode => (local.get(MODE_KEY) === "send" ? "send" : "review");
 
 /** Everything one listening run owns, so stopping it releases exactly that. */
 interface Run {
@@ -297,11 +292,7 @@ export function useDictation({
 
   const setMode = (next: DictationMode) => {
     setModeState(next);
-    try {
-      localStorage.setItem(MODE_KEY, next);
-    } catch {
-      // A remembered choice is a convenience.
-    }
+    local.set(MODE_KEY, next);
     // Switching to editing with words held back: they belong in the box now.
     if (next === "review") settle();
   };
