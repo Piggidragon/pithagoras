@@ -4,6 +4,7 @@ import { agentFileStatus, isInitialised, runWizard, writeAgentFile, type WizardI
 import { listAgentSessions, listSessions } from "../db.js";
 import { deleteNote, listNotes, markNoteRead, markNotesRead, unreadNotes } from "../activity.js";
 import { heartbeat, setHeartbeat, watchList } from "../heartbeat.js";
+import { serverTimeZone } from "../time-zone.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { FileError } from "../workspace-files.js";
 import { fail } from "./files.js";
@@ -34,7 +35,7 @@ export function agentToApi(a: Agent, chats = 0) {
       quietStart: a.quiet_start ?? "",
       quietEnd: a.quiet_end ?? "",
       // What those hours are read on: the server's clock, which is UTC in a container unless TZ says otherwise.
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timeZone: serverTimeZone(),
       last: a.last_heartbeat,
       status: a.heartbeat_status,
       running: heartbeat.isRunning(a.id),

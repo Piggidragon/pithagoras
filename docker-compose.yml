@@ -33,10 +33,10 @@ services:
       ALLOW_OPEN: ${ALLOW_OPEN:-}
       # Keeps logins valid across restarts; generate with: openssl rand -hex 32
       PORTAL_SECRET: ${PORTAL_SECRET:-}
-      # The time zone of the portal's clock, such as Europe/Berlin. A container
-      # keeps UTC unless it is told one, and the quiet hours of an agent's heartbeat
-      # and a repeating routine's schedule are read on that clock.
-      TZ: ${TZ:-}
+      # The time zone of the portal's clock, such as Europe/Berlin. It is UTC unless
+      # this says otherwise, and the quiet hours of an agent's heartbeat and a
+      # repeating routine's schedule are read on that clock.
+      TZ: ${TZ:-UTC}
       # "skip" upgrades the database without the backup it is otherwise made first,
       # for a volume with no room for the copy. See docs/guide/upgrading.md.
       PORTAL_UPGRADE_BACKUP: ${PORTAL_UPGRADE_BACKUP:-}
