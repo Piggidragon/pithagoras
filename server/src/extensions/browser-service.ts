@@ -138,8 +138,24 @@ function spec(cfg: BrowserConfig) {
   };
 }
 
+export const ALREADY_INSTALLING = 'The browser is already being installed';
+
+/** An install that is on its way: a second one would pull the same image and create the same container, or remove the first's. */
+let installing = false;
+export const installInFlight = () => installing;
+
 export async function install(): Promise<void> {
   if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
+  if (installing) throw new Error(ALREADY_INSTALLING);
+  installing = true;
+  try {
+    await installNow();
+  } finally {
+    installing = false;
+  }
+}
+
+async function installNow(): Promise<void> {
   // Nothing to install without Docker: the local runner uses a browser that is
   // already there, so installing is just starting it.
   if (!dockerAvailable()) return local.start();

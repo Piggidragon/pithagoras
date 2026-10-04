@@ -9,6 +9,7 @@ import {
   LuShieldCheck,
 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
+import { BrowserInstall } from "./BrowserInstall";
 import { inputCls } from "./SettingsUi";
 import { api, type BrowserStatus } from "../api";
 import { pollWhileVisible } from "../poll";
@@ -85,7 +86,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
           </div>
         )}
 
-        <InstallPanel status={status} onAct={act} />
+        <InstallPanel status={status} reload={load} onError={setError} />
 
         <PageHeader
           icon={<LuGlobe />}
@@ -323,7 +324,8 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
           )}
         </section>
 
-        {!status.running && (
+        {/* Only for a browser that is supposed to be up: one that was stopped, never installed, or is the machine's own Chrome is not broken, and has no compose service to start. */}
+        {!status.running && (status.install.mode === "external" || (status.install.mode === "docker" && status.install.container === "running")) && (
           <p className="mt-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-fg-muted">
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
             <span>{tx("The browser container is not answering. It is a separate service — {command} on the host that runs the portal.", { command: <span className="font-mono">docker compose up -d browser</span> })}</span>
@@ -344,12 +346,13 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
  */
 function InstallPanel({
   status,
-  onAct,
+  reload,
+  onError,
 }: {
   status: BrowserStatus;
-  onAct: (fn: () => Promise<unknown>) => void;
+  reload: () => Promise<unknown>;
+  onError: (message: string) => void;
 }) {
-  const [password, setPassword] = useState("");
   const i = status.install;
 
   if (i.container === "running") return null;
@@ -363,7 +366,6 @@ function InstallPanel({
   }
 
   const dockerMode = i.mode === "docker";
-  const needsPassword = dockerMode && !status.config.hasPassword;
 
   return (
     <div className="mb-5 rounded-xl border border-accent/30 bg-accent/5 p-3">
@@ -378,53 +380,7 @@ function InstallPanel({
             }`}
       </p>
 
-      {needsPassword && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={t("a password for its web UI")}
-            className="min-w-[14rem] flex-1 rounded-lg border border-line bg-raised/60 px-2 py-1.5 text-xs outline-none focus:border-accent/60"
-          />
-          <button
-            onClick={async () => {
-              const { password: p } = await api.suggestBrowserPassword();
-              setPassword(p);
-            }}
-            className="rounded-lg bg-fg/5 px-2.5 py-1.5 text-[11px] text-fg-muted transition hover:bg-fg/10"
-          >
-            {t("Suggest one")}
-          </button>
-        </div>
-      )}
-
-      <div className="mt-2 flex flex-wrap gap-2">
-        <button
-          disabled={needsPassword && !password.trim()}
-          onClick={() =>
-            onAct(async () => {
-              if (password.trim()) await api.setBrowserConfig({ password: password.trim() });
-              await (i.container === "stopped" ? api.startBrowser() : api.installBrowser());
-            })
-          }
-          className="rounded-lg bg-accent/12 px-3 py-1.5 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
-        >
-          {i.container === "stopped" ? t("Start it") : i.image || !dockerMode ? t("Install") : t("Install (downloads 4.6GB)")}
-        </button>
-        {i.container === "stopped" && (
-          <button
-            onClick={() => onAct(() => api.removeBrowser(false))}
-            className="rounded-lg bg-fg/5 px-3 py-1.5 text-xs text-fg-muted transition hover:bg-fg/10"
-          >
-            {t("Remove")}
-          </button>
-        )}
-      </div>
-
-      {i.pulling.active && (
-        <p className="mt-2 font-mono text-[11px] text-fg-faint">{i.pulling.line}</p>
-      )}
-      {i.pulling.error && <p className="mt-2 text-[11px] text-danger">{i.pulling.error}</p>}
+      <BrowserInstall status={status} reload={reload} onError={onError} />
     </div>
   );
 }

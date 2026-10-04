@@ -1,6 +1,8 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import express from 'express';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -65,7 +67,8 @@ await new Promise<void>(r => server.listen(process.env.DOCKER_SOCKET, r));
 const browser = await import('../server/src/extensions/browser-service.js');
 const understory = await import('../server/src/extensions/understory-service.js');
 const voice = await import('../server/src/extensions/voice-service.js');
-const { getDb } = await import('../server/src/db.js');
+const { getDb, portalBrowserOn, portalBrowserState, setPortalBrowser } = await import('../server/src/db.js');
+const { browserRouter } = await import('../server/src/api/browser.js');
 after(async () => {
   await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
   getDb().close(); rmSync(dir, { recursive: true, force: true });
@@ -194,6 +197,32 @@ test('an image that is not there is downloaded with the daemon\'s lines shown, t
   await understory.install();
   assert.equal(calls.some(c => c.startsWith('POST /images/create')), false);
   assert.deepEqual((await understory.status()).pulling, { active: false, line: 'done' });
+});
+
+test('a second browser install while one is on its way is refused; the agent is wired to the browser once it is installed, and unwired when it is removed', { timeout: 10_000 }, async () => {
+  reset(); browser.saveConfig({ password: 'secret' }); setPortalBrowser(false);
+  const app = express(); app.use(express.json()); app.use('/api', browserRouter());
+  const web = await new Promise<http.Server>(r => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  const url = `http://127.0.0.1:${(web.address() as AddressInfo).port}/api/browser/install`;
+  const creates = () => calls.filter(c => c.startsWith('POST /containers/create')).length;
+  const open = gate();
+  try {
+    const first = fetch(url, { method: 'POST' });
+    await until(() => browser.pullState().line === 'Pulling fs layer');
+    const second = await fetch(url, { method: 'POST' });
+    assert.equal(second.status, 409);
+    assert.match((await second.json() as { error: string }).error, /already being installed/);
+    assert.equal(portalBrowserOn(), false, 'not wired to a browser that is not there yet');
+    open();
+    assert.equal((await first).status, 200);
+    assert.equal(creates(), 1, 'one container, not two');
+    assert.equal(portalBrowserOn(), true);
+    // Done, so the next install is not refused.
+    assert.equal((await fetch(url, { method: 'POST' })).status, 200);
+
+    assert.equal((await fetch(url, { method: 'DELETE' })).status, 200);
+    assert.equal(portalBrowserState(), 'off');
+  } finally { open(); await new Promise<void>(r => web.close(() => r())); }
 });
 
 test('a download that fails is said, and the install does not go on, by the browser and by Understory', async () => {

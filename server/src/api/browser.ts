@@ -248,10 +248,19 @@ export function browserRouter(): Router {
     res.json({ connectedAs: findConnection() });
   });
 
-  /** Installing, and the lifecycle after it. */
+  /**
+   * Installing, and the lifecycle after it.
+   *
+   * The agent is wired to the browser once it is there, here and not by whichever
+   * page asked: the Browser page and Settings → Add-ons each decided that for
+   * themselves, and a browser installed from the one was left unreachable for the agent.
+   */
   router.post("/browser/install", async (_req, res) => {
+    // Answered before it starts, so that a second click does not even queue behind the first.
+    if (service.installInFlight()) return res.status(409).json({ error: service.ALREADY_INSTALLING });
     try {
       await service.install();
+      setPortalBrowser(true);
       res.json({ ok: true });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
@@ -274,6 +283,8 @@ export function browserRouter(): Router {
     try {
       if (req.query.profile === "forget") await service.forgetProfile();
       else await service.remove();
+      // Unwired once it is gone: tools for a browser that does not exist are the worse of the two.
+      setPortalBrowser(false);
       res.json({ ok: true });
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });

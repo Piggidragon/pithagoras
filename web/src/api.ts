@@ -1579,7 +1579,8 @@ export interface BrowserStatus {
   /** How and whether a browser can run here at all. */
   install: {
     available: boolean;
-    mode?: "docker" | "local";
+    /** "external": a browser the deployment runs itself, which the portal only looks at. */
+    mode?: "docker" | "local" | "external";
     image: boolean;
     container: "absent" | "stopped" | "running" | "unavailable";
     binary?: string | null;

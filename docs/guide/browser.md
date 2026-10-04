@@ -30,8 +30,18 @@ The local path is mostly the portal run from source. It goes headless when there
 is no display, and says so — sign-in pages refuse headless browsers often
 enough to matter.
 
+Install is the same on **Settings → Add-ons** and on the Browser page, and the
+button waits while it runs, so a second click cannot start a second download. The
+image is 4.6 GB; its progress is shown on both pages, and what went wrong if the
+download fails. Once it is installed the agent is connected to it, and when it is
+removed the agent is disconnected, whichever page you used.
+
 **Remove** takes the container away and keeps the profile, so installing again
 finds the logins still there.
+
+The Browser page only says the browser is not answering when its container is up
+and does not answer. A browser you stopped, one that is not installed, and the
+machine's own Chrome are not broken.
 
 ## Logging in
 
