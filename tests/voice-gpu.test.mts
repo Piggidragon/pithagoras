@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/containers/probe-1/wait') return res.end(JSON.stringify({ StatusCode: 0 }));
   if (url.startsWith('/containers/probe-1/logs')) return res.end(JSON.stringify(reading));
   if (url.includes('/stop?')) container.State.Running = false;
-  if (method === 'DELETE' && url === '/containers/pithagoras-voice') container = null;
+  if (method === 'DELETE' && url.split('?')[0] === '/containers/pithagoras-voice') container = null;
   if (url.startsWith('/containers/create?name=pithagoras-voice')) container = { Config: body, HostConfig: body.HostConfig, State: { Running: false } };
   if (url === '/containers/pithagoras-voice/start') container.State.Running = true;
   res.end('{}');
@@ -64,7 +64,7 @@ const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).b
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
 const cardOfCreated = () => created()[0].body.HostConfig.DeviceRequests[0];
 /** The voice container was deleted, not the throwaway one that reads nvidia-smi, and the models volume was not touched. */
-const gone = () => calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice');
+const gone = () => calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice?force=true');
 const volumeKept = () => !calls.some(c => c.method === 'DELETE' && c.url.startsWith('/volumes'));
 /** A managed container of the default engines, as an earlier portal made it: on a card by index, or on Docker's own pick without one. */
 const made = (devices: any, running = false, recipe = 'breeze+whisper:base') => ({ Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1', 'pithagoras.voice-recipe': recipe } },

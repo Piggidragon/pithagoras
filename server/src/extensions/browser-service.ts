@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { getStoredSettings, getDb } from "../db.js";
-import { containerState, dockerAvailable, imagePresent, pullImage, request } from "./docker.js";
+import { containerAction, containerState, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
 import * as local from "./browser-local.js";
 
 /**
@@ -59,7 +59,7 @@ export function saveConfig(patch: Partial<BrowserConfig>): BrowserConfig {
 }
 
 /** Progress of a pull in flight, so a multi-gigabyte download is not silence. */
-let pulling: { active: boolean; line: string; error?: string } = { active: false, line: "" };
+let pulling: PullState = { active: false, line: "" };
 export const pullState = () => pulling;
 
 /**
@@ -154,16 +154,7 @@ export async function install(): Promise<void> {
     throw new Error("Set a password before installing — it guards a browser holding live logins");
   }
 
-  if (!(await imagePresent(IMAGE))) {
-    pulling = { active: true, line: "starting" };
-    try {
-      await pullImage(IMAGE, (line) => (pulling = { active: true, line }));
-      pulling = { active: false, line: "done" };
-    } catch (e) {
-      pulling = { active: false, line: "", error: (e as Error).message };
-      throw e;
-    }
-  }
+  await ensureImage(IMAGE, (state) => (pulling = state));
 
   await request("POST", `/volumes/create`, { Name: VOLUME });
 
@@ -182,31 +173,20 @@ export async function install(): Promise<void> {
 export async function start(): Promise<void> {
   if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   if (!dockerAvailable()) return local.start();
-  const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/start`);
-  // 304 is "already running", which is the state being asked for.
-  if (res.status >= 400 && res.status !== 304) {
-    throw new Error(res.body?.message || `Start failed (${res.status})`);
-  }
+  await containerAction(CONTAINER, "start");
 }
 
 export async function stop(): Promise<void> {
   if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   if (!dockerAvailable()) return local.stop();
-  const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/stop?t=10`);
-  if (res.status >= 400 && res.status !== 304) {
-    throw new Error(res.body?.message || `Stop failed (${res.status})`);
-  }
+  await containerAction(CONTAINER, "stop");
 }
 
 /** Removes the container. The profile volume is left alone — that is the logins. */
 export async function remove(): Promise<void> {
   if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
   if (!dockerAvailable()) return local.stop();
-  await request("POST", `/containers/${CONTAINER}/stop?t=10`).catch(() => {});
-  const res = await request<{ message?: string }>("DELETE", `/containers/${CONTAINER}?force=true`);
-  if (res.status >= 400 && res.status !== 404) {
-    throw new Error(res.body?.message || `Remove failed (${res.status})`);
-  }
+  await containerAction(CONTAINER, "remove");
 }
 
 /** Forgets the logins as well. Separate on purpose, and not undoable. */

@@ -53,7 +53,7 @@ const server = http.createServer(async (req, res) => {
     volumes.delete(name); res.statusCode = 204; return res.end();
   }
   if (url.includes('/stop?')) container.State.Running = false;
-  if (method === 'DELETE' && url === `/containers/${CONTAINER}`) { container = null; res.statusCode = 204; return res.end(); }
+  if (method === 'DELETE' && url.split('?')[0] === `/containers/${CONTAINER}`) { container = null; res.statusCode = 204; return res.end(); }
   if (url.startsWith(`/containers/create?name=${CONTAINER}`)) container = { Config: body, HostConfig: body.HostConfig, State: { Running: false } };
   if (url === `/containers/${CONTAINER}/start`) container.State.Running = true;
   res.end('{}');
@@ -110,7 +110,7 @@ test('install overwrites the settings, and uninstall puts back exactly what they
   const answer = await post('/voice/uninstall');
   assert.deepEqual([answer.status, await answer.json()], [200, { ok: true }]);
   // A running container is stopped, then removed; the volume with the downloads is not touched.
-  assert.deepEqual(calls.filter(c => c.method === 'POST' || c.method === 'DELETE').map(c => `${c.method} ${c.url}`), [`POST /containers/${CONTAINER}/stop?t=10`, `DELETE /containers/${CONTAINER}`]);
+  assert.deepEqual(calls.filter(c => c.method === 'POST' || c.method === 'DELETE').map(c => `${c.method} ${c.url}`), [`POST /containers/${CONTAINER}/stop?t=10`, `DELETE /containers/${CONTAINER}?force=true`]);
   assert.equal(container, null);
   assert.ok(volumes.has(VOLUME));
   const back = await get('/voice');
@@ -283,7 +283,7 @@ test('a service installed before settings were remembered: only what points at i
 test('the downloaded engines and models go when asked, after the container, and not otherwise', async () => {
   reset(); seedContainer(false);
   assert.equal((await post('/voice/uninstall', { removeData: false })).status, 200);
-  assert.deepEqual(removed(), [`/containers/${CONTAINER}`]);
+  assert.deepEqual(removed(), [`/containers/${CONTAINER}?force=true`]);
   assert.ok(volumes.has(VOLUME));
   // The container is stopped already: nothing to stop. The volume is deleted once nothing has it.
   assert.ok(!calls.some(c => c.url.includes('/stop?')));
@@ -294,7 +294,7 @@ test('the downloaded engines and models go when asked, after the container, and 
   // With the container still there, the volume is deleted after it.
   reset(); seedContainer();
   assert.equal((await post('/voice/uninstall', { removeData: true })).status, 200);
-  assert.deepEqual(removed(), [`/containers/${CONTAINER}`, `/volumes/${VOLUME}`]);
+  assert.deepEqual(removed(), [`/containers/${CONTAINER}?force=true`, `/volumes/${VOLUME}`]);
   assert.equal(volumes.size, 0);
   assert.equal((await get('/voice/install')).state, 'absent');
 });

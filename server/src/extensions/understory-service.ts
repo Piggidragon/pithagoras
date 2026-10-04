@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { getSetting, putSetting } from "../db.js";
 import { tlsFiles } from "../http-security.js";
 import { readModelsJson, storedKey } from "../providers.js";
-import { dockerAvailable, imagePresent, pullImage, request } from "./docker.js";
+import { containerAction, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
 import { voiceNetworkMode as sharedNetworkMode } from "./voice-service.js";
 
 /**
@@ -206,7 +206,7 @@ export function spec(cfg: UnderstoryConfig, auth: string, networkMode = "host") 
   };
 }
 
-let pulling: { active: boolean; line: string; error?: string } = { active: false, line: "" };
+let pulling: PullState = { active: false, line: "" };
 
 /** The container by that name: whether it is there, running, and the portal's own. */
 async function inspect(): Promise<{ exists: boolean; running: boolean; ours: boolean }> {
@@ -273,16 +273,7 @@ async function installNow(start = true): Promise<void> {
   if (!dockerAvailable()) throw new Error("The portal cannot reach Docker here, so it cannot run Understory");
   const cfg = config();
   const made = spec(cfg, token(), await sharedNetworkMode());
-  if (!(await imagePresent(IMAGE))) {
-    pulling = { active: true, line: "starting" };
-    try {
-      await pullImage(IMAGE, (line) => (pulling = { active: true, line }));
-      pulling = { active: false, line: "done" };
-    } catch (e) {
-      pulling = { active: false, line: "", error: (e as Error).message };
-      throw e;
-    }
-  }
+  await ensureImage(IMAGE, (state) => (pulling = state));
   await request("POST", "/volumes/create", { Name: VOLUME });
   if ((await onlyOurs()).exists) await removeNow();
   const created = await request<{ message?: string }>("POST", `/containers/create?name=${CONTAINER}`, made);
@@ -292,22 +283,18 @@ async function installNow(start = true): Promise<void> {
 
 async function startNow(): Promise<void> {
   await onlyOurs();
-  const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/start`);
-  if (res.status >= 400 && res.status !== 304) throw new Error(res.body?.message || `Start failed (${res.status})`);
+  await containerAction(CONTAINER, "start");
 }
 
 async function stopNow(): Promise<void> {
   await onlyOurs();
-  const res = await request<{ message?: string }>("POST", `/containers/${CONTAINER}/stop?t=10`);
-  if (res.status >= 400 && res.status !== 304) throw new Error(res.body?.message || `Stop failed (${res.status})`);
+  await containerAction(CONTAINER, "stop");
 }
 
 /** Removes the container. The memory is in its volume, and stays. */
 async function removeNow(): Promise<void> {
   if (!(await onlyOurs()).exists) return;
-  await request("POST", `/containers/${CONTAINER}/stop?t=10`).catch(() => {});
-  const res = await request<{ message?: string }>("DELETE", `/containers/${CONTAINER}?force=true`);
-  if (res.status >= 400 && res.status !== 404) throw new Error(res.body?.message || `Remove failed (${res.status})`);
+  await containerAction(CONTAINER, "remove");
 }
 
 /** Forgets the memory as well. Separate on purpose, and not undoable. */

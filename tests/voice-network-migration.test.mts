@@ -37,7 +37,7 @@ test('managed networking automatically migrates running containers, preserves st
   assert.equal(container.HostConfig.PortBindings,undefined);
   assert.deepEqual(container.HostConfig.Binds,['pithagoras_voice-models:/voice']);
   assert.equal((await voice.status()).state,'running');
-  assert.ok(calls.some(c=>c.method==='DELETE'&&c.url==='/containers/pithagoras-voice'));
+  assert.ok(calls.some(c=>c.method==='DELETE'&&c.url==='/containers/pithagoras-voice?force=true'));
   assert.ok(!calls.some(c=>c.method==='DELETE'&&c.url.startsWith('/volumes')));
   // Updating the portal's identity must reattach the still-running add-on.
   portalId='portal-two';assert.equal((await voice.status()).state,'installing');

@@ -70,7 +70,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/containers/probe-1/wait') return res.end(JSON.stringify({ StatusCode: 0 }));
   if (url.startsWith('/containers/probe-1/logs')) return res.end(dockerGpus ?? '');
   if (url.includes('/stop?')) { container.State.Running = false; onStop?.(); }
-  if (method === 'DELETE' && url === '/containers/pithagoras-voice') container = null;
+  if (method === 'DELETE' && url.split('?')[0] === '/containers/pithagoras-voice') container = null;
   if (url.startsWith('/containers/create?name=pithagoras-voice')) container = { Config: body, HostConfig: body.HostConfig, State: { Running: false } };
   if (url === '/containers/pithagoras-voice/start') container.State.Running = true;
   res.end('{}');
@@ -94,7 +94,7 @@ const reset = () => { host(); portalId = 'portal-one'; container = null; dockerG
 const settle = async () => { for (let n = 0; n < 200 && (await voice.status()).busy; n++) await new Promise(r => setTimeout(r, 10)); };
 const created = () => calls.filter(c => c.url === '/containers/create?name=pithagoras-voice');
 /** The voice container was deleted, not the throwaway one that reads nvidia-smi. */
-const gone = () => calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice');
+const gone = () => calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice?force=true');
 const GPU = (index: number, total: number, free: number, name = `Test GPU ${index}`) => `${index}, ${name}, ${total}, ${free}\n`;
 const env = (spec: any) => Object.fromEntries(spec.Env.map((e: string) => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)]));
 
@@ -569,7 +569,7 @@ test('a rebuild reads the GPU after the running service is stopped, and starts i
   assert.ok(at(c => c.url.includes('/stop?')) >= 0 && at(c => c.url.includes('/stop?')) < at(c => c.url === '/containers/create'), 'its own memory is not counted as taken by others');
   assert.match((await voice.status()).error, /needs about 7\.0 GiB/);
   assert.equal(container.State.Running, true, 'the refusal leaves the service running');
-  assert.equal(calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice'), false);
+  assert.equal(calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice?force=true'), false);
   assert.equal(calls.filter(c => c.url === '/containers/pithagoras-voice/start').length, 1);
   // A choice that fits is stopped once, probed, and replaced.
   calls = []; container = running();
@@ -585,7 +585,7 @@ test('another choice recreates the container, keeps the volume and is not mistak
   container = { Config: { Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1' } }, HostConfig: { NetworkMode: 'container:portal-one' }, State: { Running: true } };
   await voice.install({ tts: 'chatterbox', asr: 'qwen3-asr', asrModel: '1.7b' });
   await settle();
-  assert.ok(calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice'));
+  assert.ok(calls.some(c => c.method === 'DELETE' && c.url === '/containers/pithagoras-voice?force=true'));
   assert.ok(calls.some(c => c.url.includes('/stop?')));
   assert.equal(calls.some(c => c.url.startsWith('/volumes') && c.method === 'DELETE'), false);
   assert.deepEqual(created()[0].body.HostConfig.Binds, ['pithagoras_voice-models:/voice']);
