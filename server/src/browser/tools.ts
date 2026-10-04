@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { BROWSER_CDP } from "../api/mcp.js";
-import { pointAt, pointTo, press, typedLabel, typing, withoutCursor } from "./cursor.js";
+import { pointAt, pointTo, press, typing } from "./cursor.js";
 import { diffViews, findNodes, findRef, pinned, renderView, sectionText, textPage, type AxChild, type View, type Viewport } from "./view.js";
 
 /**
@@ -292,7 +292,8 @@ export function browserTools(sessionId: string) {
       async execute(_id: string, p: { ref: string; text: string; submit?: boolean }) {
         return act(sessionId, `Typed into ${cleanRef(p.ref)}`, async (page) => {
           const { locator } = await element(page, p.ref);
-          await pointAt(page, locator, "Type", await typedLabel(locator, p.text));
+          // The field, never what goes in it: a password or a code would otherwise be on screen.
+          await pointAt(page, locator, "Type");
           await typing(page, true);
           try {
             await locator.fill(p.text, { timeout: 10_000 });
@@ -436,7 +437,8 @@ export function browserTools(sessionId: string) {
       description:
         "Take a picture of what is on screen in the current tab, or of one element by its ref. Use it only when the text view cannot answer: " +
         "layout, images, charts, colours, or a page that shows almost nothing as text, like a canvas. A picture costs more to read than a view. " +
-        "Answers with a JPEG image.",
+        "Answers with a JPEG image. A glass arrow in it, sometimes with a short label, is your own cursor, not part of the page: it points " +
+        "at the element your last action went for, so if it is not where you meant, that action hit the wrong element.",
       promptSnippet: "A picture of the screen, for layout and images",
       promptGuidelines: ["Use browser_screenshot only when layout, images or a canvas matter; browser_snapshot and browser_get_text are cheaper to read."],
       parameters: Type.Object({
@@ -445,9 +447,9 @@ export function browserTools(sessionId: string) {
       async execute(_id: string, p: { ref?: string }) {
         const page = await pageFor(sessionId);
         const target = p.ref ? (await element(page, p.ref)).locator : null;
-        const shot = await withoutCursor(page, () =>
-          target ? target.screenshot({ type: "jpeg", quality: 70, timeout: 10_000 }) : page.screenshot({ type: "jpeg", quality: 70, timeout: 10_000 }),
-        );
+        const shot = target
+          ? await target.screenshot({ type: "jpeg", quality: 70, timeout: 10_000 })
+          : await page.screenshot({ type: "jpeg", quality: 70, timeout: 10_000 });
         return { content: [{ type: "image" as const, data: shot.toString("base64"), mimeType: "image/jpeg" }], details: {} };
       },
     });
