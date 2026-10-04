@@ -41,6 +41,9 @@ object:
 }
 ```
 
+A server in the snippet whose name you already have is not imported over it: it
+is listed as skipped, and the one you have stays as it is.
+
 **The form.** Name, transport, then the fields for that transport. A server is
 `stdio` (a local process), `http` (a URL), or a Unix socket — exactly one of
 them.

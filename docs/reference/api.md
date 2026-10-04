@@ -115,6 +115,10 @@ out of it, by `..` or by a link, is refused with 400.
 `prompt` returns as soon as pi accepts the message, **not** when the work
 finishes. Watch the event stream for progress.
 
+If a Stop got there first, while pi was still starting for the message, the
+answer is `{ ok: true, unsent: true }` and the message was **not** sent: the
+chat shows it as not sent (a `portal_unsent` event), and nothing will answer it.
+
 A message matching a portal builtin is handled without reaching the model — see
 [Slash commands](/guide/commands).
 
@@ -140,7 +144,7 @@ persisted, so they must not move your cursor. Ignore anything `<= 0` when
 tracking position, or reconnecting will skip real history.
 :::
 
-Types worth knowing: `portal_prompt`, `portal_status`, `portal_notice`,
+Types worth knowing: `portal_prompt`, `portal_unsent`, `portal_status`, `portal_notice`,
 `agent_end`, `extension_ui_request`, `extension_ui_cancel`, `extension_error`,
 `stderr`, `queue_update`, `portal_prefill`, `message_update`, `message_end`, `tool_execution_update`, and `tool_execution_end`, plus other pi lifecycle events.
 
@@ -415,15 +419,15 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `PUT /api/agents/:id/voice` | `{ voice }` — the voice it speaks with in voice mode: `"design"`, a voice library id, one of Kokoro's voice ids (used while Kokoro speaks), or `""` for the one in the voice settings |
 | `GET /api/agent/orb?session=` | The avatar voice mode shows for that chat: its agent's, or the first agent's |
 | `POST /api/agent/sessions` | `{ agent?, title? }` — a conversation with that agent, the first without one |
-| `GET /api/agent/setup`, `POST /api/agent/setup`, `PUT /api/agent/files/:name` | The same for the first agent |
+| `GET /api/agent/setup`, `POST /api/agent/setup`, `PUT /api/agent/files/:name` | The same for the first agent, answered by the same handlers: the 409 for a file that changed, and `kept` |
 
 ## People and audit
 
 | Route | Purpose |
 | --- | --- |
 | `GET /api/people` | List known people and roles. |
-| `PATCH /api/people/:key` | Update name, role or notes. |
-| `DELETE /api/people/:key` | Forget a person. |
+| `PATCH /api/people/:key` | Update name, role or notes. Moving the last primary user to another role is refused with 409 and `code: "last-primary"`; `force: true` in the body does it anyway. |
+| `DELETE /api/people/:key` | Forget a person. The last primary user is refused the same way, unless the query has `?force=1`. |
 | `GET /api/audit?limit=2000` | Read up to all 2,000 retained decisions (default 200), newest first. |
 | `DELETE /api/audit?through=<id>` | Clear the log: every decision up to and including `through` (the newest one the caller saw, so a decision recorded since survives), or every decision without it. Earlier `cleared` entries stay. A `through` that is not an entry id is refused with 400. Answers `{ removed }`, and a clear that removed something leaves one `cleared` entry saying how many. |
 | `GET /api/tool-rules` | List standing tool permissions. |
@@ -438,7 +442,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `PUT /api/mcp/servers/:name` | Add or update a server. `{ entry, from? }`: with `from` it is a rename. A name that another server has is refused with 409 and `code: "exists"`. |
 | `DELETE /api/mcp/servers/:name` | Remove a server. |
 | `PUT /api/mcp/settings` | Update MCP settings. |
-| `POST /api/mcp/import` | Import server configuration. |
+| `POST /api/mcp/import` | `{ text }` — import pasted server configuration. A server whose name is taken is not replaced: it is listed in `skipped` with the reason, beside those it could not use. |
 | `PUT /api/mcp/raw` | Save the raw configuration after JSON validation. |
 
 ## Skills
@@ -452,7 +456,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `POST /api/skills/:name/enabled` | Enable or disable a skill. |
 | `POST /api/skills/preview-import` | Preview a repository import: the skills found, those that cannot be imported and why, and the commit looked at (`sha`). |
 | `POST /api/skills/import` | Import selected skills. `sha` (optional) is the commit the preview saw, which is then what is installed; the answer lists `imported` and `skipped`. |
-| `POST /api/skills/:name/update` | Refresh an imported skill. |
+| `POST /api/skills/:name/update` | Refresh an imported skill. A skill that was not imported answers 400, and one that is not in its repository any more 404; when nothing was updated the answer is `{ error, imported, skipped }`, `skipped` saying why. |
 
 ## Routines
 

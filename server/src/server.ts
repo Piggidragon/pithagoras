@@ -53,12 +53,6 @@ import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
 import { heartbeat } from "./heartbeat.js";
 import { deleteNotesOf } from "./activity.js";
-import {
-  agentFileStatus,
-  runWizard,
-  writeAgentFile,
-  type WizardInput,
-} from "./agent-setup.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
@@ -682,38 +676,6 @@ app.post("/api/agent/sessions", (req, res) => {
 });
 
 // --- the agent's home directory ---
-
-app.get("/api/agent/setup", (_req, res) => {
-  res.json(agentFileStatus());
-});
-
-/** Run the wizard. Refuses to overwrite an existing MEMORY.md. */
-app.post("/api/agent/setup", (req, res) => {
-  const body = (req.body ?? {}) as WizardInput;
-  if (typeof body.agentName !== "string" || !body.agentName.trim()) {
-    return res.status(400).json({ error: "The agent needs a name" });
-  }
-  if (typeof body.userName !== "string" || !body.userName.trim()) {
-    return res.status(400).json({ error: "Who is it working for?" });
-  }
-  try {
-    runWizard(body);
-    res.json(agentFileStatus());
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message });
-  }
-});
-
-app.put("/api/agent/files/:name", (req, res) => {
-  const content = req.body?.content;
-  if (typeof content !== "string") return res.status(400).json({ error: "content required" });
-  try {
-    writeAgentFile(req.params.name, content);
-    res.json(agentFileStatus());
-  } catch (e) {
-    res.status(400).json({ error: (e as Error).message });
-  }
-});
 
 /**
  * The avatar voice mode shows for a chat (`?session=`): its agent's, and the

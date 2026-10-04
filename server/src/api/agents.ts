@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { AgentError, DEFAULT_AGENT, agentOf, channelsOf, createAgent, getAgent, listAgents, orbOf, renameAgent, setOrb, setVoice, type Agent } from "../agents.js";
+import { AgentError, DEFAULT_AGENT, agentOf, channelsOf, createAgent, defaultAgent, getAgent, listAgents, orbOf, renameAgent, setOrb, setVoice, type Agent } from "../agents.js";
 import { agentFileStatus, isInitialised, runWizard, writeAgentFile, type WizardInput } from "../agent-setup.js";
 import { listAgentSessions, listSessions } from "../db.js";
 import { deleteNote, listNotes, markNoteRead, markNotesRead, unreadNotes } from "../activity.js";
@@ -157,10 +157,7 @@ export function agentsRouter(): Router {
     if (agent) res.json(agentFileStatus(agent.home));
   });
 
-  /** The setup wizard, for this agent's home. Writes the files that are not there and leaves the others, `kept` in the answer. */
-  router.post("/agents/:id/setup", (req, res) => {
-    const agent = agentOr404(req.params.id, res);
-    if (!agent) return;
+  const setUp = (agent: Agent, req: express.Request, res: express.Response) => {
     const body = (req.body ?? {}) as WizardInput;
     if (typeof body.agentName !== "string" || !body.agentName.trim()) return res.status(400).json({ error: "The agent needs a name" });
     if (typeof body.userName !== "string" || !body.userName.trim()) return res.status(400).json({ error: "Who is it working for?" });
@@ -170,23 +167,37 @@ export function agentsRouter(): Router {
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
-  });
+  };
 
-  /** `{ content, mtime }`: `mtime` is the file's as the page read it; a file the agent has written since is not overwritten (409). */
-  router.put("/agents/:id/files/:name", (req, res) => {
-    const agent = agentOr404(req.params.id, res);
-    if (!agent) return;
+  const saveFile = (agent: Agent, name: string, req: express.Request, res: express.Response) => {
     const { content, mtime } = req.body ?? {};
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
     if (mtime !== undefined && typeof mtime !== "number") return res.status(400).json({ error: "mtime must be a number" });
     try {
-      writeAgentFile(req.params.name, content, agent.home, mtime);
+      writeAgentFile(name, content, agent.home, mtime);
       res.json(agentFileStatus(agent.home));
     } catch (e) {
       if (e instanceof FileError) return fail(res, e);
       res.status(400).json({ error: (e as Error).message });
     }
+  };
+
+  /** The setup wizard, for this agent's home. Writes the files that are not there and leaves the others, `kept` in the answer. */
+  router.post("/agents/:id/setup", (req, res) => {
+    const agent = agentOr404(req.params.id, res);
+    if (agent) setUp(agent, req, res);
   });
+
+  /** `{ content, mtime }`: `mtime` is the file's as the page read it; a file the agent has written since is not overwritten (409). */
+  router.put("/agents/:id/files/:name", (req, res) => {
+    const agent = agentOr404(req.params.id, res);
+    if (agent) saveFile(agent, req.params.name, req, res);
+  });
+
+  // The first agent's, at the addresses from before there were several: the same handlers, so the same answers.
+  router.get("/agent/setup", (_req, res) => res.json(agentFileStatus(defaultAgent().home)));
+  router.post("/agent/setup", (req, res) => setUp(defaultAgent(), req, res));
+  router.put("/agent/files/:name", (req, res) => saveFile(defaultAgent(), req.params.name, req, res));
 
   return router;
 }

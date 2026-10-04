@@ -35,7 +35,18 @@ const auth = () => {
 /** Self-signed upstream on loopback: verifying it would mean pinning our own cert. */
 const agent = new https.Agent({ rejectUnauthorized: false });
 
-const upstreamPath = (url: string) => url.slice(PREFIX.length) || "/";
+/** Where on the browser's own server an address of the portal's /browser-ui is. */
+function upstreamPath(url: string): string {
+  const rest = url.slice(PREFIX.length);
+  return rest.startsWith("/") ? rest : `/${rest}`;
+}
+
+/** Is `url` the browser's, however the prefix is cased — as Express matches the route? */
+function isBrowserUrl(url: string | undefined): url is string {
+  if (url === undefined || url.slice(0, PREFIX.length).toLowerCase() !== PREFIX) return false;
+  const next = url[PREFIX.length];
+  return next === undefined || next === "/" || next === "?";
+}
 
 /**
  * What goes on to the browser: the request as it came, without the portal's own
@@ -59,9 +70,16 @@ function answered(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
   return { ...headers, "content-security-policy": own ? `${own}, ${FRAME_ANCESTORS}` : FRAME_ANCESTORS };
 }
 
-/** An answer to a connection that is not going to become a stream, then closed. */
+/**
+ * An answer to a connection that is not going to become a stream, then closed.
+ * Not left open for the client to close: one that never does would hold the
+ * portal's end, and a descriptor, for as long as the portal runs.
+ */
 function refuse(socket: Duplex, status: number, message: string): void {
   socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  const giveUp = setTimeout(() => socket.destroy(), 5_000);
+  giveUp.unref();
+  socket.once("close", () => clearTimeout(giveUp));
 }
 
 /**
@@ -101,7 +119,11 @@ export function mountBrowserProxy(app: Express): void {
  */
 export function attachBrowserUpgrade(server: http.Server): void {
   server.on("upgrade", (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (!req.url?.startsWith(PREFIX)) return;
+    // With a listener here Node leaves every upgrade to it — no parser, no
+    // timeout, no answer — so one that is not the browser's is answered too, and
+    // a client that resets the connection is not an error nobody listens to.
+    socket.on("error", () => {});
+    if (!isBrowserUrl(req.url)) return refuse(socket, 404, "Not Found");
     // Express never sees an upgrade, so requireAuth did not either: the same
     // login, asked here. And a page of another site may not open the stream with
     // the visitor's cookie — a browser names where the page came from.

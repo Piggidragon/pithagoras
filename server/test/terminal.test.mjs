@@ -151,6 +151,59 @@ test("a client that goes away while the shell is held back for it does not leave
   }
 });
 
+/** A client of the stream that is connected and does not read, until it is told to. */
+const stalledClient = (id) =>
+  new Promise((resolve) => http.get(`${base}/terminal/${id}/stream`, { agent: false }, (r) => { r.pause(); resolve(r); }));
+
+test("a client that stopped reading does not hold the shell for one that keeps up, and is let go for it", async (t) => {
+  const id = await openShell(t);
+  const counter = path.join(home, "written-two");
+  await post(`/terminal/${id}/input`, { data: `n=0; while :; do printf '%0262144d\\n' 0; n=$((n+1)); echo $n > ${counter}; done\n` });
+  // The old connection of a page whose network dropped: connected, and reading nothing.
+  const stale = await stalledClient(id);
+  const staleGone = new Promise((resolve) => { stale.on("close", resolve); stale.on("error", () => {}); });
+  // The same page after it reconnected.
+  let received = 0;
+  const live = await new Promise((resolve) => http.get(`${base}/terminal/${id}/stream`, { agent: false }, (r) => { r.on("data", (chunk) => { received += chunk.length; }); resolve(r); }));
+  try {
+    // Held for the stale one, the shell would stand at what the pipes hold: some tens of pieces of 256 KiB.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    assert.ok(received > 12_000_000, `${received} bytes reached the client that was reading`);
+    const before = received;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.ok(received > before, "and it goes on");
+    // The stale one was let go once it was as far behind as it may be: reading again, it gets what was queued for it and then the end.
+    stale.on("data", () => {});
+    stale.resume();
+    await Promise.race([staleGone, new Promise((_, reject) => setTimeout(() => reject(new Error("the stale client was not let go")), 5000))]);
+  } finally {
+    live.destroy();
+    stale.destroy();
+  }
+});
+
+test("a client that is the only one and takes nothing for too long is let go, and the shell goes on without it", async (t) => {
+  const id = await openShell(t);
+  const counter = path.join(home, "written-dead");
+  await post(`/terminal/${id}/input`, { data: `n=0; while :; do printf '%0262144d\\n' 0; n=$((n+1)); echo $n > ${counter}; done\n` });
+  const written = () => { try { return Number(readFileSync(counter, "utf8")) || 0; } catch { return 0; } };
+  const res = await stalledClient(id);
+  const gone = new Promise((resolve) => { res.on("close", resolve); res.on("error", () => {}); });
+  try {
+    const held = await settled(written);
+    assert.ok(held > 0 && held < 256, "the shell is held back for it at first");
+    // Nothing is read from here on, and it goes on all the same once the client has been let go.
+    const deadline = Date.now() + 20_000;
+    while (written() < held + 100 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(written() >= held + 100, "the shell does not wait for a connection that takes nothing");
+    res.on("data", () => {});
+    res.resume();
+    await Promise.race([gone, new Promise((_, reject) => setTimeout(() => reject(new Error("the client was not let go")), 5000))]);
+  } finally {
+    res.destroy();
+  }
+});
+
 test("the scrollback a client that connects late is given is the end of what was written, cut to its size", async (t) => {
   const id = await openShell(t);
   // 300,000 characters in pieces, then a line to look for: the first of them cannot all be there.

@@ -39,3 +39,15 @@ test("a server is still changed under its own name, renamed to a free one, and a
   assert.equal((await put("fresh", { command: "x" })).status, 200);
   assert.ok(servers().fresh);
 });
+
+test("a pasted config adds the servers that are new and leaves the one of the same name as it was", async () => {
+  const text = JSON.stringify({ mcpServers: { github: { command: "npx", args: ["-y", "github-mcp"] }, pasted: { command: "pasted-mcp" } } });
+  const res = await fetch(`${base}/api/mcp/import`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+  const body = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(body));
+  assert.deepEqual(body.added, ["pasted"]);
+  assert.deepEqual(body.skipped, [{ name: "github", reason: "A server called github already exists" }]);
+  assert.deepEqual(servers().github.oauth, { clientId: "kept" });
+  assert.equal(servers().github.command, undefined);
+  assert.equal(servers().pasted.command, "pasted-mcp");
+});

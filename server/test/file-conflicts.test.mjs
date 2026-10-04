@@ -48,6 +48,27 @@ test("an agent's file is saved with the time the page read it at, and not over w
   assert.equal((await call("PUT", "/api/agents/home/files/notes.txt", { content: "x" })).status, 400, "only the agent's own files");
 });
 
+test("the first agent's older addresses answer as the scoped ones do: a file changed since is not overwritten, and the wizard names what it kept", async () => {
+  const file = path.join(home, "agent-home", "MEMORY.md");
+  writeFileSync(file, "# MEMORY.md\n\nBefore.\n");
+  const opened = (await call("GET", "/api/agent/setup")).body;
+  writeFileSync(file, "# MEMORY.md\n\nWhat the agent wrote.\n");
+  utimesSync(file, new Date(), new Date(memory(opened).mtime + 60_000));
+  const stale = await call("PUT", "/api/agent/files/MEMORY.md", { content: "old page text", mtime: memory(opened).mtime });
+  assert.equal(stale.status, 409, JSON.stringify(stale.body));
+  assert.equal(stale.body.code, "conflict");
+  assert.equal(readFileSync(file, "utf8"), "# MEMORY.md\n\nWhat the agent wrote.\n");
+  assert.equal((await call("PUT", "/api/agent/files/MEMORY.md", { content: "x", mtime: "soon" })).status, 400);
+
+  const reread = (await call("GET", "/api/agent/setup")).body;
+  assert.equal((await call("PUT", "/api/agent/files/MEMORY.md", { content: "Fixed.", mtime: memory(reread).mtime })).status, 200);
+
+  const wizard = await call("POST", "/api/agent/setup", { agentName: "Ada", userName: "Sam" });
+  assert.equal(wizard.status, 200, JSON.stringify(wizard.body));
+  assert.ok(wizard.body.kept.includes("MEMORY.md"), "the file that was there is named, not silently kept");
+  assert.equal(readFileSync(file, "utf8"), "Fixed.\n");
+});
+
 test("a project's instructions are saved with the time they were read at", async () => {
   const made = await call("POST", "/api/projects", { name: "demo", instructions: "Use tabs." });
   assert.equal(made.status, 200, JSON.stringify(made.body));

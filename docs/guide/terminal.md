@@ -29,7 +29,12 @@ scrollback in the page.
 Output comes to the page as a server-sent event stream and keystrokes go back as
 requests, so nothing but plain HTTP is needed behind a reverse proxy. The last
 200,000 characters are kept on the server and replayed when you reconnect, so
-closing the panel or reloading the page keeps the screen. A shell nobody is
+closing the panel or reloading the page keeps the screen. A command that writes
+faster than the page takes it waits, as at a terminal, but only for a page that
+is still reading: one that has taken nothing for ten seconds — a laptop that
+went to sleep, a phone that lost its network — is let go, and the page opens a
+new connection and is given the replay again. A page that stopped reading does
+not stop the shell for another one that is watching. A shell nobody is
 watching for a while is ended; closing the panel ends it at once, together with
 what it started. If the connection to the shell is lost — it exited, or the portal
 restarted — the panel says so once; close it and open it again for a new one.

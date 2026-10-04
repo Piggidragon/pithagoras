@@ -328,20 +328,21 @@ test("the window's budget is a fresh one when the window is over", () => {
 // --- the agent's browser ---
 
 /** A request for the upgrade to a stream, as a browser makes it, with `after` as the bytes the page sends first. */
-function upgrade(headers = {}, after = "") {
+function upgrade(headers = {}, after = "", url = "/browser-ui/websockify") {
   const socket = net.connect(port, "127.0.0.1");
   let text = "";
   socket.on("data", (d) => { text += d; });
   // Refused and closed on is what some of these are about; the answer is what is read.
   socket.on("error", () => {});
   const lines = [
-    "GET /browser-ui/websockify HTTP/1.1", `Host: 127.0.0.1:${port}`, "Connection: Upgrade", "Upgrade: websocket",
+    `GET ${url} HTTP/1.1`, `Host: 127.0.0.1:${port}`, "Connection: Upgrade", "Upgrade: websocket",
     "Sec-WebSocket-Version: 13", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
     ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`),
   ];
   // One write, so that what follows the headers arrives with them, as it does from a browser.
   socket.write(`${lines.join("\r\n")}\r\n\r\n${after}`);
-  return { socket, text: () => text };
+  const closed = new Promise((resolve) => socket.once("close", resolve));
+  return { socket, text: () => text, closed };
 }
 const until = async (check, what) => {
   for (let i = 0; i < 100; i++) {
@@ -368,6 +369,19 @@ test("the browser page and its stream are behind the login: nothing reaches the 
   wrong.socket.destroy();
 
   assert.deepEqual([browser.requests.length, browser.upgrades.length], [0, 0], "the browser was never asked");
+});
+
+test("an upgrade that is not the browser's is answered and closed, not held open for whoever sent it", async () => {
+  browser.upgrades.length = 0;
+  // Nothing else takes upgrades, so each of these is the portal's to answer: the page, the API, and the browser's prefix in other letters.
+  for (const url of ["/", "/api/sessions", "/browser-uifoo", "/BROWSER-UI/websockify"]) {
+    const stream = upgrade({}, "", url);
+    await until(() => stream.text().includes("\r\n\r\n"), `an answer to ${url}`);
+    assert.match(stream.text(), url.startsWith("/BROWSER") ? /^HTTP\/1\.1 401 / : /^HTTP\/1\.1 404 /, url);
+    // Closed from the portal's side too, with the client still connected.
+    await Promise.race([stream.closed, new Promise((_, reject) => setTimeout(() => reject(new Error(`${url} was left open`)), 3000))]);
+  }
+  assert.equal(browser.upgrades.length, 0, "and nothing went to the browser");
 });
 
 test("signed in, the page is the browser's, with the browser's own login added and the portal's left out", async () => {

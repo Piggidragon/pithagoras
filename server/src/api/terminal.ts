@@ -34,6 +34,17 @@ const MAX_SCROLLBACK = 200_000;
  */
 const UNWATCHED_MS = 5 * 60_000;
 
+/**
+ * How long a client may sit on what it was sent before it is let go. A page
+ * whose network dropped, or that a phone suspended, keeps its connection and
+ * takes nothing from it, possibly for a quarter of an hour; its page opens a
+ * new one and is given the scrollback, which is all it would have missed.
+ */
+const STALL_MS = 10_000;
+
+/** What a client that is behind may have queued while another keeps up, before it is let go for it. */
+const MAX_BEHIND = 4_000_000;
+
 /** A client of the stream: takes what the shell wrote, and says whether it has room for more. */
 type Listener = (chunk: string) => boolean;
 
@@ -75,21 +86,28 @@ function deliver(term: Term, text: string): void {
 }
 
 /**
- * The shell is held while a client is behind: a command that writes faster than
- * the connection takes it would otherwise be read as fast as it can write, and
- * queued in the portal's memory, until there is no more of it. Not read, the
- * pipe fills, and `script` and the command with it wait, as at a terminal.
+ * The shell is held while every client is behind: a command that writes faster
+ * than the connection takes it would otherwise be read as fast as it can write,
+ * and queued in the portal's memory, until there is no more of it. Not read,
+ * the pipe fills, and `script` and the command with it wait, as at a terminal.
+ * One that keeps up does not wait for one that does not: that one is let go
+ * when it has been behind too long or too far.
  */
+function settle(term: Term): void {
+  const held = term.listeners.size > 0 && term.waiting.size >= term.listeners.size;
+  for (const out of [term.proc.stdout, term.proc.stderr]) {
+    if (held) out?.pause();
+    else out?.resume();
+  }
+}
+
 function hold(term: Term, listener: Listener): void {
   term.waiting.add(listener);
-  term.proc.stdout?.pause();
-  term.proc.stderr?.pause();
+  settle(term);
 }
 
 function release(term: Term, listener: Listener): void {
-  if (!term.waiting.delete(listener) || term.waiting.size) return;
-  term.proc.stdout?.resume();
-  term.proc.stderr?.resume();
+  if (term.waiting.delete(listener)) settle(term);
 }
 
 /**
@@ -259,13 +277,23 @@ export function terminalRouter(): Router {
       "X-Accel-Buffering": "no",
     });
 
+    let stall: NodeJS.Timeout | undefined;
+    /** Ends this client's stream; its page opens a new one, and is given the scrollback. */
+    const drop = () => res.destroy();
     const send: Listener = (chunk) => {
       const room = res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-      if (!room && !term.waiting.has(send)) {
+      if (room) return true;
+      if (!term.waiting.has(send)) {
         hold(term, send);
-        res.once("drain", () => release(term, send));
+        stall = setTimeout(drop, STALL_MS);
+        res.once("drain", () => {
+          clearTimeout(stall);
+          release(term, send);
+        });
+      } else if (res.writableLength > MAX_BEHIND) {
+        drop();
       }
-      return room;
+      return false;
     };
     term.listeners.add(send);
     // What is already on screen, so reconnecting does not show an empty shell.
@@ -275,9 +303,11 @@ export function terminalRouter(): Router {
     const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
     req.on("close", () => {
       clearInterval(heartbeat);
+      clearTimeout(stall);
       term.listeners.delete(send);
       // Gone, it will not drain: the shell is not to wait for it.
       release(term, send);
+      settle(term);
       watchUnattended(term);
     });
   });

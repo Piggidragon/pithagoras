@@ -333,6 +333,11 @@ export function mcpRouter(): Router {
         skipped.push({ name, reason: problem });
         continue;
       }
+      // As the form's save refuses it: what is there is somebody's setup, and a pasted README snippet would replace it unseen.
+      if (Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
+        skipped.push({ name, reason: `A server called ${name} already exists` });
+        continue;
+      }
       config.mcpServers[name] = entry as Record<string, unknown>;
       added.push(name);
     }
