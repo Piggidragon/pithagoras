@@ -120,20 +120,7 @@ function replaceFile(text: string): void {
   writeFileAtomic(file, text);
 }
 
-/**
- * Change pi's settings file without losing what else is in it.
- *
- * Read-modify-write on a file pi also owns, so two precautions. The write goes
- * through a rename, so a reader never sees half of it. And the portal's own
- * writes are serialised, so a slider released at the same moment as a Save
- * cannot interleave and drop one of the two changes.
- *
- * What this cannot do is coordinate with pi itself: pi has no setter for most
- * of these fields, so the portal writes the file directly, and a pi write
- * landing between the read and the rename would still be lost. That window is
- * milliseconds wide and pi only writes on a deliberate action, so it is a
- * smaller risk than the alternative of reaching into its internals.
- */
+/** The portal's own writes to the file, one after the other: the last of them. */
 let writeChain: Promise<unknown> = Promise.resolve();
 
 /**
@@ -148,6 +135,19 @@ export function inTurnWithSettings<T>(work: () => T): Promise<T> {
 }
 
 /**
+ * Change pi's settings file without losing what else is in it.
+ *
+ * Read-modify-write on a file pi also owns, so two precautions. The write goes
+ * through a rename, so a reader never sees half of it. And the portal's own
+ * writes are serialised, so a slider released at the same moment as a Save
+ * cannot interleave and drop one of the two changes.
+ *
+ * What this cannot do is coordinate with pi itself: pi has no setter for most
+ * of these fields, so the portal writes the file directly, and a pi write
+ * landing between the read and the rename would still be lost. That window is
+ * milliseconds wide and pi only writes on a deliberate action, so it is a
+ * smaller risk than the alternative of reaching into its internals.
+ *
  * `written` runs once the file is in place, still in turn with other writes:
  * for what is kept elsewhere alongside it, which must not change when the
  * file did not.

@@ -15,11 +15,10 @@
 /**
  * The MCP the portal attaches the agent's browser as.
  *
- * Its tools arrive named `browser_<whatever>`, and they are the one group here
- * that already has a switch: the globe beside the composer, which grants the
- * session the browser itself. Two switches for one question is one too many,
- * and the weaker of them is this one — turning the tools off does not take the
- * browser away, it only stops offering it.
+ * Its tools arrive named `browser_<whatever>`, and they are switched here like
+ * any other server's: having the browser is having its tools, and there is no
+ * second switch for it. The globe beside the composer only shows or hides the
+ * view of the browser the agent is driving.
  */
 export const BROWSER_MCP = "browser";
 

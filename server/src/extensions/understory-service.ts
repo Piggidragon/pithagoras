@@ -88,11 +88,10 @@ export function config(): UnderstoryConfig {
 const put = putSetting;
 
 /**
- * Saved as given, except that a custom address sent without a key keeps the
- * one it had, while the address is the same: the page never holds it, so it
- * cannot send it back.
+ * A choice as it would be saved: as given, except that a custom address sent
+ * without a key keeps the one it had, for the same address only. The page never
+ * holds the key, so it cannot send it back.
  */
-/** A choice as it would be saved: a custom address sent without a key keeps the one it had, for the same address only. */
 export function withSavedKey(llm: LlmChoice): LlmChoice {
   const had = config().llm;
   // Only for the same address: a key is the one server's, and must not go to another.
@@ -326,6 +325,9 @@ export function lastDream(): DreamRun | null {
   }
 }
 
+/** In every script the portal runs there, so one given up on can be found and ended. */
+const MARK = "pithagoras-portal-run";
+
 /**
  * Code run inside Understory's container, with its own library, settings and
  * bundle — Understory has no API that writes, and none that tidies up on
@@ -333,9 +335,6 @@ export function lastDream(): DreamRun | null {
  * goes. Its input is handed over base64'd in the environment; it prints what
  * it came to, as JSON, as its last line.
  */
-/** In every script the portal runs there, so one given up on can be found and ended. */
-const MARK = "pithagoras-portal-run";
-
 function script(body: string): string {
   return `/* ${MARK} */ (async () => {
   const m = await import("@understory/core");

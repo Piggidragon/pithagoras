@@ -27,11 +27,6 @@ const IN_SNAPSHOT = new Set(["message_update", "tool_execution_update", "portal_
 export function eventsRouter(): Router {
   const router = express.Router();
 
-  /**
-   * Replay-then-tail. The client passes the last seq it saw, so reconnecting
-   * after minutes or days delivers exactly what was missed and then continues
-   * live — no gap, no duplicates.
-   */
   /** What came before a cursor: the transcript scrolling back rather than forward. */
   router.get("/sessions/:id/events/before", (req, res) => {
     const session = getSession(req.params.id);
@@ -44,6 +39,11 @@ export function eventsRouter(): Router {
     res.type("json").send(`{"events":[${rows.map(eventJson).join(",")}],"more":${rows.length === limit}}`);
   });
 
+  /**
+   * Replay-then-tail. The client passes the last seq it saw, so reconnecting
+   * after minutes or days delivers exactly what was missed and then continues
+   * live — no gap, no duplicates.
+   */
   router.get("/sessions/:id/events", (req, res) => {
     const session = getSession(req.params.id);
     if (!session) return res.status(404).json({ error: "Not found" });

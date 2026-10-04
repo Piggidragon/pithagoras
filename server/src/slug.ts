@@ -3,8 +3,6 @@
  *
  *   "Cool Project"   -> "cool-project"
  *   "  My   App!  "  -> "my-app"
- *
- * The result is also used as the session title, so one name drives both.
  */
 export function slugify(input: string): string {
   return input
