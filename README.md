@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="https://thecodacus.github.io/pithagoras/">Documentation</a> ·
-  <a href="https://thecodacus.github.io/pithagoras/guide/deploying">Deploying</a> ·
-  <a href="https://thecodacus.github.io/pithagoras/channels/writing-a-channel">Write a channel</a>
+  <a href="https://thecodacus.github.io/Pithagoras/">Documentation</a> ·
+  <a href="https://thecodacus.github.io/Pithagoras/guide/deploying">Deploying</a> ·
+  <a href="https://thecodacus.github.io/Pithagoras/channels/writing-a-channel">Write a channel</a>
 </p>
 
 ---
@@ -29,7 +29,7 @@ adds 150–300 tokens per tool.
 
 ```bash
 git clone https://github.com/thecodacus/pithagoras.git && cd pithagoras
-cp .env.example .env      # set PORTAL_PASSWORD (8+ characters; it will not start without), and uncomment WORKSPACES_DIR with the folder your repos are in
+cp .env.example .env      # set PORTAL_PASSWORD (8+ characters, in single quotes if it has a $ or #; it will not start without), and uncomment WORKSPACES_DIR with the folder your repos are in
 docker compose up -d --build
 ```
 
@@ -41,7 +41,7 @@ The container uses host networking, so pi and its extensions reach services on t
 `127.0.0.1` — a llama.cpp server on `:8080`, for example — exactly as they would outside a
 container. It needs the Docker socket mount to install the Browser and Voice add-ons.
 Running from source, the Portainer stack and the full variable list are in
-[Deploying](https://thecodacus.github.io/pithagoras/guide/deploying).
+[Deploying](https://thecodacus.github.io/Pithagoras/guide/deploying).
 
 Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
 
@@ -105,7 +105,7 @@ on Tailscale/LAN rather than the public internet.
 | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` | — | Provider credentials, forwarded to pi. |
 | `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Per-task caps in `container` mode. |
 
-The rest is in [Configuration](https://thecodacus.github.io/pithagoras/reference/configuration).
+The rest is in [Configuration](https://thecodacus.github.io/Pithagoras/reference/configuration).
 
 ## Settings
 

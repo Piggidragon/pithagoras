@@ -71,7 +71,7 @@ What the first start after an install of version 0.1.0, or of any build made bef
 - **A voice add-on.** The container of a voice add-on that an older version made is made again, with the engines and the card it had, the next time it is started or installed from Settings → Add-ons; the models and builds in its volume are kept. Rebuilding the portal does not touch it until then.
 - **`WORKSPACES_DIR` is required.** An install whose `.env` never set it was mounting the folder `/root/repos` of the host, and Compose now stops until the variable is set. Set it to the folder your repositories are in; for an install that relied on the old default, that is `/root/repos`. The Portainer stack asks for it too.
 - **The password.** A portal whose `PORTAL_PASSWORD` is still `change-me`, the example of the first release's `.env.example`, no longer starts, so change it before you upgrade. A new or changed password has to be at least 8 characters; a portal that already ran with a shorter one keeps starting with it, with a warning. See [Deploying](/guide/deploying#environment).
-- **Channel packages.** A third-party channel has to say who sent each message (`from` in `ctx.ask`), or once a primary user is named its messages are turned away like a stranger's. See [Writing a channel](/channels/writing-a-channel).
+- **Channel packages.** A third-party channel has to say who sent each message (`from` in `ctx.ask`, with the sender's id as a string), or once a primary user is named its messages are turned away like a stranger's. See [Writing a channel](/channels/writing-a-channel).
 
 ## Pin a version
 

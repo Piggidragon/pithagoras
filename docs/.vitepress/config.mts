@@ -1,8 +1,10 @@
 import { defineConfig } from "vitepress";
 
 // Project pages serve from /<repo>/, so every asset and link needs the
-// prefix. Overridable for a custom domain, where the site is at the root.
-const base = (process.env.DOCS_BASE ?? "/pithagoras/").replace(/\/?$/, "/");
+// prefix, spelled as the repository is: the paths are case-sensitive. The
+// docs workflow sets it from the repository's name; this is the upstream's for
+// a build by hand. Overridable for a custom domain, where the site is at the root.
+const base = (process.env.DOCS_BASE ?? "/Pithagoras/").replace(/\/?$/, "/");
 
 export default defineConfig({
   title: "Pithagoras",

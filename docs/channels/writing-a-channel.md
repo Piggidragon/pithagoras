@@ -208,12 +208,18 @@ package gets the feature without doing anything.
 work on a machine with no inbound route:
 
 ```js
+const handle = async (update) => {
+  const reply = await ctx.ask(update.text, {
+    session: `chat:${update.chatId}`,
+    from: { id: String(update.userId), name: update.userName },
+  });
+  await send(update.chatId, reply);
+};
+
 while (running && !ctx.signal.aborted) {
   const updates = await getUpdates({ offset, timeout: 50 }, ctx.signal);
-  for (const update of updates) {
-    const reply = await ctx.ask(update.text, { chatId: update.chatId });
-    await send(update.chatId, reply);
-  }
+  // Not awaited: see the box above.
+  for (const update of updates) void handle(update);
 }
 ```
 
@@ -227,8 +233,12 @@ const connect = () => {
   if (stopped || ctx.signal.aborted) return;
   const socket = new WebSocket(url);
   socket.addEventListener("message", async (frame) => {
-    const { text, channel } = parse(frame.data);
-    await send(channel, await ctx.ask(text, { channel }));
+    const { text, channel, user, userName } = parse(frame.data);
+    const reply = await ctx.ask(text, {
+      session: `channel:${channel}`,
+      from: { id: String(user), name: userName },
+    });
+    await send(channel, reply);
   });
   socket.addEventListener("close", () => {
     if (!stopped && !ctx.signal.aborted) setTimeout(connect, 3000);
@@ -356,7 +366,9 @@ POSTs `{session, message}` there, and the conversation becomes two-way.
 ## Identity
 
 Pass `from: { id, name }` on `ctx.ask` — the platform's own id, never a display
-name. Without it every message is anonymous, which means it cannot be attributed
+name. **`id` has to be a string**: where the platform gives a number, as
+Telegram's JSON does, write `String(user.id)`. Anything else counts as no
+sender at all. Without it every message is anonymous, which means it cannot be attributed
 to anybody in the [roster](/people/) and is refused once a primary user is
 named, with a reply saying the message did not name its sender. A package written
 without `from` stops answering the day somebody is named primary, which is the

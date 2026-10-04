@@ -13,11 +13,18 @@ cd Pithagoras
 
 Create a `.env` next to `docker-compose.yml`. This writes one, with a secret of
 its own (change the password and the folder first, between the single quotes,
-where `%`, `$` and `\` are taken as they are):
+where `%`, `$` and `\` are taken as they are, and neither can hold a `'`):
 
 ```bash
-printf 'PORTAL_PASSWORD=%s\nWORKSPACES_DIR=%s\nPORTAL_SECRET=%s\n' 'something-long' '/path/to/repos' "$(openssl rand -hex 32)" > .env
+printf "PORTAL_PASSWORD='%s'\nWORKSPACES_DIR='%s'\nPORTAL_SECRET=%s\n" 'something-long' '/path/to/repos' "$(openssl rand -hex 32)" > .env
 ```
+
+The two typed values go into the file in single quotes on purpose. Compose reads
+a `.env` value without quotes as its own syntax: `$name` becomes a variable (or
+nothing), `$$` becomes one `$`, and ` #` starts a comment. The portal would then
+get another password than the one you typed, and the sign-in would refuse it.
+Between single quotes the value is taken as it is. If you write the file by
+hand, quote a password that has a `$` or a `#` in it the same way.
 
 Write `PORTAL_SECRET=` followed by the output of `openssl rand -hex 32` if you
 make the file by hand. Compose does not run commands in a `.env`: the text
@@ -123,7 +130,7 @@ chats interrupted.
 git pull && docker compose up -d --build
 ```
 
-Your data lives on the `portal-data` volume, not in the image. Sessions,
+Your data lives in a volume, not in the image (`portal-data`, or `pithagoras-data` in the Portainer stack). Sessions,
 transcripts, installed pi packages and installed channel packages all survive a
 rebuild. When the new version changes the database, the portal copies it aside
 and upgrades it before it starts serving; see [Upgrading](/guide/upgrading).
@@ -187,7 +194,9 @@ The upgrade backs the database up by itself, but only when it changes it (see
 [Upgrading](/guide/upgrading)). A backup of your own is up to you. What holds
 your work:
 
-- **`/data`**: the volume `portal-data`, or the folder `PORTAL_DATA_DIR` names. The
+- **`/data`**: the folder `PORTAL_DATA_DIR` names, or else the volume the Compose
+  file declares (`<project>_portal-data`, and `<stack>_pithagoras-data` in
+  Portainer: Docker puts the project's or the stack's name in front). The
   database, the chats' files, pi's settings and packages, the agents, the pictures.
 - **The memory of the Understory the portal runs**, if you use it: the volume
   `pithagoras_understory-memory` (`UNDERSTORY_VOLUME`), plain markdown files.
@@ -280,7 +289,7 @@ Everything here is optional except the password and, with the Compose files,
 | `EXECUTOR` | `host` | `host` or `container` — see [Architecture](/reference/architecture#executors). |
 | `WORKSPACE_ROOT` | `/workspaces` | Where workspaces live inside the container. |
 | `WORKSPACES_DIR` | — (required) | Compose only: the host folder mounted at `/workspaces`. |
-| `PORTAL_DATA_DIR` | `portal-data` volume | Compose only: an absolute host path to mount at `/data` instead of the volume. |
+| `PORTAL_DATA_DIR` | `portal-data` volume (`pithagoras-data` in the Portainer stack) | Compose only: an absolute host path to mount at `/data` instead of the volume. |
 | `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file; both Compose files mount `PORTAL_TLS_DIR` at `/certs`, so name the files there (`/certs/portal.crt`). |
 | `PORTAL_CONTAINER_NAME` | `pithagoras` (Compose) | The portal's own container name, for managed add-ons and container mounts. Unset natively. |
 | `PI_IMAGE` | `pithagoras-runner:latest` | Container executor's image. |
@@ -310,7 +319,9 @@ key under **Settings → Providers**, which needs no change to the file.
 building locally. Point a Portainer stack at it and set the same environment
 variables: it passes everything `docker-compose.yml` does, the certificates and
 the TLS variables, the password settings and the provider keys included, and
-`WORKSPACES_DIR` is required there too. Set `PITHAGORAS_VERSION` to a release
+`WORKSPACES_DIR` is required there too. `PORTAL_DATA_DIR` works as it does there:
+without it the data is in the volume `pithagoras-data`, which Docker names
+`<stack>_pithagoras-data`. Set `PITHAGORAS_VERSION` to a release
 (see [Upgrading](/guide/upgrading#pin-a-version)).
 
 ## Running from source
@@ -363,8 +374,11 @@ without anyone opening the settings screen. If your organisation restricts who
 may enable Pages, do it once by hand instead: **Settings → Pages → Source →
 GitHub Actions**.
 
-The site is served from `/pithagoras/`, so `base` is set to match. On a custom
-domain, where the site sits at the root, override it:
+The site is served from `/<repository name>/`, so the workflow sets `base` to
+that, spelled as the repository is: GitHub Pages paths are case-sensitive, and a
+fork has a name of its own. A build by hand uses `/Pithagoras/`, the upstream's,
+unless `DOCS_BASE` says otherwise. On a custom domain, where the site sits at the
+root, set it to `/` in the workflow's build step:
 
 ```yaml
 - run: npm run docs:build

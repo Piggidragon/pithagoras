@@ -43,7 +43,11 @@ jobs:
         with:
           enablement: true
       - run: npm ci
+      # Project pages serve from /<repository name>/, spelled as the repository
+      # is: the paths are case-sensitive, and a fork has a name of its own.
       - run: npm run docs:build
+        env:
+          DOCS_BASE: /${{ github.event.repository.name }}/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/.vitepress/dist

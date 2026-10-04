@@ -8,7 +8,9 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - pithagoras-data:/data
+      # A named volume unless PORTAL_DATA_DIR is set to an absolute path, which
+      # mounts that directory, as docker-compose.yml does.
+      - ${PORTAL_DATA_DIR:-pithagoras-data}:/data
       # Certificates, when you have them. Empty by default.
       - ${PORTAL_TLS_DIR:-/dev/null}:/certs:ro
       # Workspaces the agent may work in, read-write. There is no default: a path

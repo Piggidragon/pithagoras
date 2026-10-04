@@ -165,7 +165,7 @@ before its package was there starts when the package arrives.
 
 ### What happens to a message
 
-1. The package receives it and calls `ctx.ask(text, { session, title })`.
+1. The package receives it and calls `ctx.ask(text, { session, title, from })`.
 2. The key is prefixed with the channel's slug and resolved to a session,
    created on first sight.
 3. The channel's [instructions](#per-channel-instructions) are appended to the

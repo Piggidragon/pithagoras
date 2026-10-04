@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -30,6 +30,12 @@ test('the Portainer stack passes the same environment as the Compose file', () =
   assert.deepEqual([...environmentOf('docker-compose.portainer.yml')].sort(), [...environmentOf('docker-compose.yml')].sort());
 });
 
+test('the data folder PORTAL_DATA_DIR names is mounted by both Compose files, and without it the data is in a volume', () => {
+  for (const file of COMPOSE) {
+    assert.match(read(file), /- \$\{PORTAL_DATA_DIR:-[\w-]+\}:\/data$/m, `${file} mounts PORTAL_DATA_DIR at /data`);
+  }
+});
+
 test('what the docs tell a deployment to set reaches the container: the clock, the upgrade backup, an open listener, the TLS files', () => {
   for (const file of COMPOSE) {
     const names = environmentOf(file);
@@ -42,13 +48,14 @@ test('what the docs tell a deployment to set reaches the container: the clock, t
   }
 });
 
-test('the command the deployment guide gives for .env writes a password and a folder as they were typed, whatever characters they hold', () => {
-  const command = /^printf '.*> \.env$/m.exec(read('docs/guide/deploying.md'))?.[0];
+test('the command the deployment guide gives for .env gives the portal the password and folder that were typed, whatever characters they hold', () => {
+  const command = /^printf ['"].*> \.env$/m.exec(read('docs/guide/deploying.md'))?.[0];
   assert.ok(command, 'the guide has the command');
-  // A password manager's symbols: `%` and `\` are what printf reads as a conversion and an escape in its format.
-  const password = '50%off-%s-%b-\\n-$HOME';
+  // A password manager's symbols. `%` and `\` are what printf reads as a conversion and an escape in its format;
+  // `$` and ` #` are what Compose reads in a value without quotes as a variable and a comment.
+  const password = 'Pa$$w0rd #x-50%off-%s-%b-\\n-$HOME-${SHELL}';
   const folder = '/srv/my %d repos';
-  const edited = command.replace("'something-long'", `'${password}'`).replace("'/path/to/repos'", `'${folder}'`);
+  const edited = command.replace("'something-long'", () => `'${password}'`).replace("'/path/to/repos'", () => `'${folder}'`);
   assert.notEqual(edited, command, 'the placeholders are in the command');
 
   const temp = mkdtempSync(path.join(process.env.TMPDIR || tmpdir(), 'pitha-env-'));
@@ -59,11 +66,27 @@ test('the command the deployment guide gives for .env writes a password and a fo
     chmodSync(path.join(temp, 'bin', 'openssl'), 0o755);
     execFileSync('bash', ['-c', edited], { cwd: temp, env: { ...process.env, PATH: `${path.join(temp, 'bin')}:${process.env.PATH}` } });
     assert.deepEqual(readFileSync(path.join(temp, '.env'), 'utf8').split('\n'), [
-      `PORTAL_PASSWORD=${password}`,
-      `WORKSPACES_DIR=${folder}`,
+      `PORTAL_PASSWORD='${password}'`,
+      `WORKSPACES_DIR='${folder}'`,
       'PORTAL_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       '',
     ]);
+
+    // What reaches the container is what Compose makes of the file, not the file: written without quotes,
+    // this password came out as "Pa$w0rd" and the sign-in refused the one that was typed.
+    if (spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status !== 0) return;
+    for (const file of COMPOSE) {
+      const shown = JSON.parse(
+        execFileSync('docker', ['compose', '-f', path.join(root, file), '--env-file', path.join(temp, '.env'), 'config', '--format', 'json'], {
+          cwd: temp,
+          env: { PATH: process.env.PATH, HOME: process.env.HOME },
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).toString(),
+      );
+      const environment = Object.values<any>(shown.services)[0].environment;
+      // `config` writes its own output so that Compose could read it again: a `$` comes out as `$$`.
+      assert.equal(environment.PORTAL_PASSWORD.replaceAll('$$', '$'), password, `${file} gives the container the password as typed`);
+    }
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
@@ -154,13 +177,35 @@ test('the docs site names its favicon under the base it is served from, whatever
   };
   const had = process.env.DOCS_BASE;
   try {
-    assert.deepEqual(await faviconFor(undefined), { base: '/pithagoras/', href: '/pithagoras/favicon.png' });
+    assert.deepEqual(await faviconFor(undefined), { base: '/Pithagoras/', href: '/Pithagoras/favicon.png' });
     assert.deepEqual(await faviconFor('/'), { base: '/', href: '/favicon.png' });
     assert.deepEqual(await faviconFor('/fork'), { base: '/fork/', href: '/fork/favicon.png' });
   } finally {
     if (had === undefined) delete process.env.DOCS_BASE;
     else process.env.DOCS_BASE = had;
   }
+});
+
+test('the docs are built under the path they are served from, and the links to them are written the way that path is spelled', () => {
+  // GitHub Pages paths are case-sensitive: the upstream repository is Pithagoras, and a fork has its own name.
+  assert.match(jobsOf('.github/workflows/docs.yml').build, /- run: npm run docs:build\n\s+env:\n\s+DOCS_BASE: \/\$\{\{ github\.event\.repository\.name \}\}\//);
+  for (const file of ['README.md', 'channels/README.md']) {
+    const links = [...read(file).matchAll(/thecodacus\.github\.io\/([^/\s)"]+)\//g)].map((m) => m[1]);
+    assert.ok(links.length, `${file} links to the docs`);
+    for (const name of links) assert.equal(name, 'Pithagoras', `${file} links to the docs under the repository's own spelling`);
+  }
+});
+
+test('every ctx.ask in the channel guide passes the session and the sender, and the guide says the sender\'s id is a string', () => {
+  // The portal throws for an ask without a session, and turns a message with no sender away once somebody is primary.
+  const guide = read('docs/channels/writing-a-channel.md').split('\n');
+  const calls = guide.flatMap((line, at) => (/ctx\.ask\(.*\{$/.test(line) ? [guide.slice(at, at + 6).join('\n')] : []));
+  assert.ok(calls.length >= 5, 'the guide has its examples');
+  for (const call of calls) {
+    assert.match(call, /session:/, call);
+    assert.match(call, /from:/, call);
+  }
+  assert.match(guide.join('\n'), /`id` has to be a string/);
 });
 
 const dockerfile = () => read('Dockerfile').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
