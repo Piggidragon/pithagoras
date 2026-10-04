@@ -37,6 +37,10 @@ By default a routine keeps one session, so a run can see what the last one did â
 "nothing new since yesterday" needs yesterday. **Fresh session each run** gives
 each one a clean start instead, for work where history is only noise.
 
+A run that is still going after an hour is listed as an error. In a fresh session
+it is stopped then, as pressing Stop in its chat would; in the session a routine
+keeps, it carries on there.
+
 ## Reporting back
 
 A run's closing account is stored, and stored is where it stays unless the

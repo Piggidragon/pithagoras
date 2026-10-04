@@ -33,6 +33,9 @@ const LOOK_TIMEOUT_MS = 20 * 60_000;
 
 const TICK_MS = 60_000;
 
+/** What a look shows once a restart cut it off. */
+const INTERRUPTED = "Interrupted by a restart";
+
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 /** What the agent is asked to watch, or "" when there is nothing. */
@@ -136,7 +139,7 @@ class HeartbeatSupervisor {
     if (this.timer) return;
     // A look cut off by a restart never reached its `finally`; nothing else
     // would ever take "Looking" off the agent's page.
-    getDb().prepare("UPDATE agents SET heartbeat_status = 'Interrupted by a restart' WHERE heartbeat_status = 'Looking'").run();
+    getDb().prepare("UPDATE agents SET heartbeat_status = ? WHERE heartbeat_status = 'Looking'").run(INTERRUPTED);
     this.timer = setInterval(() => void this.tick(), TICK_MS);
     if (typeof this.timer.unref === "function") this.timer.unref();
   }
@@ -194,10 +197,12 @@ class HeartbeatSupervisor {
       const session = sessionFor(agent);
       await sessions.ask(session.id, prompt(agent, watch, trigger), { timeoutMs: LOOK_TIMEOUT_MS });
       const left = countNotes(agent.id) - before;
-      status(left ? `${left} new ${left === 1 ? "note" : "notes"}` : "Nothing new");
+      // A look the portal's own stop aborted ends like any other, and would read
+      // as one that found nothing: it was cut off, as a crash cuts one off.
+      status(sessions.closing ? INTERRUPTED : left ? `${left} new ${left === 1 ? "note" : "notes"}` : "Nothing new");
     } catch (e) {
       // The first line: pi's errors go on to explain where its docs are.
-      status(`Failed: ${(e as Error).message.split("\n")[0]}`);
+      status(sessions.closing ? INTERRUPTED : `Failed: ${(e as Error).message.split("\n")[0]}`);
     } finally {
       this.running.delete(agent.id);
     }

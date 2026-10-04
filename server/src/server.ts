@@ -804,7 +804,10 @@ app.post("/api/sessions/:id/prompt", promptJson, async (req, res) => {
     const images = saveImages(IMAGE_ROOT, session.id, parsed);
     // Returns as soon as pi accepts the prompt. The run continues server-side
     // regardless of what this browser does next.
-    await sessions.prompt(session.id, message, { voice: req.body?.voice === true, images, steer: req.body?.steer === true });
+    const sent = await sessions.prompt(session.id, message, { voice: req.body?.voice === true, images, steer: req.body?.steer === true });
+    // A Stop got there first: the words are back with the person, as not sent,
+    // and a chat they were the start of is not named after them.
+    if (!sent) return res.json({ ok: true, unsent: true });
     // A chat that has no name yet is named after what it starts with — once pi
     // has taken the message, so one that never got there does not keep its name.
     // Read again: a rename that came in meanwhile is not overwritten.

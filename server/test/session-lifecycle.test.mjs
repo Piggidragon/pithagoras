@@ -442,22 +442,14 @@ test("an idle pi that is in the middle of something is left alone", async () => 
   assert.deepEqual(await sessions.reapIdle(), [id], "and let go once it is not");
 });
 
-test("a container that still holds a process of the agent's is kept, and let go once it holds none", async () => {
+test("a chat whose pi cannot pick its conversation up again is not let go for being idle, and one that can is", async () => {
   const { id, pi } = await idleFor(60);
-  let held = true;
-  const asked = [];
-  Object.assign(sessions.live.get(id).executor, { holdsProcesses: async (asking) => (asked.push(asking), held) });
-  assert.deepEqual(await sessions.reapIdle(), [], "a dev server in it would end with pi");
-  assert.deepEqual(asked, [id]);
+  // As a container's is: started again, it is a new conversation, and the person is still talking to the old one.
+  Object.assign(sessions.live.get(id).executor, { resumes: false });
+  assert.deepEqual(await sessions.reapIdle(), [], "it would meet the next message as a stranger");
   assert.equal(pi.disposed, false);
 
-  // A message that comes in while the container is asked about is use, as at any other time.
-  sessions.live.get(id).executor.holdsProcesses = async () => (sessions.activity.set(id, Date.now() + 1), false);
-  assert.deepEqual(await sessions.reapIdle(), [], "used meanwhile");
-
-  held = false;
-  sessions.live.get(id).executor.holdsProcesses = async () => held;
-  sessions.activity.set(id, Date.now() - 60 * 60_000);
+  sessions.live.get(id).executor.resumes = true;
   assert.deepEqual(await sessions.reapIdle(), [id]);
   assert.equal(pi.disposed, true);
 });

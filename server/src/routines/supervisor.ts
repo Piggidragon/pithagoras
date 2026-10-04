@@ -210,6 +210,10 @@ class RoutineSupervisor {
       // the portal stops, one more with every run. Its transcript stays. Not while
       // a subagent it started is still working: the idle reaper takes it then.
       if (fresh && !sessions.backgroundWork(fresh.id)) {
+        // A run that ran out of time is still going. Stopped under it, its chat
+        // would stay "running" for good: nothing settles it, a Stop does nothing,
+        // and no agent looks around while anything is working.
+        if (!sessions.closing && getSession(fresh.id)?.status === "running") await endRun(fresh.id);
         await sessions.stop(fresh.id).catch(() => {});
         forgetBrowserSession(fresh.id);
       }
@@ -228,6 +232,9 @@ class RoutineSupervisor {
   }
 
   private finish(id: string, status: string, output: string, ms: number): void {
+    // A run the portal's own stop aborted ends like any other, and would be
+    // recorded as ok: it was cut off, as a crash cuts one off.
+    if (sessions.closing) [status, output] = ["interrupted", INTERRUPTED];
     getDb()
       .prepare("UPDATE routines SET last_status = ?, last_output = ?, last_ms = ? WHERE id = ?")
       .run(status, (output ?? "").slice(0, MAX_OUTPUT), ms, id);
@@ -264,6 +271,19 @@ class RoutineSupervisor {
     });
     return getSession(id)!;
   }
+}
+
+/**
+ * Stops the run a session is in, waiting no longer for a pi that will not wind
+ * down than a restart does.
+ */
+async function endRun(sessionId: string): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    sessions.abort(sessionId).catch(() => {}),
+    new Promise<void>((resolve) => (timer = setTimeout(resolve, sessions.abortGraceMs))),
+  ]);
+  clearTimeout(timer);
 }
 
 /**

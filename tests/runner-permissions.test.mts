@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import {ContainerExecutor} from '../server/src/executors/index.ts';
+import {ContainerExecutor,HostExecutor} from '../server/src/executors/index.ts';
 import { scratch } from './helpers.mts';
 test('runner uses the portal uid/gid and a pre-created private session directory',async()=>{
  const temp=scratch('pitha-runner-');const saved=process.env.PATH;const prior=process.env.ARG_FILE;
@@ -40,18 +40,18 @@ test('provider keys reach the container by name, never as a value on the docker 
  }finally{for(const [k,v] of Object.entries(saved)){if(v===undefined)delete process.env[k];else process.env[k]=v;}rmSync(temp,{recursive:true,force:true});}
 });
 
-test('a container holds a process besides pi when docker top lists a second one, and when it cannot be asked',async()=>{
- const temp=scratch('pitha-runner-top-');const saved={PATH:process.env.PATH,TOP_FILE:process.env.TOP_FILE};
- process.env.PATH=temp+':'+saved.PATH;process.env.TOP_FILE=join(temp,'top');
- // `docker top` as docker prints it: a header, then a line for each process; a missing container is an error.
- writeFileSync(join(temp,'docker'),'#!/bin/sh\nif [ "$1" = "top" ] && [ "$2" = "pithagoras-gone" ]; then echo "Error response from daemon: No such container: $2" >&2; exit 1; fi\nif [ "$1" = "top" ]; then cat "$TOP_FILE"; exit 0; fi\nexit 1\n',{mode:0o755});
- const header='UID PID PPID C STIME TTY TIME CMD\n';
+test('a container is said not to resume its conversation exactly while it starts pi without the conversation\'s file, and the host does',async()=>{
+ const temp=scratch('pitha-runner-resume-');const saved={PATH:process.env.PATH,ARG_FILE:process.env.ARG_FILE};
+ process.env.PATH=temp+':'+saved.PATH;process.env.ARG_FILE=join(temp,'args');
+ writeFileSync(join(temp,'docker'),'#!/bin/sh\nprintf "%s\\n" "$@" > "$ARG_FILE"\nif [ "$1" = "container" ] && [ "$2" = "inspect" ]; then echo "Error: No such container: $3" >&2; exit 1; fi\n',{mode:0o755});
  try {
   const executor=new ContainerExecutor('test-runner',join(temp,'sessions'),{memoryMb:2048,cpus:2,pidsLimit:512});
-  writeFileSync(process.env.TOP_FILE!,header+'node 101 100 0 10:00 ? 00:00:01 pi --mode rpc\n');
-  assert.equal(await executor.holdsProcesses('abc'),false,'pi alone ends with the container and loses nothing');
-  writeFileSync(process.env.TOP_FILE!,header+'node 101 100 0 10:00 ? 00:00:01 pi --mode rpc\nnode 202 101 0 10:05 ? 00:00:09 npm run dev\n');
-  assert.equal(await executor.holdsProcesses('abc'),true,'a dev server the agent left running would end with it');
-  assert.equal(await executor.holdsProcesses('gone'),true,'not told: not safe to stop');
+  const client=await executor.launch({sessionId:'abc',workspacePath:temp,sessionFile:'/sessions/abc/conversation.jsonl'});
+  await new Promise<void>(resolve=>client.on('exit',()=>resolve()));
+  const args=readFileSync(process.env.ARG_FILE!,'utf8').split('\n');
+  // The idle reaper leaves a chat alone for as long as this is false; when pi is given its file, this is to say so.
+  assert.equal(args.includes('--session')||args.includes('--continue'),executor.resumes!==false);
+  assert.equal(executor.resumes,false);
+  assert.notEqual(new HostExecutor(join(temp,'sessions')).resumes,false);
  }finally{for(const [k,v] of Object.entries(saved)){if(v===undefined)delete process.env[k];else process.env[k]=v;}rmSync(temp,{recursive:true,force:true});}
 });
