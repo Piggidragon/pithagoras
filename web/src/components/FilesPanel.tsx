@@ -754,13 +754,14 @@ export const FilesPanel = memo(function FilesPanel({
                     >
                       <LuPencil aria-hidden className="h-3.5 w-3.5" />
                     </button>
+                    {/* Off by aria-disabled, not disabled: while the question is open this button is where focus goes back to, and a button that is disabled keeps none. remove() ignores the click. */}
                     <button
                       onClick={() => void remove(entry)}
-                      disabled={removing.has(join(dir, entry.name))}
+                      aria-disabled={removing.has(join(dir, entry.name))}
                       aria-busy={removing.has(join(dir, entry.name))}
                       title={t("Delete {name}", { name: entry.name })}
                       aria-label={t("Delete {name}", { name: entry.name })}
-                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger disabled:opacity-60"
+                      className="rounded p-1 text-fg-faint transition hover:bg-danger/10 hover:text-danger aria-disabled:opacity-60"
                     >
                       {removing.has(join(dir, entry.name)) ? <LuRefreshCw aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <LuTrash2 aria-hidden className="h-3.5 w-3.5" />}
                     </button>
