@@ -35,6 +35,11 @@ signed in shows that.
 which follows the machine and changes with it — at sunset, on a desktop that
 flips.
 
+In both themes even the quietest text — hints, timestamps, placeholders — keeps a
+contrast of at least 4.5:1 against what it is drawn on, and the keyboard focus is
+a 2px outline in the full accent colour, round fields, checkboxes, dropdowns and
+buttons alike.
+
 ## Animations
 
 The portal has always moved a little: panels slide in, menus unroll, a working
