@@ -60,6 +60,23 @@ export function AuditPage() {
   );
 }
 
+/** What was asked for, two lines of it and the whole with a click: a refused command is the one thing here worth reading to the end. */
+function Subject({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen((v) => !v)}
+      aria-expanded={open}
+      title={text}
+      // `block` only when open: the clamp is a display of its own, and the later of the two rules would win.
+      className={`mt-1 w-full break-all text-left font-mono text-[11px] text-fg-muted ${open ? "block whitespace-pre-wrap" : "line-clamp-2"}`}
+    >
+      {text}
+    </button>
+  );
+}
+
 function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState("all");
@@ -204,12 +221,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
                   )}
                   <span className="ml-auto shrink-0 text-[11px] text-fg-faint">{when(e.at)}</span>
                 </div>
-                {e.subject && (
-                  <p className="mt-1 truncate font-mono text-[11px] text-fg-muted">
-                    {e.tool ? `${e.tool}: ` : ""}
-                    {e.subject}
-                  </p>
-                )}
+                {e.subject && <Subject text={`${e.tool ? `${e.tool}: ` : ""}${e.subject}`} />}
                 {e.kind === "cleared" && Number.isFinite(Number(e.reason)) ? (
                   <p className="mt-0.5 text-[11px] text-fg-faint">
                     {tp(Number(e.reason), "One entry was deleted.", "{n} entries were deleted.")}
