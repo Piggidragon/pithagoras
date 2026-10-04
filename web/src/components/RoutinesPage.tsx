@@ -20,7 +20,7 @@ import { ErrorBanner, Segments, Switch, SwitchTrack, btnCls, inputCls, primaryCl
 import { confirmDialog } from "./ConfirmDialog";
 import { below } from "../paths";
 import { pollWhileVisible } from "../poll";
-import { formatDateTime, labelOf, msg, t, tx } from "../i18n";
+import { formatDateTime, labelOf, msg, t, tp, tx } from "../i18n";
 import { useFlash } from "../use-flash";
 import { serverTime, sinceThen } from "../time";
 
@@ -221,7 +221,7 @@ export function RoutinesPage({ onOpenSession }: { onOpenSession: (id: string) =>
           }
         >
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Stat value={routines.length} label={t("routines")} />
+            <Stat value={routines.length} label={tp(routines.length, "routine", "routines")} />
             <Stat value={routines.filter((r) => r.enabled).length} label={t("enabled")} tone="text-accent" />
             <Stat
               value={routines.filter((r) => r.lastStatus === "error").length}

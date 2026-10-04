@@ -393,7 +393,7 @@ function AgentView({
             }
           >
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Stat value={sessions.length} label={t("conversations")} />
+              <Stat value={sessions.length} label={tp(sessions.length, "conversation", "conversations")} />
               <Stat value={sessions.filter((s) => s.status === "running").length} label={t("running")} tone="text-accent" />
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1">
                 <LuFolder className="h-3 w-3 shrink-0 text-fg-faint" />
@@ -628,9 +628,7 @@ function DeleteAgent({ agent, onClose, onDeleted }: { agent: Agent; onClose: () 
       ) : (
         <div className="space-y-3">
           <p className="text-sm text-fg-muted">
-            {agent.chats === 1
-              ? t("Its one chat is stopped and deleted with it.")
-              : t("Its {n} chats are stopped and deleted with it.", { n: agent.chats })}
+            {tp(agent.chats, "Its one chat is stopped and deleted with it.", "Its {n} chats are stopped and deleted with it.")}
           </p>
           {choice("keep", t("Keep its folder"), t("Its files and memory stay in {home}. An agent made under the same name picks them up again.", { home: agent.home }))}
           {choice("delete", t("Delete its folder too"), t("Everything in {home} is removed, its memory with it. This cannot be undone.", { home: agent.home }))}
@@ -660,15 +658,16 @@ function RowBody({ s, title }: { s: AgentSession; title: ReactNode }) {
   );
 }
 
-/** What a WATCH.md might say, shown in an empty one. */
-const WATCH_EXAMPLE = [
-  "# What to keep an eye on",
-  "",
-  "- The open pull requests on the project: tell me about one waiting more than three days.",
-  "- The notes in ~/inbox: anything that needs an answer this week.",
-  "",
-  "Only tell me what needs me. Stay quiet otherwise.",
-].join("\n");
+/** What a WATCH.md might say, shown in an empty one: the markdown stays, the words are the reader's. */
+const watchExample = () =>
+  [
+    `# ${t("What to keep an eye on")}`,
+    "",
+    `- ${t("The open pull requests on the project: tell me about one waiting more than three days.")}`,
+    `- ${t("The notes in ~/inbox: anything that needs an answer this week.")}`,
+    "",
+    t("Only tell me what needs me. Stay quiet otherwise."),
+  ].join("\n");
 
 /** The files that define the agent, editable in place. */
 function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; onSaved: (s: Setup) => void }) {
@@ -767,7 +766,7 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
             aria-label={file.name}
             rows={14}
             spellCheck={false}
-            placeholder={file.name === "WATCH.md" ? WATCH_EXAMPLE : undefined}
+            placeholder={file.name === "WATCH.md" ? watchExample() : undefined}
             className="w-full resize-y rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-accent/60"
           />
           {changed && (

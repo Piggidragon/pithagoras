@@ -483,7 +483,7 @@ export function ImagesPage() {
           }
         >
           <div className="mt-3 flex flex-wrap gap-2">
-            <Stat value={list.total} label={t("pictures")} />
+            <Stat value={list.total} label={tp(list.total, "picture", "pictures")} />
             {list.pageBytes > 0 && <Stat value={bytesLabel(list.pageBytes)} label={t("kept from this page")} />}
             {makingNow > 0 && <Stat value={makingNow} label={t("being made")} tone="text-accent" />}
           </div>

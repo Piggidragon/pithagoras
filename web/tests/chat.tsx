@@ -133,7 +133,8 @@ if (phase === 'reasoning') events.push(
   ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'The last step writes the bundle.' } }, 1),
 );
 // The portal restarted mid-command: nothing says the call ended, only that the chat was interrupted.
-if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12));
+// A tool that is not a shell command has no exit to say how it ended, only that it was cut off.
+if (phase === 'interrupted') events.push(ev('turn_start', {}, 20), ...bash('b3', 'npm run test:e2e', 'Running 42 tests using 4 workers\n  ✓ login (1.2s)\n', undefined, 12), ev('tool_execution_start', { toolCallId: 'r3', toolName: 'read', args: { path: 'docs/guide/interface.md' } }, 11));
 if (phase === 'agents') {
   events.push(
     ev('tool_execution_start', { toolCallId: 'dr', toolName: 'deep_research', args: { query: 'Which vector DB fits a homelab?' } }, 50),

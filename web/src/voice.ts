@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { Item } from "./transcript";
 
 /** Only new completed replies, even when older history is paged into view. */
@@ -13,7 +14,7 @@ export function newSpeech(items: Item[], afterSeq: number, seen: Set<string>): s
 
 /** Keep code blocks and link destinations out of speech; split without losing text. */
 export function speechChunks(text: string): string[] {
-  const plain = text.replace(/```[\s\S]*?(?:```|$)/g, ' Code is shown in the transcript. ')
+  const plain = text.replace(/```[\s\S]*?(?:```|$)/g, () => ` ${t("Code is shown in the transcript.")} `)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]*>/g, '').replace(/[*_`#>|]/g, '').replace(/\s+/g, ' ').trim();
   const chunks: string[] = [];

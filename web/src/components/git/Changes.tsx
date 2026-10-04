@@ -235,7 +235,7 @@ function Stashes({ count }: { count: number }) {
     <div className="mt-2 border-t border-line">
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1 px-3 py-1.5 text-left text-[11px] text-fg-subtle hover:text-fg">
         <LuArchiveRestore aria-hidden className="h-3.5 w-3.5" />
-        {count} {count === 1 ? t("stash") : t("stashes")}
+        {tp(count, "{n} stash", "{n} stashes")}
         <span className="ml-auto text-fg-faint">{open ? t("hide") : t("show")}</span>
       </button>
       {open && error && <ErrorNote onRetry={() => setAgain((n) => n + 1)}>{error}</ErrorNote>}

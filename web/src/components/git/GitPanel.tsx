@@ -8,7 +8,7 @@ import { ErrorNote, Quiet, TextButton } from "./bits";
 import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
-import { msg, t, tp, useLanguage } from "../../i18n";
+import { labelOf, msg, t, tp, useLanguage } from "../../i18n";
 import { below } from "../../paths";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
@@ -317,6 +317,15 @@ function BarButton({ label, onClick, disabled, children }: { label: string; onCl
   );
 }
 
+/** What a stopped operation is called in "Giving up the …". */
+const OPERATION_NAME: Record<string, string> = {
+  merge: msg("merge"),
+  rebase: msg("rebase"),
+  am: msg("patch series"),
+  "cherry-pick": msg("cherry-pick"),
+  revert: msg("revert"),
+};
+
 /** A merge or rebase that stopped half way, and the two ways out of it. */
 function Operation() {
   const { id, repo, act, busy } = useGit();
@@ -332,7 +341,7 @@ function Operation() {
       <TextButton disabled={!!busy || conflicts > 0} onClick={() => void act(msg("Continuing"), () => gitApi.continue(id))}>
         {t("Continue")}
       </TextButton>
-      <TextButton danger disabled={!!busy} onClick={() => void act(msg("Giving up the {operation}"), () => gitApi.abort(id), { operation: repo.operation ?? "" })}>
+      <TextButton danger disabled={!!busy} onClick={() => void act(msg("Giving up the {operation}"), () => gitApi.abort(id), { operation: labelOf(OPERATION_NAME, repo.operation ?? "merge") })}>
         {t("Abort")}
       </TextButton>
     </div>

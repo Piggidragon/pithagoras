@@ -264,8 +264,21 @@ test('a routine changed to a one-off cannot be saved while its time is empty', a
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 });
 
+test('the count in the header names one routine in the singular', async ({ page }) => {
+  await portal(page);
+  await page.goto('/routines');
+  await expect(page.getByText('routine', { exact: true })).toBeVisible();
+  await expect(page.getByText('routines', { exact: true })).toHaveCount(0);
+});
+
 test.describe('in a browser set to German', () => {
   test.use({ locale: 'de-DE' });
+
+  test('the count in the header names one routine in the singular', async ({ page }) => {
+    await portal(page);
+    await page.goto('/routines');
+    await expect(page.getByText('Routine', { exact: true })).toBeVisible();
+  });
 
   test('a one-off a restart cut off is shown as interrupted, not as done', async ({ page }) => {
     await portal(page, {

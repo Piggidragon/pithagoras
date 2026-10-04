@@ -13,7 +13,15 @@ import { BrowserInstall } from "./BrowserInstall";
 import { ErrorBanner, LoadFailed, inputCls } from "./SettingsUi";
 import { api, type BrowserStatus } from "../api";
 import { pollWhileVisible } from "../poll";
-import { t, tx } from "../i18n";
+import { labelOf, msg, t, tx } from "../i18n";
+
+/** What kind of conversation allowed or refused the browser, as the portal names it. */
+const SESSION_KIND: Record<string, string> = {
+  task: msg("task"),
+  agent: msg("agent"),
+  routine: msg("routine"),
+  heartbeat: msg("heartbeat"),
+};
 
 /**
  * The agent's browser.
@@ -320,7 +328,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                     <span className="shrink-0 text-[11px] text-fg-faint">
                       {s.allowed ? t("on") : t("off")}
                     </span>
-                    <span className="shrink-0 text-[11px] text-fg-faint">{s.kind}</span>
+                    <span className="shrink-0 text-[11px] text-fg-faint">{labelOf(SESSION_KIND, s.kind)}</span>
                   </button>
                 </li>
               ))}

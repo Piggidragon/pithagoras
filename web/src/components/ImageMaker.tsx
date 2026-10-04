@@ -734,7 +734,7 @@ export function ImageMaker({
             className={primaryCls}
           >
             {busy ? <LuLoader aria-hidden className="h-4 w-4 animate-spin" /> : editing ? <LuWandSparkles aria-hidden className="h-4 w-4" /> : <LuSparkles aria-hidden className="h-4 w-4" />}
-            {editing ? (count > 1 ? t("Make {n} changes", { n: count }) : t("Change the picture")) : count > 1 ? t("Make {n} pictures", { n: count }) : t("Make the picture")}
+            {editing ? tp(count, "Change the picture", "Make {n} changes") : tp(count, "Make the picture", "Make {n} pictures")}
           </button>
           {editing && (
             <>

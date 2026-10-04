@@ -46,7 +46,7 @@ import { fancy, glide, launch, leaveRef, mark, settle, useLeaveRef, type Mark } 
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, SPLIT, SPLIT_LEAST, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
-import { msg, t } from "../i18n";
+import { labelOf, msg, t } from "../i18n";
 import { tabKeys } from "../tab-keys";
 import { STEP, arrowSteps } from "../resize-keys";
 
@@ -84,6 +84,14 @@ const PANEL: Record<AsidePanel, { label: string; close: string }> = {
   files: { label: msg("Files"), close: msg("Close the files") },
   git: { label: msg("Git"), close: msg("Close the git panel") },
   terminal: { label: msg("Terminal"), close: msg("Close the terminal") },
+};
+
+/** Where a slash command comes from; one a newer portal adds is shown as it is named. */
+const COMMAND_SOURCE: Record<string, string> = {
+  builtin: msg("builtin"),
+  extension: msg("extension"),
+  prompt: msg("prompt"),
+  skill: msg("skill"),
 };
 
 type Movable = HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
@@ -1888,7 +1896,7 @@ export function Chat({
               >
                 <span className="font-mono text-xs text-accent">{trigger}{c.name}</span>
                 <span className="truncate text-xs text-fg-subtle">{c.description}</span>
-                <span className="ml-auto shrink-0 text-[10px] text-fg-faint">{c.source}</span>
+                <span className="ml-auto shrink-0 text-[10px] text-fg-faint">{labelOf(COMMAND_SOURCE, c.source)}</span>
               </button>
             ))}
           </div>

@@ -255,7 +255,7 @@ function reportedExit(output: string): number | undefined {
  */
 export function shellOutcome(status: ToolItem["status"], output: string, interrupted?: boolean, tool = "bash"): { label: string; tone: "ok" | "error" | "warn" } | undefined {
   if (status === "running") return undefined;
-  if (interrupted) return { label: "interrupted", tone: "warn" };
+  if (interrupted) return { label: t("interrupted"), tone: "warn" };
   if (status === "done") {
     const code = reportedExit(output) ?? (tool.toLowerCase() === "bash" ? 0 : undefined);
     return code === undefined ? undefined : { label: `exit ${code}`, tone: code === 0 ? "ok" : "error" };
@@ -316,7 +316,7 @@ export function ToolCall({
   const outcome = shell
     ? shellOutcome(item.status, output, item.interrupted, name)
     : item.interrupted
-      ? ({ label: "interrupted", tone: "warn" } as const)
+      ? ({ label: t("interrupted"), tone: "warn" } as const)
       : undefined;
   // Counted on the whole output: what is kept of it is only the end.
   const lines = shell ? (item.outputLines ?? lineCount(output)) : 0;

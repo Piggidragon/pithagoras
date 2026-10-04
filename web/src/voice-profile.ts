@@ -2,6 +2,8 @@
 import { msg } from "./i18n";
 export type VoiceMark = { name:string; at:number; detail?:Record<string,number|string|boolean> };
 export type VoiceTrace = { id:number; started:number; marks:VoiceMark[]; status:string };
+/** How a trace ended, as the panel says it; the report keeps the raw value. */
+export const TRACE_STATUS:Record<string,string>={recording:msg('recording'),complete:msg('complete'),interrupted:msg('interrupted'),stopped:msg('stopped'),muted:msg('muted'),error:msg('error'),vad_misfire:msg('voice detection misfired'),disabled:msg('profiling switched off')};
 /**
  * The first things a model gives back that an event shows: its first token of any
  * kind, of the reply's text, of its reasoning. A token of its own, or the reply

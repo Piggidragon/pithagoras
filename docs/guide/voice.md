@@ -516,8 +516,12 @@ the comparison guide.
 ## Status lines while it works
 
 Voice mode says a few short lines of its own while the agent is busy, so a silence
-is not mistaken for a hang. They come from the portal, in English, and not from the
-model; they are not part of the conversation and are not added to the transcript.
+is not mistaken for a hang. They come from the portal, in the language the portal
+is set to (English or German, see [Settings → Language](/guide/settings#language)),
+and not from the model; they are not part of the conversation and are not added to
+the transcript. The same goes for the short line that stands in for a code block
+when a reply is read aloud, "Code is shown in the transcript.": the code itself is
+never spoken. The lines below are given in English.
 
 - **Thinking.** When the agent has been thinking for about two seconds and has not
   started to answer, a phrase such as "Let me think about that for a moment." is
