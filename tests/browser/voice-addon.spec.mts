@@ -27,11 +27,11 @@ test('settings install progress, ready connection, and stop',async({page})=>{
 
 // The saved settings the install overwrote, as the portal puts them back, and the page that has to show them.
 const uninstallPage = async (page: any, state = 'running') => {
- let status = state, connected = false, failure = ''; const requests: any[] = [];
+ let status = state, connected = false, failure = '', reads = 0; const requests: any[] = [];
  let config: any = { enabled: true, whisperUrl: 'http://127.0.0.1:7862/v1/audio/transcriptions', breezeUrl: 'http://127.0.0.1:7862/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'audio-cpp', sttModel: 'qwen3-asr', language: 'auto' };
  await page.route('**/api/voice/presets', (r: any) => r.fulfill({ json: [] }));
  await page.route('**/api/voice', (r: any) => r.fulfill({ json: config }));
- await page.route('**/api/voice/install', (r: any) => r.fulfill({ json: { available: true, state: status, busy: false, progress: '', error: '', connected, choice: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } } }));
+ await page.route('**/api/voice/install', (r: any) => { if (r.request().method() === 'GET') reads++; return r.fulfill({ json: { available: true, state: status, busy: false, progress: '', error: '', connected, choice: { tts: 'breeze', asr: 'qwen3-asr', asrModel: '0.6b' } } }); });
  await page.route('**/api/voice/uninstall', (r: any) => {
   requests.push(r.request().postDataJSON()); status = 'absent'; connected = false;
   config = { ...config, enabled: false, runtime: 'breeze', whisperUrl: 'http://stt.example.test:9000/inference', breezeUrl: 'http://tts.example.test:9001/v1/audio/speech', sttModel: '' };
@@ -40,7 +40,7 @@ const uninstallPage = async (page: any, state = 'running') => {
  });
  await page.goto('/tests/voice-addon.html');
  await page.locator('summary').filter({ hasText: 'Voice service' }).click();
- return { requests, change: (patch: any) => { config = { ...config, ...patch }; }, setState: (value: string) => { status = value; }, setConnected: (value: boolean) => { connected = value; }, fail: (message: string) => { failure = message; } };
+ return { requests, reads: () => reads, change: (patch: any) => { config = { ...config, ...patch }; }, setState: (value: string) => { status = value; }, setConnected: (value: boolean) => { connected = value; }, fail: (message: string) => { failure = message; } };
 };
 
 test('uninstall asks first and says what goes, keeps the downloads unless told, and shows the settings that were put back', async ({ page }) => {
@@ -84,6 +84,39 @@ test('a service that turns ready takes over what the install wrote, and not what
  await expect(page.getByLabel('Describe the speaking voice')).toHaveValue('Edited and not saved yet');
 });
 
+// Time goes by in the steps of the quick poll, with a moment of real time after each for the answer to come: a poll that is asked again only after its answer needs both.
+const elapse = async (page: any, ms: number) => {
+ for (let left = ms; left > 0; left -= 2500) { await page.clock.runFor(Math.min(2500, left)); await page.waitForTimeout(25); }
+};
+
+test('the install status is asked for slowly once it is steady, and not at all in a hidden tab', async ({ page }) => {
+ await page.clock.install();
+ const { reads, setState } = await uninstallPage(page, 'running');
+ await expect.poll(reads).toBeGreaterThan(0);
+ const first = reads();
+ await elapse(page, 60_000);
+ // A minute of a steady service: two more questions, not twenty-four.
+ expect(reads() - first).toBeLessThanOrEqual(3);
+ // Hidden: nothing is asked, however long it stays so.
+ await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+ const hidden = reads();
+ await elapse(page, 120_000);
+ expect(reads()).toBe(hidden);
+ // Looked at again: asked at once.
+ await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+ await expect.poll(reads).toBeGreaterThan(hidden);
+ // And quickly again once something is changing.
+ setState('starting');
+ await elapse(page, 32_500);
+ await expect(page.locator('summary').filter({ hasText: 'Voice service' })).toContainText('starting');
+ const starting = reads();
+ await elapse(page, 10_000);
+ expect(reads() - starting).toBeGreaterThanOrEqual(3);
+});
+
+// A steady service is looked at again every half minute, and at once when the tab is come back to.
+const lookAgain = (page: any) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+
 test('uninstall deletes the downloaded engines and models only when the box is ticked, and is not offered where nothing is installed', async ({ page }) => {
  const { requests, setState, setConnected } = await uninstallPage(page, 'absent');
  const uninstall = page.getByRole('button', { name: 'Uninstall', exact: true });
@@ -91,11 +124,14 @@ test('uninstall deletes the downloaded engines and models only when the box is t
  await expect(uninstall).toBeHidden();
  // The container was removed by hand and the settings still point at the service: they can be put right from here.
  setConnected(true);
+ await lookAgain(page);
  await expect(uninstall).toBeVisible({ timeout: 8000 });
  setConnected(false);
+ await lookAgain(page);
  await expect(uninstall).toBeHidden({ timeout: 8000 });
  // A stopped service is uninstalled too.
  setState('stopped');
+ await lookAgain(page);
  await expect(uninstall).toBeVisible({ timeout: 8000 });
  await uninstall.click();
  await page.getByRole('alertdialog').getByRole('checkbox', { name: /Also delete the downloaded engines and models/ }).check();

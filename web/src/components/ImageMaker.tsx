@@ -715,7 +715,8 @@ export function ImageMaker({
                   ? t("Paint over what should change in picture 1, “{name}”. The mask belongs to the first picture only: to paint on another, move it to the first place, which starts the mask over. Without a mask the whole picture may change. The mask is not kept.", { name: sourceName(sources[0]) })
                   : t("Paint over what should change. Without a mask the whole picture may change. The mask goes with the first picture, and is not kept.")}
               </p>
-              <MaskPainter ref={mask} src={api.galleryFileUrl(sources[0].id)} />
+              {/* Keyed by the picture: another one must not keep the strokes, or a "could not be loaded", of the one before. */}
+              <MaskPainter key={sources[0].id} ref={mask} src={api.galleryFileUrl(sources[0].id)} />
             </div>
           )}
         </div>

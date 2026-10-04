@@ -1805,6 +1805,29 @@ test('the mask belongs to the first picture, which says so, and moving another f
   expect(p.state.edited[0]).toEqual({ prompt: 'Beta, as Alpha', sources: [b.id, a.id], count: 1 });
 });
 
+test('the mask painter is not reused for another first picture: it would keep the strokes and a failed load of the one before', async ({ page }) => {
+  const a = pic({ prompt: 'Alpha', age: 2 });
+  const b = pic({ prompt: 'Beta', age: 1 });
+  await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await pick(page, 'Alpha', 'Beta');
+  await page.getByRole('button', { name: 'Only change a part: paint a mask' }).click();
+  await expect(page.getByRole('img', { name: 'The picture to change' })).toHaveAttribute('src', `/api/images/${a.id}/file`);
+  // Mask is switched off again as soon as the first picture changes, so the one render in between is where a painter that is kept shows: its picture is another's, under the old state.
+  await page.evaluate(() => {
+    (window as any).reused = 0;
+    new MutationObserver((records) => {
+      for (const r of records) {
+        const img = r.target as HTMLElement;
+        if (img.getAttribute('alt') === 'The picture to change' && r.oldValue !== img.getAttribute('src')) (window as any).reused++;
+      }
+    }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['src'], attributeOldValue: true });
+  });
+  await strip(page).getByRole('button', { name: 'Move Beta earlier' }).click();
+  await expect.poll(() => names(page)).toEqual(['Beta', 'Alpha']);
+  expect(await page.evaluate(() => (window as any).reused)).toBe(0);
+});
+
 test('a picture of the row opens larger in the viewer, which steps through them and gives focus back', async ({ page }) => {
   const a = pic({ prompt: 'Alpha', age: 2 });
   const b = pic({ prompt: 'Beta', age: 1 });

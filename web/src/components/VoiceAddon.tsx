@@ -1,7 +1,7 @@
 import { VoiceLibrary, kokoroVoiceOptions } from './VoiceLibrary';
 import { VoiceEngines } from './VoiceEngines';
 import { Select } from "./Select";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines";
@@ -10,6 +10,7 @@ import { DEFAULT_KOKORO_VOICE } from "../../../server/src/kokoro-voices";
 import { labelOf, languageName, msg, t } from "../i18n";
 import { btnCls, inputCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
+import { pollWhileVisible } from "../poll";
 
 /** What the voice service is doing, as its badge says it. */
 const INSTALL_STATE: Record<string, string> = {
@@ -43,11 +44,18 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   // The install writes its connection settings as the service comes up. Only those are taken over, so that what is being typed here is not replaced; a failed poll makes the state flip to unavailable and back, and would otherwise do it every time.
   useEffect(()=>{if(install?.state==='running')void api.voice().then(value=>{setConfig(current=>current?{...current,...managed(value)}:value);window.dispatchEvent(new Event('voice-config-changed'));}).catch(e=>onError(e.message));},[install?.state]);
   const [actionBusy, setActionBusy] = useState(false);
-  useEffect(() => {
-    let disposed=false, timer: ReturnType<typeof setTimeout>;
-    const poll=async()=>{try { const state=await api.voiceInstallStatus(); if(!disposed)setInstall(state); } catch(e) { if(!disposed)setInstall({available:false,state:'unavailable',busy:false,progress:'',error:(e as Error).message}); } finally { if(!disposed)timer=setTimeout(poll,2500); }};
-    void poll(); return ()=>{disposed=true;clearTimeout(timer);};
-  },[]);
+  // One question at a time, and none for a page that has gone: each asks Docker several things.
+  const alive = useRef(true), asking = useRef(false);
+  const poll = useCallback(async () => {
+    if (asking.current) return;
+    asking.current = true;
+    try { const state = await api.voiceInstallStatus(); if (alive.current) setInstall(state); } catch (e) { if (alive.current) setInstall({ available: false, state: 'unavailable', busy: false, progress: '', error: (e as Error).message }); } finally { asking.current = false; }
+  }, []);
+  useEffect(() => { alive.current = true; void poll(); return () => { alive.current = false; }; }, [poll]);
+  // Quickly while something is changing, which is what the page is open for; slowly once it is as it will stay, and not at all in a tab nobody looks at, which asks at once when it is looked at again.
+  const changing = !install || install.busy || install.state === 'starting' || !!install.progress;
+  const every = changing ? 2500 : install?.state === 'unavailable' ? 10_000 : 30_000;
+  useEffect(() => pollWhileVisible(() => void poll(), every), [poll, every]);
   // The GPU as nvidia-smi reports it, for the engine choice. Where it cannot be read the install reads it, so a failure here is no error.
   const [hardware, setHardware] = useState<VoiceHardware | null>(null);
   useEffect(() => { void api.voiceHardware().then(setHardware).catch(() => {}); }, []);

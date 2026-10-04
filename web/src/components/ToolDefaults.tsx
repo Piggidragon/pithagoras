@@ -122,7 +122,11 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       onChange={(e) => setRenaming({ source: group.source, value: e.target.value })}
                       onKeyDown={(e) => {
                         if (isEnter(e)) rename(group.source, renaming.value);
-                        if (isEscape(e)) setRenaming(null);
+                        // Cancels the rename only: Settings closes on Escape too, and would take the whole dialog with it.
+                        if (isEscape(e)) {
+                          e.stopPropagation();
+                          setRenaming(null);
+                        }
                       }}
                       placeholder={displayName(group.source)}
                       aria-label={t("Name for {source}", { source: sourceName(group.source) })}
