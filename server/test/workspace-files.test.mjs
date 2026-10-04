@@ -428,3 +428,17 @@ test('a link is marked as one, also when it leads to a folder that is listed as 
   assert.equal(by['a.txt'].link, undefined);
   done();
 });
+
+test('a refusal is sent with its code, so that the page does not have to read the sentence', async () => {
+  const { fail } = await import('../dist/api/files.js');
+  const answer = (e) => {
+    const sent = {};
+    const res = { status(s) { sent.status = s; return this; }, json(b) { sent.body = b; return this; } };
+    fail(res, e);
+    return sent;
+  };
+  // Both are 409: only the code says which one it is.
+  assert.deepEqual(answer(new FileError('conflict', 'The file changed after you opened it')), { status: 409, body: { error: 'The file changed after you opened it', code: 'conflict' } });
+  assert.deepEqual(answer(new FileError('exists', 'Something with that name is already here')), { status: 409, body: { error: 'Something with that name is already here', code: 'exists' } });
+  assert.equal(answer(new FileError('too_large', 'Too big')).body.code, 'too_large');
+});

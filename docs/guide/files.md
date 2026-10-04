@@ -50,7 +50,13 @@ that started there. Nothing outside it can be reached.
   about.
 
 A save is made whole: the text is written beside the file and put in place, so a
-save that fails (a full disk, say) leaves the file as it was.
+save that fails (a full disk, say) leaves the file as it was. The reason is shown
+above the editor; your text and the **Save** button stay, to copy or to try again.
+
+An edit that is not saved is kept for its chat. Switch to another chat, leave the
+page or reload it, and when Files is open again the file is as you left it, still
+marked as not saved. Only **Discard** gives it up. If the file changed in the
+meantime, you get the same choice as at a save.
 
 The agent writes here too, so a save is checked. If the file changed after you
 opened it, the save is refused and you choose between loading the new version

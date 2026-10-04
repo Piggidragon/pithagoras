@@ -18,16 +18,14 @@ import {
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
-import { api, type FileEntry, type Unsaved } from "../api";
+import { ApiError, api, type FileEntry, type Unsaved } from "../api";
 import type { FileActivity } from "../file-activity";
+import { flushFileDraft, keepFileDraft, readFileDraft } from "../file-drafts";
 import { confirmDialog } from "./ConfirmDialog";
 import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
 import { deleteAsking, unsavedNotes } from "../unsaved";
 import { t, tp, useLanguage } from "../i18n";
-
-/** What the server says when a save would put older text over newer. */
-const CHANGED = "The file changed after you opened it";
 
 interface Open {
   path: string;
@@ -106,17 +104,24 @@ export const FilesPanel = memo(function FilesPanel({
 }) {
   // Its text is in the language chosen: it is drawn for that, as it is not for the chat's draws.
   useLanguage();
-  const [dir, setDir] = useState("");
+  // An edit this chat's panel was left with, from before it was unmounted: the chat was switched or left with it open.
+  const [left] = useState(() => readFileDraft(sessionId));
+  const [dir, setDir] = useState(() => (left ? parentOf(left.path) : ""));
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [listing, setListing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
-  const [file, setFile] = useState<Open | null>(null);
-  const [draft, setDraft] = useState("");
+  const [file, setFile] = useState<Open | null>(() =>
+    left ? { path: left.path, loading: false, binary: false, size: left.size, mtime: left.mtime, saved: left.saved } : null,
+  );
+  const [draft, setDraft] = useState(left?.text ?? "");
   const [saving, setSaving] = useState(false);
+  // A save that failed, shown above the editor: the text stays, and so does the button, to try again.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [changed, setChanged] = useState(false);
-  const [following, setFollowing] = useState(true);
+  // The agent's next file would take an edit away from the screen: it follows only when nothing was left open.
+  const [following, setFollowing] = useState(!left);
   const [showHidden, setShowHidden] = useState(savedShowHidden);
   // The entry being given a name, and the name so far.
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -159,6 +164,27 @@ export const FilesPanel = memo(function FilesPanel({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+  // Kept while there are changes, for a panel that is unmounted with them: switching chat or leaving the page.
+  useEffect(() => {
+    keepFileDraft(sessionId, dirty && file ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size } : null);
+  }, [sessionId, dirty, file, draft]);
+  // Written before it goes: unmounting must not lose what was typed a moment ago. Closing the panel on purpose forgets it first.
+  useEffect(() => () => flushFileDraft(sessionId), [sessionId]);
+  // An edit brought back may be of a file that changed meanwhile: told the way a save would, instead of at the save.
+  useEffect(() => {
+    if (!left) return;
+    const ask = fileAsk.current;
+    void api
+      .readFile(sessionId, left.path)
+      .then((r) => {
+        if (ask === fileAsk.current && r.mtime !== left.mtime) setChanged(true);
+      })
+      .catch(() => {
+        if (ask === fileAsk.current) setChanged(true);
+      });
+    // Once, for what the panel opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const root = folder.split("/").filter(Boolean).pop() || "folder";
 
   const loadDir = useCallback(
@@ -193,6 +219,7 @@ export const FilesPanel = memo(function FilesPanel({
     (path: string) => {
       const ask = ++fileAsk.current;
       setChanged(false);
+      setSaveError(null);
       setFile({ path, loading: true, binary: false, size: 0, mtime: 0, saved: "" });
       setDraft("");
       return api
@@ -289,14 +316,15 @@ export const FilesPanel = memo(function FilesPanel({
   const save = async (overwrite = false) => {
     if (!file || file.binary || saving) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const r = await api.saveFile(sessionId, file.path, draft, overwrite ? undefined : file.mtime);
       setFile({ ...file, saved: draft, mtime: r.mtime, size: r.size, error: undefined });
       setChanged(false);
     } catch (e) {
-      const message = (e as Error).message;
-      if (message === CHANGED) setChanged(true);
-      else setFile({ ...file, error: message });
+      // By the code, not the sentence: the server's wording is not this page's to depend on.
+      if (e instanceof ApiError && e.body.code === "conflict") setChanged(true);
+      else setSaveError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -572,6 +600,11 @@ export const FilesPanel = memo(function FilesPanel({
                 {t("Save mine anyway")}
               </button>
             </div>
+          )}
+          {saveError && (
+            <p role="alert" className="flex shrink-0 items-start gap-1.5 border-b border-line bg-danger/10 px-3 py-1.5 text-xs text-danger">
+              <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {saveError}
+            </p>
           )}
           {file.error ? (
             <p role="alert" className="m-3 flex items-start gap-1.5 rounded-lg border border-danger/25 bg-danger/10 px-2 py-2 text-xs text-danger">

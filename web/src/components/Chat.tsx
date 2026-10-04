@@ -34,6 +34,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
 import { lazyComponent } from "../lazy";
+import { forgetFileDraft } from "../file-drafts";
 import { FilesPanel } from "./FilesPanel";
 import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
 import { TitleInput } from "./TitleInput";
@@ -321,6 +322,8 @@ export function Chat({
     ) {
       return;
     }
+    // Given up on: the panel's unmounting would otherwise keep the edit for the next time it opens.
+    forgetFileDraft(session.id);
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
