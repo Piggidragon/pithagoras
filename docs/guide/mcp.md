@@ -44,6 +44,8 @@ object:
 **The form.** Name, transport, then the fields for that transport. A server is
 `stdio` (a local process), `http` (a URL), or a Unix socket — exactly one of
 them.
+A name that another server has is refused, whether the server is new or renamed:
+it would replace that one, with everything the form does not show.
 
 **The file.** "Edit the file directly" at the bottom of the panel, for anything
 the form does not cover: OAuth blocks, tracing, per-server timeouts. The form

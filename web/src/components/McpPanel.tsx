@@ -107,6 +107,7 @@ export function McpPanel({ onError }: { onError: (e: string) => void }) {
     return (
       <ServerForm
         server={existing}
+        taken={view.servers.filter((s) => s.name !== existing?.name).map((s) => s.name)}
         onBack={() => setEditing(null)}
         onSave={async (name, entry) => {
           await api.saveMcpServer(name, entry, existing?.name);
@@ -387,11 +388,14 @@ function ImportBox({
 
 function ServerForm({
   server,
+  taken,
   onBack,
   onSave,
   onError,
 }: {
   server?: McpServerView;
+  /** The names of the other servers: a new or renamed one on any of them would replace it. */
+  taken: string[];
   onBack: () => void;
   onSave: (name: string, entry: McpServerEntry) => Promise<void>;
   onError: (e: string) => void;
@@ -417,9 +421,11 @@ function ServerForm({
   const [debug, setDebug] = useState(e.debug === true);
   const [disabled, setDisabled] = useState(e.disabled === true);
   const [saving, setSaving] = useState(false);
+  const nameTaken = taken.includes(name.trim());
 
   const submit = async () => {
     if (!name.trim()) return onError(t("Give the server a name"));
+    if (nameTaken) return onError(t("A server called {name} already exists", { name: name.trim() }));
     // Start from the stored entry so fields this form does not show — oauth
     // blocks, tracing, timeouts set by hand — survive an edit here.
     const next: McpServerEntry = { ...e };
@@ -475,9 +481,10 @@ function ServerForm({
       </button>
 
       <div className="space-y-4">
-        <Field label={t("Name")} hint={t("How its tools are prefixed, so keep it short")}>
+        <Field label={t("Name")} hint={nameTaken ? <span className="text-danger">{t("A server called {name} already exists", { name: name.trim() })}</span> : t("How its tools are prefixed, so keep it short")}>
           <input
             className={inputCls}
+            aria-invalid={nameTaken || undefined}
             value={name}
             placeholder="filesystem"
             onChange={(ev) => setName(ev.target.value)}

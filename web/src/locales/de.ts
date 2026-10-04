@@ -933,6 +933,7 @@ const de: Locale = {
     "Skipped {name}: {reason}": "Übersprungen: {name}: {reason}",
     "Import": "Importieren",
     "Give the server a name": "Gib dem Server einen Namen",
+    "A server called {name} already exists": "Einen Server namens {name} gibt es schon",
     "How its tools are prefixed, so keep it short": "Wird seinen Tools vorangestellt, halte ihn also kurz",
     "Transport": "Transport",
     "Local process": "Lokaler Prozess",

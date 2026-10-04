@@ -239,7 +239,7 @@ export function mcpRouter(): Router {
     }
   });
 
-  /** Create or replace one server. `from` renames an existing entry. */
+  /** Create or change one server. `from` renames an existing entry; a name that is taken by another is refused. */
   router.put("/mcp/servers/:name", (req, res) => {
     const name = req.params.name;
     const from = typeof req.body?.from === "string" ? req.body.from : null;
@@ -251,6 +251,10 @@ export function mcpRouter(): Router {
 
     const { config, error } = readMcpFile();
     if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
+    // An entry of that name already there is somebody's setup — environment, headers, an oauth block the form does not show — and a new or renamed server would replace it unseen.
+    if (name !== from && Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
+      return res.status(409).json({ error: `A server called ${name} already exists`, code: "exists" });
+    }
     if (from && from !== name) delete config.mcpServers[from];
     config.mcpServers[name] = req.body.entry;
     try {
