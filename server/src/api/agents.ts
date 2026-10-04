@@ -49,12 +49,13 @@ export function agentsRouter(): Router {
 
   router.get("/agents", (_req, res) => {
     // Read once, then counted per agent: every chat is read either way.
+    const agents = listAgents();
     const counts = new Map<string, number>();
     for (const s of [...listSessions(), ...listAgentSessions()]) {
-      const a = agentOf(s.workspace);
+      const a = agentOf(s.workspace, agents);
       if (a) counts.set(a.id, (counts.get(a.id) ?? 0) + 1);
     }
-    res.json({ agents: listAgents().map((a) => agentToApi(a, counts.get(a.id) ?? 0)) });
+    res.json({ agents: agents.map((a) => agentToApi(a, counts.get(a.id) ?? 0)) });
   });
 
   /** A new agent, with its home. Given the wizard's answers, it is set up as well. */

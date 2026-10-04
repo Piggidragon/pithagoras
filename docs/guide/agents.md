@@ -14,10 +14,14 @@ files.
 The **Agents** page shows a card for each agent, with its avatar and name and
 how many chats it has. **New agent** asks the same two questions as the first
 setup: who it is, and who it works for. Its home is made in `agents/` beside the
-first agent's home, named after it (`agents/research-bot` for *Research Bot*),
-and its files are written there. A folder that is already there, kept when an
-agent of the same name was deleted, is taken up as it is: the files in it stay
-as they were, and only the ones that are missing are written.
+first agent's home, named after it (`agents/research-bot` for *Research Bot*;
+accents are dropped, so *Jürgen* is `agents/jurgen`, and a name in another
+alphabet is `agents/agent-` and a short code), and its files are written there.
+The name is kept in the folder, in `.agent-name`. A folder that is already
+there, kept when an agent of the same name was deleted, is taken up as it is:
+the files in it stay as they were, and only the ones that are missing are
+written. A folder kept by an agent of another name is left alone: the new one
+gets the next free name, `agents/<name>-2`.
 
 A card opens that agent (`/agents?agent=research-bot`), with **New
 conversation** to start one with it and four tabs: **Conversations**,

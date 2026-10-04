@@ -1,5 +1,7 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { writeFileAtomic } from "./atomic-write.js";
 import { getDb } from "./db.js";
 import { removeFolderLater } from "./folder-removal.js";
 import { agentHomePath } from "./agent-home.js";
@@ -65,15 +67,53 @@ export function agentAt(home: string): Agent | undefined {
   return listAgents().find((a) => a.home === at);
 }
 
-/** The agent a chat working here belongs to: its home, or inside it. */
-export function agentOf(workspace: string | null | undefined): Agent | undefined {
+/**
+ * The agent a chat working here belongs to: its home, or inside it. Given the
+ * agents, a caller that asks about every chat reads them once, not once per chat.
+ */
+export function agentOf(workspace: string | null | undefined, agents: Agent[] = listAgents()): Agent | undefined {
   if (!workspace) return undefined;
-  return listAgents().find((a) => isWithinText(a.home, path.resolve(workspace)));
+  const at = path.resolve(workspace);
+  return agents.find((a) => isWithinText(a.home, at));
 }
 
-/** A folder name from a name: lower case, letters and digits joined by dashes. */
+/** Of these chats, the ones that are `agent`'s. The agents are read once, whatever the number of chats. */
+export function chatsOf<T extends { workspace: string | null | undefined }>(agent: Agent, chats: T[]): T[] {
+  const agents = listAgents();
+  return chats.filter((s) => agentOf(s.workspace, agents)?.id === agent.id);
+}
+
+/**
+ * A folder name from a name: lower case, letters and digits joined by dashes,
+ * accents dropped. A name with no letter or digit a folder name can keep (in
+ * another alphabet, or emoji) is `agent-` and a short code of the name, so that
+ * it is not the folder of every other such name.
+ */
 export function slugOf(name: string): string {
-  return name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "agent";
+  const slug = name.normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return slug || `agent-${createHash("sha1").update(sameName(name)).digest("hex").slice(0, 6)}`;
+}
+
+/** Names are the same when they differ in case and in the space around them only. */
+const sameName = (name: string): string => name.normalize("NFC").trim().toLowerCase();
+
+/** In an agent's folder: the name it was made for, so that only that name takes a kept folder up. */
+const NAME_FILE = ".agent-name";
+
+/**
+ * Whether an agent called `name` may have `home`: it is not there, or empty, or
+ * kept from an agent of that name. Two names can make the same slug ("Maria 2",
+ * "小助手 2"), and what one kept is not the other's. A folder from before the
+ * name was recorded is taken as the name's when the name is all plain letters,
+ * as it was before.
+ */
+function freeFor(home: string, name: string): boolean {
+  if (!existsSync(home) || readdirSync(home).length === 0) return true;
+  try {
+    return sameName(readFileSync(path.join(home, NAME_FILE), "utf8")) === sameName(name);
+  } catch {
+    return /^[\x20-\x7e]+$/.test(name);
+  }
 }
 
 const checkName = (name: unknown): string => {
@@ -91,16 +131,18 @@ export class AgentError extends Error {
 /**
  * A new agent, with a home of its own under agentsRoot(). Named like one that
  * was deleted with its folder kept, it takes that folder up again, with its
- * files and memory: that is how a deleted agent comes back.
+ * files and memory: that is how a deleted agent comes back. A folder kept by
+ * another name is left alone.
  */
 export function createAgent(input: { name: unknown }): Agent {
   const name = checkName(input.name);
   const taken = new Set(listAgents().map((a) => a.id));
   const base = slugOf(name);
   let id = base;
-  for (let n = 2; taken.has(id) || id === DEFAULT_AGENT; n++) id = `${base}-${n}`;
+  for (let n = 2; taken.has(id) || id === DEFAULT_AGENT || !freeFor(path.join(agentsRoot(), id), name); n++) id = `${base}-${n}`;
   const home = path.join(agentsRoot(), id);
   mkdirSync(home, { recursive: true });
+  writeFileAtomic(path.join(home, NAME_FILE), name);
   getDb().prepare("INSERT INTO agents (id, name, home) VALUES (?, ?, ?)").run(id, name, home);
   return getAgent(id)!;
 }

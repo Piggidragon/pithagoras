@@ -27,7 +27,7 @@ import { insideReal, isWithinText } from "./within.js";
 import { agentHomePath } from "./agent-home.js";
 import { dataFolder } from "./data-dir.js";
 import { agentHome, resolveChannelSession } from "./agent.js";
-import { AgentError, agentOf, agentsRoot, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
+import { AgentError, agentOf, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
 import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
 import { heartbeat } from "./heartbeat.js";
@@ -643,7 +643,7 @@ app.get("/api/agent/sessions", (req, res) => {
 
   res.json({
     agentHome: agent.home,
-    sessions: listAgentSessions().filter((s) => agentOf(s.workspace)?.id === agent.id).map((s) => ({
+    sessions: chatsOf(agent, listAgentSessions()).map((s) => ({
       ...toApi(s),
       // Matched on the slug, so a channel deleted and recreated under the same
       // one still owns its conversations.
