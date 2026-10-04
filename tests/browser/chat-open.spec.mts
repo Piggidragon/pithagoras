@@ -5,10 +5,10 @@ import { test, expect, mockPortal, HANG } from './portal-mock';
  * Opening a chat: the stream it keeps open, and the effort pill it draws
  * before anything has answered.
  */
-const ornith = { id: 'Ornith1.5-35b', name: 'Ornith 1.5 35B', provider: 'llama-swap' };
-const qwen = { id: 'Qwen3.8-27b', name: 'Qwen 3.8 27B', provider: 'llama-swap' };
+const modelA = { id: 'model-a', name: 'Model A', provider: 'llama-swap' };
+const modelB = { id: 'model-b', name: 'Model B', provider: 'llama-swap' };
 const ALL = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-const config = (model: typeof ornith, levels: string[], named: { provider: string | null; model: string | null } = { provider: null, model: null }, models = [ornith, qwen]) =>
+const config = (model: typeof modelA, levels: string[], named: { provider: string | null; model: string | null } = { provider: null, model: null }, models = [modelA, modelB]) =>
   ({ live: false, state: { model, thinkingLevel: 'medium' }, stats: null, thinking: { levels }, models: { models }, named });
 
 async function portal(page: Page, opts: { streamsOpen?: boolean; listHangs?: boolean } = {}) {
@@ -35,20 +35,20 @@ async function portal(page: Page, opts: { streamsOpen?: boolean; listHangs?: boo
     if (p === '/api/sessions/b/config' || p === '/api/sessions/c2/config') return HANG;
     if (p === '/api/sessions/a/config' && method === 'POST') {
       picked = true;
-      return { ok: true, applied: ['model'], state: { model: qwen, thinkingLevel: 'medium' } };
+      return { ok: true, applied: ['model'], state: { model: modelB, thinkingLevel: 'medium' } };
     }
     if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') {
       // The model menu fetches the catalogue where the browser has none cached, and is answered as the config is.
-      return picked ? { ...config(qwen, ALL, { provider: 'llama-swap', model: qwen.id }), live: true } : config(ornith, ['off', 'medium']);
+      return picked ? { ...config(modelB, ALL, { provider: 'llama-swap', model: modelB.id }), live: true } : config(modelA, ['off', 'medium']);
     }
-    if (p === '/api/sessions/c/config') return config(ornith, ['off', 'medium'], { provider: 'llama-swap', model: null });
-    // The default is Qwen now, and pi's catalogue has not said its levels yet.
-    if (p === '/api/sessions/d/config') return config(qwen, []);
-    // No catalogue yet: opening the model menu asks pi for it, which says the default is Qwen now.
-    if (p === '/api/sessions/e/config') return config(ornith, ['off', 'medium'], undefined, []);
-    if (p === '/api/sessions/e/models') return { ...config(qwen, ALL), live: true };
-    // Still Ornith, the default, but pi's catalogue has not answered yet.
-    if (p === '/api/sessions/f/config') return config(ornith, []);
+    if (p === '/api/sessions/c/config') return config(modelA, ['off', 'medium'], { provider: 'llama-swap', model: null });
+    // The default is Model B now, and pi's catalogue has not said its levels yet.
+    if (p === '/api/sessions/d/config') return config(modelB, []);
+    // No catalogue yet: opening the model menu asks pi for it, which says the default is Model B now.
+    if (p === '/api/sessions/e/config') return config(modelA, ['off', 'medium'], undefined, []);
+    if (p === '/api/sessions/e/models') return { ...config(modelB, ALL), live: true };
+    // Still Model A, the default, but pi's catalogue has not answered yet.
+    if (p === '/api/sessions/f/config') return config(modelA, []);
     // No default set in the portal: pi's own, which an idle chat cannot name.
     if (p === '/api/sessions/g/config') return config({ id: 'default', name: "pi's default", provider: 'llama-swap' }, []);
     // The browser has no connection for it: asked, and never answered.
@@ -154,9 +154,9 @@ test("a model picked in a chat on the default is not kept as the default's", asy
   await page.goto('/s/a');
   await expect(page.getByTitle('Thinking on / off')).toHaveText('thinking on');
   // Picked here: the chat is on a model of its own now, with seven levels.
-  await page.getByTitle('Ornith1.5-35b', { exact: true }).click();
+  await page.getByTitle('model-a', { exact: true }).click();
   await page.getByRole('button', { name: 'More models' }).click();
-  await page.getByTitle('Qwen3.8-27b', { exact: true }).click();
+  await page.getByTitle('model-b', { exact: true }).click();
   await expect(page.getByTitle('Effort / thinking level')).toHaveText('medium');
   // Chat b is still on the default, which switches on and off.
   await open(page, 'Second chat', 'b');
@@ -165,13 +165,13 @@ test("a model picked in a chat on the default is not kept as the default's", asy
 });
 
 test("a new default's control is not the old default's, when its levels are not known yet", async ({ page }) => {
-  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:Ornith1.5-35b' });
+  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:model-a' });
   await portal(page);
-  // Chat d is drawn first with the default's levels as last seen: Ornith's.
-  // Its answer names Qwen, the default now, with no levels yet. What was
+  // Chat d is drawn first with the default's levels as last seen: Model A's.
+  // Its answer names Model B, the default now, with no levels yet. What was
   // drawn is another model's, and stayed until the chat was run.
   await page.goto('/s/d');
-  await expect(page.locator('.composer-settings button').first()).toHaveText('Qwen 3.8 27B');
+  await expect(page.locator('.composer-settings button').first()).toHaveText('Model B');
   await expect(page.getByTitle('Effort / thinking level')).toHaveText('medium');
 });
 
@@ -180,31 +180,31 @@ test("the levels the model list reports are kept as the config's are", async ({ 
   await portal(page);
   await page.goto('/s/e');
   await expect(page.getByTitle('Thinking on / off')).toHaveText('thinking on');
-  // No catalogue: opening the menu asks pi, which says the default is Qwen now.
-  await page.getByTitle('Ornith1.5-35b', { exact: true }).click();
+  // No catalogue: opening the menu asks pi, which says the default is Model B now.
+  await page.getByTitle('model-a', { exact: true }).click();
   await expect(pill(page)).toHaveText('medium');
   await page.keyboard.press('Escape');
-  // Chat b follows the default too: it draws Qwen's seven levels, not Ornith's two.
+  // Chat b follows the default too: it draws Model B's seven levels, not Model A's two.
   await open(page, 'Second chat', 'b');
   await expect(page.locator('.composer-settings button').first()).toHaveText('default');
   await expect(page.getByTitle('Effort / thinking level')).toHaveText('medium');
 });
 
 test("the default's control stays while pi's catalogue has not answered", async ({ page }) => {
-  // Drawn from what was last seen for a chat on the default: Ornith's. Its
-  // answer names Ornith with no levels yet. The first paint named no model,
+  // Drawn from what was last seen for a chat on the default: Model A's. Its
+  // answer names Model A with no levels yet. The first paint named no model,
   // and was taken for another's: the right control became the full slider
   // whenever the catalogue was slow.
-  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:Ornith1.5-35b' });
+  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:model-a' });
   await portal(page);
   await page.goto('/s/f');
-  await expect(page.locator('.composer-settings button').first()).toHaveText('Ornith 1.5 35B');
+  await expect(page.locator('.composer-settings button').first()).toHaveText('Model A');
   await page.waitForTimeout(300);
   await expect(page.getByTitle('Thinking on / off')).toHaveText('thinking on');
 });
 
 test("pi's own default, which cannot be named, keeps what was drawn", async ({ page }) => {
-  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:Ornith1.5-35b' });
+  await seen(page, { ':': ['off', 'medium'] }, { ':': 'llama-swap:model-a' });
   await portal(page);
   await page.goto('/s/g');
   await expect(page.locator('.composer-settings button').first()).toHaveText("pi's default");

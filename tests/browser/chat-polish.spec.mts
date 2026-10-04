@@ -25,7 +25,7 @@ test('a tool call reads as its parameters, closed and opened, not as JSON', asyn
 
   // An MCP tool that answers in JSON: its answer is read the same way.
   const mcp = page.locator('.chat-tool', { hasText: 'github_list_issues' });
-  await expect(mcp.locator('.chat-tool-detail')).toHaveText('Owner: Piggidragon · Repo: pithagoras · State: open · Labels: bug, ui');
+  await expect(mcp.locator('.chat-tool-detail')).toHaveText('Owner: octo-org · Repo: pithagoras · State: open · Labels: bug, ui');
   await mcp.locator('.chat-tool-head').click();
   const output = mcp.locator('.chat-tool-output');
   await expect(output).toHaveClass(/is-structured/);
@@ -267,5 +267,4 @@ test('a finished reply says how fast it was written and read, and the tokens in 
   expect(details).toContain('Answer: 41 tokens, written in 1.14 s');
   expect(details).toContain('Draft: 22 of 30 tokens kept');
   await line.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: '/tmp/pithagoras-reply-stats.png', clip: await page.locator('.reply-actions').last().evaluate((el) => { const r = el.parentElement!.getBoundingClientRect(); return { x: r.x - 8, y: r.y - 8, width: Math.min(r.width + 16, 900), height: r.height + 16 }; }) });
 });

@@ -40,7 +40,7 @@ const events: PortalEvent[] = [
   ev('compaction_end', { result: { summary: 'The user asked to fix the build. The build passes; one test fails.', tokensBefore: 84210 } }, 60),
 ];
 if (phase === 'tools') events.push(ev('turn_start', {}, 20), ...bash('b3', 'for i in $(seq 1 40); do echo "step $i"; sleep 1; done', Array.from({ length: 12 }, (_, i) => `step ${i + 1}`).join('\n'), undefined, 12));
-if (phase === 'model') events.push(ev('turn_start', {}, 8), ev('portal_model', { model: 'Qwen3.6-35B-A3B-UD-Q4_K_XL', state: 'loading' }, 7));
+if (phase === 'model') events.push(ev('turn_start', {}, 8), ev('portal_model', { model: 'model-b-q4', state: 'loading' }, 7));
 if (phase === 'prefill') events.push(ev('turn_start', {}, 8), ev('message_start', { message: { role: 'assistant' } }, 7), ev('portal_prefill', { total: 48000, processed: 20160, cache: 12000 }, 1));
 if (phase === 'thinking') events.push(ev('turn_start', {}, 8), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: 'The test fails because the regex expects the status at the very end.\nI should check how pi appends it' } }, 5), ev('message_update', { streamId: 's', assistantMessageEvent: { type: 'thinking_delta', delta: ' — it adds two newlines before "Command exited".' } }, 1));
 // Slash commands and how each went: quiet, answered, a run, terminal-only, failed.
@@ -82,7 +82,7 @@ if (phase === 'args') events.push(
   ev('tool_execution_end', { toolCallId: 'ws', toolName: 'web_search', result: { content: [{ type: 'text', text: 'Found 10 results.' }] } }, 18),
   ev('tool_execution_start', { toolCallId: 'ed', toolName: 'edit', args: { path: 'web/src/main.tsx', edits: [{ oldText: 'const a = 1;', newText: 'const a = 2;' }, { oldText: 'render(<App />);', newText: 'render(\n  <App />\n);' }] } }, 17),
   ev('tool_execution_end', { toolCallId: 'ed', toolName: 'edit', result: { content: [{ type: 'text', text: 'Applied 2 edits.' }] } }, 16.5),
-  ev('tool_execution_start', { toolCallId: 'mc', toolName: 'mcp', args: { tool: 'github_list_issues', args: { owner: 'Piggidragon', repo: 'pithagoras', state: 'open', labels: ['bug', 'ui'] } } }, 16),
+  ev('tool_execution_start', { toolCallId: 'mc', toolName: 'mcp', args: { tool: 'github_list_issues', args: { owner: 'octo-org', repo: 'pithagoras', state: 'open', labels: ['bug', 'ui'] } } }, 16),
   ev('tool_execution_end', { toolCallId: 'mc', toolName: 'mcp', result: { content: [{ type: 'text', text: JSON.stringify([{ number: 21, title: 'Jump button over the tools menu', labels: ['bug', 'ui'] }, { number: 23, title: 'Copy beside the reply', labels: ['ui'] }]) }] } }, 15.5),
   // Numbers as they were written, spaces as they were given, and an id too long for JavaScript's numbers.
   ev('tool_execution_start', { toolCallId: 'cf', toolName: 'configure', args: { port: 8080, threshold: 0.0001, old_string: '    return x;' } }, 15),
@@ -224,7 +224,7 @@ if (phase === 'git') {
   });
 }
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'stats' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'stats' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {

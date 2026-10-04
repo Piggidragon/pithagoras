@@ -8,16 +8,16 @@ import { test, expect, mockPortal, reply } from './portal-mock';
  * `down` answer with an error until `up` says otherwise.
  */
 const settings = {
-  settings: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' }, stored: {}, defaults: { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' },
+  settings: { provider: 'llama-swap', model: 'model-a', thinkingLevel: 'medium' }, stored: {}, defaults: { provider: 'llama-swap', model: 'model-a', thinkingLevel: 'medium' },
   piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
 };
 const answers: Record<string, unknown> = {
   '/api/settings': settings,
-  '/api/models': { models: [{ provider: 'llama-swap', id: 'Ornith', name: 'Ornith 1.5', contextWindow: 65536, reasoning: true }], providers: { 'llama-swap': 'llama-swap' } },
+  '/api/models': { models: [{ provider: 'llama-swap', id: 'model-a', name: 'Model A', contextWindow: 65536, reasoning: true }], providers: { 'llama-swap': 'llama-swap' } },
   '/api/routines/report-targets': { targets: [], default: null },
   '/api/extensions': { settingsPath: '/a/settings.json', extensions: [] },
   '/api/pi-settings': { path: '/a/settings.json', content: '{ "theme": "dark" }' },
-  '/api/providers': { presets: [], apis: [], hosted: [], providers: [{ id: 'llama-swap', kind: 'llama-swap', label: 'llama-swap', baseUrl: 'http://gpu:8080/v1', key: { set: false }, models: [{ id: 'Ornith', name: 'Ornith 1.5' }], endpoint: true }] },
+  '/api/providers': { presets: [], apis: [], hosted: [], providers: [{ id: 'llama-swap', kind: 'llama-swap', label: 'llama-swap', baseUrl: 'http://gpu:8080/v1', key: { set: false }, models: [{ id: 'model-a', name: 'Model A' }], endpoint: true }] },
   '/api/providers/status': { status: {} },
   '/api/mcp': { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null, servers: [{ name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false }] },
   '/api/people': { people: [{ key: 'telegram:1', name: 'Ada', role: 'primary', channel: 'telegram' }] },

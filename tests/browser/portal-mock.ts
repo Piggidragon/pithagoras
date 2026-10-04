@@ -68,7 +68,7 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
 /** What Settings asks when it opens, with nothing configured: for a test of one page in it that has no use for the rest. */
 const settingsBase = ({ path, method }: Ask): Answer => {
   if (method !== 'GET') return undefined;
-  const defaults = { provider: 'llama-swap', model: 'Ornith', thinkingLevel: 'medium' };
+  const defaults = { provider: 'llama-swap', model: 'model-a', thinkingLevel: 'medium' };
   if (path === '/api/settings') return {
     settings: defaults, stored: {}, defaults, piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 },
     contextDefault: null, executor: 'host', workspaceRoot: '/w',

@@ -11,7 +11,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       managed: {
         available: docker, image: false, container, pulling: { active: false, line: '' }, url: 'http://127.0.0.1:3800/mcp',
         config: { llm, dreamInterval: '', dreamAt: '' }, autoPossible,
-        providers: [{ id: 'llama-swap', models: ['Ornith', 'Small'] }, { id: 'vllm', models: ['Qwen'] }],
+        providers: [{ id: 'llama-swap', models: ['model-a', 'Small'] }, { id: 'vllm', models: ['model-b'] }],
         dreaming: false, lastDream: null as any, nextDream: null as string | null, timeZone: 'Europe/Berlin',
       },
     },
@@ -22,7 +22,7 @@ async function portal(page: Page, { reachable = true, available = true, docker =
       settings: { provider: 'p', model: 'm', thinkingLevel: 'medium' }, stored: {}, defaults: { provider: 'p', model: 'm', thinkingLevel: 'medium' },
       piSettingsPath: '/a/settings.json', compaction: { keepRecentTokens: 20000 }, compactionDefaults: { keepRecentTokens: 20000 }, contextDefault: null, executor: 'host', workspaceRoot: '/w',
     };
-    if (p === '/api/models') return { models: [{ provider: 'p', id: 'm', name: 'M', contextWindow: 65536 }, { provider: 'llama-swap', id: 'qwen3.8', name: 'Qwen 3.8' }], providers: { p: 'p' } };
+    if (p === '/api/models') return { models: [{ provider: 'p', id: 'm', name: 'M', contextWindow: 65536 }, { provider: 'llama-swap', id: 'model-b', name: 'Model B' }], providers: { p: 'p' } };
     if (p === '/api/features/subagent' && method === 'GET') return { subagent: state.subagent };
     if (p === '/api/features/flags') return { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled }, images: { enabled: images.enabled && images.baseUrl !== '' } };
     if (p === '/api/features/images' && method === 'GET') return { images };
@@ -222,7 +222,7 @@ test('the portal runs Understory: a provider and model set up here, how often it
 });
 
 test("the chat's model for the memory, unless the portal serves its own TLS", async ({ page }) => {
-  const { sent } = await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'Ornith' } });
+  const { sent } = await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'model-a' } });
   await page.goto('/settings/add-ons');
   await addons(page).getByRole('tab', { name: 'Memory' }).click();
   const here = addons(page).getByRole('region', { name: 'Understory run here' });
@@ -233,7 +233,7 @@ test("the chat's model for the memory, unless the portal serves its own TLS", as
 });
 
 test("over the portal's own TLS the memory cannot use the chat's model", async ({ page }) => {
-  await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'Ornith' }, autoPossible: false });
+  await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'model-a' }, autoPossible: false });
   await page.goto('/settings/add-ons');
   await addons(page).getByRole('tab', { name: 'Memory' }).click();
   await expect(addons(page).getByRole('radio', { name: "The chat's model" })).toBeDisabled();
@@ -246,9 +246,9 @@ test('subagents run on the chat\'s model unless one is named', async ({ page }) 
   const model = addons(page).getByRole('combobox', { name: 'Subagent model' });
   await expect(model).toContainText('Same as the chat');
   await model.click();
-  await page.getByRole('option', { name: /Qwen 3\.8/ }).click();
-  await expect(model).toContainText('Qwen 3.8');
-  expect(sent.at(-1)!.body).toEqual({ model: 'llama-swap/qwen3.8' });
+  await page.getByRole('option', { name: /Model B/ }).click();
+  await expect(model).toContainText('Model B');
+  expect(sent.at(-1)!.body).toEqual({ model: 'llama-swap/model-b' });
 });
 
 test("a model at an address of its own keeps its saved key unless one is typed", async ({ page }) => {
@@ -267,7 +267,7 @@ test("a model at an address of its own keeps its saved key unless one is typed",
 });
 
 test('forgetting the memory asks first', async ({ page }) => {
-  const { sent } = await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'Ornith' } });
+  const { sent } = await portal(page, { docker: true, llm: { source: 'provider', provider: 'llama-swap', model: 'model-a' } });
   await page.goto('/settings/add-ons');
   await addons(page).getByRole('tab', { name: 'Memory' }).click();
   const here = addons(page).getByRole('region', { name: 'Understory run here' });

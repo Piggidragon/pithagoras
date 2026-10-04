@@ -32,7 +32,7 @@ function Fixture() {
   const [shortcuts, setShortcuts] = useState(false);
   // The chat open: another one is the same page shown for another session, as the portal's own switches.
   const [chat, setChat] = useState('test');
-  const session: Session = { id: chat, title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Qwen3.6 35B', thinking_level: 'medium' };
+  const session: Session = { id: chat, title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' };
   return <>
     <main data-testid="workspace" style={{ maxWidth: 980, height: 'calc(100vh - 96px)', minHeight: 540, margin: '16px auto 0' }}>
       <Chat session={session} events={events} onClientCommand={() => {}} onEditMessage={async () => {}} onDeleteMessage={async () => {}} onRename={async () => {}} onAbort={async () => { setAborted(n => n + 1); setRunning(false); }} onSend={async (message, options) => {

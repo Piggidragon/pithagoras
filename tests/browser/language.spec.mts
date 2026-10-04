@@ -3,7 +3,7 @@ import { test, expect, mockPortal } from './portal-mock';
 
 /** The portal with no server: enough canned answers for Settings and the sidebar to draw. */
 const portal = (page: Page) => mockPortal(page, ({ path }) => {
-  if (path === '/api/models') return { models: [{ provider: 'llama-swap', id: 'Ornith', name: 'Ornith 1.5', contextWindow: 65536, reasoning: true }], providers: { 'llama-swap': 'llama-swap' } };
+  if (path === '/api/models') return { models: [{ provider: 'llama-swap', id: 'model-a', name: 'Model A', contextWindow: 65536, reasoning: true }], providers: { 'llama-swap': 'llama-swap' } };
 }, { settings: true });
 
 const pickLanguage = async (page: Page, name: RegExp) => {
