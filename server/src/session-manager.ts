@@ -21,6 +21,7 @@ import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { forgetBrowserSession } from "./browser/tools.js";
+import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
 import { forgetCanvases } from "./canvases.js";
 import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
@@ -2563,6 +2564,8 @@ class SessionManager extends EventEmitter {
     await this.settleStart(sessionId);
     await this.stop(sessionId);
     forgetBrowserSession(sessionId);
+    // Nothing of it asks the progress proxy any more.
+    forgetLlamaProxy(sessionId);
   }
 
   /**

@@ -26,6 +26,7 @@ const { resolveChannelSession } = await import("../dist/agent.js");
 const { findSessionFile } = await import("../dist/pi/session-file.js");
 const { routineSupervisor } = await import("../dist/routines/supervisor.js");
 const { beginCanvasWrite, createCanvas, listCanvases, markCanvasRead, saveCanvasPrefix } = await import("../dist/canvases.js");
+const { proxyBaseUrl, startLlamaProxy } = await import("../dist/llama-progress.js");
 
 test.after(() => {
   getDb().close();
@@ -198,6 +199,19 @@ test("deleting a chat takes its pictures even when pi's folder cannot go", async
     mkdirSync(root, { recursive: true });
   }
   assert.equal(existsSync(pictures), false);
+});
+
+test("a deleted chat is let go of by the llama.cpp progress proxy, which would hold its address until a restart", async () => {
+  const id = chat();
+  startLlamaProxy(() => {});
+  let base;
+  await until(() => (base = proxyBaseUrl(id, "http://127.0.0.1:9")) !== undefined, "the proxy to listen");
+  // Known: the request goes on to the server, which is not there, and says so.
+  const known = await fetch(`${base}/v1/models`);
+  assert.notEqual(await known.text(), "unknown session");
+  await sessions.discard(id);
+  const gone = await fetch(`${base}/v1/models`);
+  assert.deepEqual([gone.status, await gone.text()], [502, "unknown session"]);
 });
 
 test("a restart aborts the run that is going first, so the answer written so far is kept", async () => {

@@ -66,7 +66,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file. |
 | `ALLOW_OPEN` | — | `1` lets a portal with no password listen on the network; without one it binds `127.0.0.1` only. |
 | `GIT_SSH_COMMAND` | `ssh -o BatchMode=yes` | What the Git panel's fetch, pull and push run ssh with. |
-| `LLAMA_DISK_CACHE_MODELS` | — | Comma-separated model names whose llama.cpp prompt cache is kept on disk between chats. |
+| `LLAMA_DISK_CACHE_MODELS` | — | Comma-separated model names whose llama.cpp prompt cache is kept on disk between chats. The server needs `--parallel 1` and a `--slot-save-path`; chats on that model then run one at a time. See [Session prefill snapshots](/guide/voice#session-prefill-snapshots). |
 | `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |
 | `VOICE_GPU` | — | The GPU index the managed voice container uses, as `nvidia-smi` lists them, where no GPU is chosen on the page (which wins). Empty: the card with the most free memory. See [Docker add-ons](/guide/add-ons#engines-devices-and-memory). |
 | `VOICE_VRAM_RESERVE_MIB` | — | GPU memory in MiB the voice installer keeps free on its card for something else. |
