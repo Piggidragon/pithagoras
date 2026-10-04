@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 RUN npm install
 COPY server server
 COPY web web
+# The web build copies it next to the voice files it covers (web/scripts/copy-vad-assets.mjs).
+COPY THIRD_PARTY_NOTICES.md ./
 RUN npm run build
 
 FROM node:22-slim

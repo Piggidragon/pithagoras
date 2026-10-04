@@ -142,3 +142,9 @@ Full docs live in `docs/` and are a VitePress site.
 npm run docs         # dev server
 npm run docs:build   # static build into docs/.vitepress/dist
 ```
+
+## License
+
+Pithagoras is licensed under the [Apache License 2.0](LICENSE) (see also [NOTICE](NOTICE)). The voice
+mode ships a voice activity model and a WebAssembly runtime from other projects, under their own
+licences: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
