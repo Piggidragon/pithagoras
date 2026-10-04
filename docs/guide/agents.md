@@ -57,6 +57,11 @@ An agent can look around on its own. It is off until you choose how often, on
 the **Heartbeat** tab: every 30 minutes up to once a day. The same tab has the
 hours it keeps quiet and **Look now**.
 
+The quiet hours are read on the portal's clock, not on your browser's, and the
+tab names its time zone next to them. In the container image that is UTC until
+you set `TZ`, such as `Europe/Berlin` (see [Deploying](/guide/deploying#environment)),
+so hours of 22:00 to 07:00 typed in another zone would otherwise be kept in that one.
+
 What it looks at is its `WATCH.md`, the fourth file under **Files**: what to keep
 an eye on, and what counts as worth telling you. It is not context for its
 chats; only a look reads it. An agent with an empty one has nothing to watch.

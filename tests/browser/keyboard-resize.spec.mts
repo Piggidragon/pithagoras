@@ -141,7 +141,7 @@ test('the tabs of the terminals are one stop for Tab, and the arrow keys, Home a
 });
 
 test('the sections of an agent and the add-ons take the arrow keys the same way', async ({ page }) => {
-  const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
+  const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', timeZone: 'UTC', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
   await mockPortal(page, ({ path: p, method }) => {
     if (method !== 'GET') return;
     if (p === '/api/agents') return { agents: [agent] };

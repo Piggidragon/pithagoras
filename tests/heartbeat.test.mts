@@ -104,6 +104,16 @@ test('the routes set the heartbeat and read, mark and delete its notes', async (
     assert.equal(set.status, 200);
     assert.deepEqual([set.body.heartbeat.minutes, set.body.heartbeat.quietStart, set.body.heartbeat.watching], [60, '22:00', true]);
     assert.equal(set.body.unread, 2);
+    // The hours are read on the server's clock, and the page says which: a container's is UTC unless TZ is set.
+    assert.equal(set.body.heartbeat.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const had = process.env.TZ;
+    process.env.TZ = 'Pacific/Auckland';
+    try {
+      assert.equal((await call('PUT', '/heartbeat', { minutes: 60, quietStart: '22:00', quietEnd: '07:00' })).body.heartbeat.timeZone, 'Pacific/Auckland');
+    } finally {
+      if (had === undefined) delete process.env.TZ;
+      else process.env.TZ = had;
+    }
     assert.equal((await call('PUT', '/heartbeat', { minutes: 1 })).status, 400);
 
     // While a chat is working the model is taken: a look by hand waits, as one on its schedule does.

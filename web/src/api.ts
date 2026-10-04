@@ -141,6 +141,8 @@ export interface Agent {
     /** "HH:MM", both or neither. */
     quietStart: string;
     quietEnd: string;
+    /** The time zone of the server's clock, which the quiet hours are read on. */
+    timeZone: string;
     last: string | null;
     status: string | null;
     running: boolean;

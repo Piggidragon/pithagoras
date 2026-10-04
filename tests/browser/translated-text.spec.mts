@@ -8,7 +8,7 @@ import { DEFAULT_ORB } from '../../server/src/orb-style';
  */
 
 const session = { id: 'demo', title: 'A chat', workspace: '/workspaces/demo', status: 'idle', kind: 'task', pinned: false };
-const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 1, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
+const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 1, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', timeZone: 'UTC', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
 
 /** The agent's page, with one chat and a WATCH.md that has nothing in it yet. */
 async function agentPage(page: Page) {

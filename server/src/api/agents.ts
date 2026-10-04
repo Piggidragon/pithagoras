@@ -33,6 +33,8 @@ export function agentToApi(a: Agent, chats = 0) {
       minutes: a.heartbeat_minutes ?? 0,
       quietStart: a.quiet_start ?? "",
       quietEnd: a.quiet_end ?? "",
+      // What those hours are read on: the server's clock, which is UTC in a container unless TZ says otherwise.
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       last: a.last_heartbeat,
       status: a.heartbeat_status,
       running: heartbeat.isRunning(a.id),

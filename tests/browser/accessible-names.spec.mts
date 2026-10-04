@@ -14,7 +14,7 @@ const channels = {
   kinds: [{ id: 'telegram', label: 'Telegram', blurb: 'A bot', fields: [{ key: 'botToken', label: 'Bot token', secret: true, required: true }, { key: 'chatId', label: 'Chat id' }], packageName: 'x', builtin: true, runnable: true }],
   broken: [], agentHome: '/a', channelsDir: '/c',
 };
-const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
+const agent = { id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', timeZone: 'UTC', last: null, status: null, running: false, watching: false, available: true }, unread: 0 };
 const skill = { name: 'review', description: 'Reviews', path: '/s/review', scope: 'user', editable: true, manualOnly: false, broken: false, enabled: true, source: null, content: '---\nname: review\n---\nBody' };
 const person = (key: string, name: string, role: string) => ({ key, name, role, notes: '', first_seen: '', last_seen: null, announced_at: null, renamed: 0 });
 const mcp = { path: '/a/mcp.json', exists: true, adapterInstalled: true, adapterSpec: 'npm:pi-mcp-adapter', settings: {}, raw: '{}', parseError: null, servers: [{ name: 'notes', entry: { command: 'notes-mcp' }, transport: 'stdio', disabled: false }] };

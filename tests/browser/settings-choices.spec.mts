@@ -133,7 +133,7 @@ test('the auto-compact switch in the context card says it is a switch, and its s
 });
 
 test('the fields of a heartbeat are the sizes they were written for: 8rem for the hours, the short height for the command', async ({ page }) => {
-  const heartbeat = { minutes: 30, quietStart: '22:00', quietEnd: '07:00', last: null, status: null, running: false, watching: false, available: true };
+  const heartbeat = { minutes: 30, quietStart: '22:00', quietEnd: '07:00', timeZone: 'Europe/Berlin', last: null, status: null, running: false, watching: false, available: true };
   await portal(page, {
     '/api/agents': { agents: [{ id: 'home', name: 'Nova', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', unread: 0, heartbeat }] },
     '/api/agents/home/setup': { initialised: true, home: '/a', files: [] },
@@ -148,6 +148,19 @@ test('the fields of a heartbeat are the sizes they were written for: 8rem for th
   expect((await page.getByLabel('Quiet until').boundingBox())!.width).toBeCloseTo(128, 0);
   // Text of 12px on a 16px line, 6px above and below, and the border: 30px, not the 34px of a roomy field.
   expect((await page.getByLabel('Command it may run').boundingBox())!.height).toBeCloseTo(30, 0);
+});
+
+test('the quiet hours of a heartbeat say whose clock they are on', async ({ page }) => {
+  const heartbeat = { minutes: 30, quietStart: '22:00', quietEnd: '07:00', timeZone: 'Pacific/Auckland', last: null, status: null, running: false, watching: false, available: true };
+  await portal(page, {
+    '/api/agents': { agents: [{ id: 'home', name: 'Nova', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: DEFAULT_ORB, voice: '', unread: 0, heartbeat }] },
+    '/api/agents/home/setup': { initialised: true, home: '/a', files: [] },
+    '/api/agent/sessions': { sessions: [], agentHome: '/a' },
+    '/api/tool-rules': { rules: [] },
+  });
+  await page.goto('/agents?agent=home&tab=heartbeat');
+  // The inputs are filled in the browser's own time, so the page has to say that the server reads them on another.
+  await expect(page.getByText('the portal\'s time (Pacific/Auckland)')).toBeVisible();
 });
 
 test('switching a channel on or off does not take back what was typed in it and not yet saved', async ({ page }) => {

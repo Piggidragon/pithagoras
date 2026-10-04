@@ -82,7 +82,7 @@ export function HeartbeatSettings({ agent, onChanged }: { agent: Agent; onChange
               />
             </div>
             <div className="text-xs text-fg-muted">
-              {t("Quiet hours")}
+              {t("Quiet hours")} <span className="text-[11px] text-fg-faint">{t("the portal's time ({zone})", { zone: hb.timeZone })}</span>
               <div className="mt-1 flex items-center gap-1.5">
                 <input type="time" aria-label={t("Quiet from")} value={quietStart} onChange={(e) => setQuietStart(e.target.value)} onBlur={() => saveQuiet(quietStart, quietEnd)} className={`${inputSmCls} !w-32`} />
                 <span>{t("to")}</span>
