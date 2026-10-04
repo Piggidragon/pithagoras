@@ -9,7 +9,9 @@ import { test, expect, mockPortal } from './portal-mock';
 const at = new Date().toISOString();
 const chat = { id: 'a', title: 'Chat A', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, created_at: at, provider: null, model: null, thinking_level: null };
 
-async function portal(page: Page) {
+const alpha = { id: 'm', name: 'Alpha', provider: 'prov-a' };
+
+async function portal(page: Page, { withModel = false } = {}) {
   const answered: unknown[] = [];
   await mockPortal(page, ({ path, method, json }) => {
     if (path === '/api/sessions') return { sessions: [chat], executor: 'host' };
@@ -18,6 +20,7 @@ async function portal(page: Page) {
       answered.push(json());
       return { ok: true };
     }
+    if (path.endsWith('/config') && withModel) return { live: true, state: { model: alpha, thinkingLevel: 'off' }, stats: null, thinking: { levels: [] }, models: { models: [alpha] }, named: { provider: 'prov-a', model: 'm' } };
     if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
     if (path.endsWith('/canvases')) return [];
     if (path === '/api/settings' && method === 'PUT') return { settings: {}, compaction: { keepRecentTokens: 20000 }, refreshed: 0, note: '' };
@@ -126,4 +129,54 @@ test('the phone drawer is a dialog that keeps the keyboard, and is only that whi
   await page.setViewportSize({ width: 1000, height: 812 });
   await expect(page.getByRole('dialog', { name: 'Navigation' })).toHaveCount(0);
   await expect(page.getByLabel('Sidebar', { exact: true })).toBeVisible();
+});
+
+test('Settings opened from the phone drawer, which closes with it, gives focus back to what opened the drawer', async ({ page }) => {
+  await portal(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/s/a');
+  await caughtUp(page);
+  const open = page.getByRole('button', { name: 'Open navigation', exact: true });
+  await open.focus();
+  await page.keyboard.press('Enter');
+  const drawer = page.getByRole('dialog', { name: 'Navigation' });
+  await drawer.getByRole('button', { name: 'Settings', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await expect(drawer).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeHidden();
+  await expect(open).toBeFocused();
+});
+
+test("Settings opened from the model menu gives focus back to the model pill, not to the item that went with the menu", async ({ page }) => {
+  await portal(page, { withModel: true });
+  await page.goto('/s/a');
+  await caughtUp(page);
+  const pill = page.getByRole('button', { name: 'Model: Alpha', exact: true });
+  await pill.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Add or change providers…' }).focus();
+  await page.keyboard.press('Enter');
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeHidden();
+  await expect(pill).toBeFocused();
+});
+
+test("closing the confirmation of a sidebar row's Delete with Escape puts focus on the row, whose buttons were drawn only while it had focus", async ({ page }) => {
+  await portal(page);
+  await page.goto('/s/a');
+  await caughtUp(page);
+  const row = page.getByLabel('Sidebar', { exact: true }).locator('[data-flip="a"]');
+  await row.focus();
+  await row.getByRole('button', { name: /^Delete/ }).focus();
+  await page.keyboard.press('Enter');
+  const question = page.getByRole('alertdialog');
+  await expect(question).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(question).toBeHidden();
+  await expect(row).toBeFocused();
 });

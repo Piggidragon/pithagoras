@@ -28,7 +28,8 @@ interface ConfirmOptions {
   deletes?: boolean;
 }
 
-type Pending = ConfirmOptions & { id: number; resolve: (ok: boolean) => void };
+/** `from` is what had focus when it was asked, which is where focus goes back to: by the time the dialog is drawn it has taken focus itself. */
+type Pending = ConfirmOptions & { id: number; resolve: (ok: boolean) => void; from: HTMLElement | null };
 
 let present: ((p: Pending) => void) | null = null;
 let counter = 0;
@@ -41,7 +42,7 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
     const text = typeof options.message === "string" ? `\n\n${options.message}` : "";
     return Promise.resolve(window.confirm(options.title + text));
   }
-  return new Promise((resolve) => present!({ ...options, id: ++counter, resolve }));
+  return new Promise((resolve) => present!({ ...options, id: ++counter, resolve, from: document.activeElement as HTMLElement | null }));
 }
 
 /** Mounted once, at the root. Draws whatever confirmDialog() asked for, in order. */
@@ -69,7 +70,7 @@ export function ConfirmHost() {
     if (!current) return;
     // Back to whatever had focus, so a keyboard user is not dropped at the top
     // of the page after answering.
-    const before = document.activeElement as HTMLElement | null;
+    const before = current.from;
     const onKey = (e: KeyboardEvent) => {
       // Capture phase, and stopped: a settings dialog underneath listens for
       // Escape too, and one keypress should close only the topmost thing.
@@ -91,7 +92,12 @@ export function ConfirmHost() {
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
-      before?.focus?.();
+      // A control that is only drawn while its row has focus (the sidebar's Delete) is not there to take it back: its row is.
+      const back = before && before.getClientRects().length === 0 ? before.parentElement?.closest<HTMLElement>('[tabindex]:not([tabindex="-1"]), a[href], button') : before;
+      // Unless focus went somewhere on purpose meanwhile: what the answer led to.
+      const at = document.activeElement;
+      if (at && at !== document.body && !at.closest('[role="alertdialog"]')) return;
+      back?.focus?.();
     };
     // answer closes over `current`, which is what this effect is keyed on.
     // eslint-disable-next-line react-hooks/exhaustive-deps

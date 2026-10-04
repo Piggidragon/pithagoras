@@ -658,7 +658,8 @@ export function ComposerBar({
           <div className="my-1 border-t border-line" />
           <button
             type="button"
-            onClick={() => { setOpen(null); navigate(`/s/${sessionId}/settings/models`); }}
+            // The menu goes with the click, and Settings gives focus back to what had it: the pill, not an item that is gone.
+            onClick={() => { pills.model.current?.focus(); setOpen(null); navigate(`/s/${sessionId}/settings/models`); }}
             className="flex w-full items-center px-3 py-1.5 text-left text-xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg"
           >
             {t("Add or change providers…")}

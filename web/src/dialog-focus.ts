@@ -9,6 +9,9 @@ function tabbables(box: HTMLElement): HTMLElement[] {
   );
 }
 
+/** Is `el` on the page and drawn? A control inside something that is hidden is on the page, and cannot take focus. */
+const drawn = (el: HTMLElement) => el.isConnected && el.getClientRects().length > 0;
+
 /** Where focus goes back to when each open dialog closes, the newest last: for a dialog that opens from inside one, or in its place, to find. */
 const returnsTo = new Map<Element, () => HTMLElement | null>();
 
@@ -42,10 +45,11 @@ export function useDialogFocus<T extends HTMLElement>(active = true) {
   useEffect(() => {
     const dialog = box.current;
     if (!active || !dialog) return;
-    // What it was opened from, or where that went back to when it is gone from the page, or was no element to begin with.
+    // What it was opened from, or where that went back to when it is gone from the page or no longer drawn
+    // (the phone's drawer closes with Settings opened from it), or was no element to begin with.
     const target = () => {
       const from = opener.current;
-      return from && from !== document.body && from.isConnected ? from : behind.current?.isConnected ? behind.current : null;
+      return from && from !== document.body && drawn(from) ? from : behind.current && drawn(behind.current) ? behind.current : null;
     };
     returnsTo.set(dialog, target);
     if (!dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
