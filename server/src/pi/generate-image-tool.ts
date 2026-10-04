@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { GENERATED_DIR, recordChatPicture } from "../image-gallery.js";
-import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, MAX_PROMPT, SIZE, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
+import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, MAX_PROMPT, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
+import { parseSize } from "../image-settings.js";
 import { FileError, baseDir, makeFolder, saveNewFile } from "../workspace-files.js";
 import { pictureIn } from "./show-image-tool.js";
 
@@ -105,7 +106,8 @@ export class GenerateImageTool {
         if (!prompt) throw new Error("A prompt is required: say what the picture should show.");
         if (prompt.length > MAX_PROMPT) throw new Error(`The prompt is over ${MAX_PROMPT} characters; say it shorter.`);
         const size = typeof p.size === "string" ? p.size.trim() : "";
-        if (size && !SIZE.test(size)) throw new Error('The size looks like "1024x1024".');
+        const checked = size ? parseSize(size) : size;
+        if (typeof checked !== "string") throw new Error(`${checked.error}.`);
         const { bytes, ext } = await generateImage(config, { prompt, ...(size ? { size } : {}) }, { signal });
         const rel = saveGenerated(folder, bytes, ext);
         if (sessionId) {

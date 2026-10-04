@@ -90,6 +90,10 @@ test("a request is checked: the address is a base with no secret in it, the size
     assert.equal(typeof parse({ baseUrl: bad }), "string", bad);
   }
   assert.equal(typeof parse({ size: "huge" }), "string");
+  // A default size is one the Images page takes as well: each side from 64 to 8192, or auto.
+  for (const bad of ["16x16", "99999x99999", "63x64", "1024x8193"]) assert.match(String(parse({ size: bad })), /each side from 64 to 8192/, bad);
+  for (const good of ["auto", "64x64", "8192x8192", " 1024x768 "]) assert.equal((parse({ size: good }) as { size: string }).size, good.trim(), good);
+  assert.equal((parse({ size: "  " }) as { size: string }).size, "", "emptied is the way back to none");
   assert.equal(typeof parse({ enabled: "yes" }), "string");
   assert.equal(typeof parse({ model: 5 }), "string");
 });
@@ -144,6 +148,18 @@ test("a key saved before any address goes with the first address, and is dropped
   gen.saveImageGeneration({ baseUrl: "https://elsewhere.example.org/v1", model: "image-model", size: "" });
   assert.equal(gen.imageGenerationState().keySet, false);
   gen.saveImageGeneration({ baseUrl: "", apiKey: "" });
+});
+
+test("a default size saved before sizes were limited, and outside the limits, is none", () => {
+  const was = getSetting("image_generation");
+  try {
+    putSetting("image_generation", JSON.stringify({ baseUrl: "https://images.example.com/v1", size: "16x16" }));
+    assert.equal(gen.imageGenerationConfig().size, "", "the gallery would refuse it for every picture asked without a size");
+    putSetting("image_generation", JSON.stringify({ baseUrl: "https://images.example.com/v1", size: "1024x1024" }));
+    assert.equal(gen.imageGenerationConfig().size, "1024x1024");
+  } finally {
+    putSetting("image_generation", was ?? "{}");
+  }
 });
 
 test("a picture comes back as base64 and is asked for with the model, the prompt and the key", async () => {
@@ -485,6 +501,8 @@ test("the tool fails loudly: a bad ask, an endpoint with no picture, an add-on s
     await assert.rejects(call({ prompt: "   " }), /prompt is required/);
     await assert.rejects(call({ prompt: "x".repeat(4001) }), /over 4000 characters/);
     await assert.rejects(call({ prompt: "p", size: "huge" }), /1024x1024/);
+    // The sides the gallery takes, no others: the agent cannot ask for what the page refuses.
+    for (const size of ["99999x99999", "16x16", "1024x8193"]) await assert.rejects(call({ prompt: "p", size }), /each side from 64 to 8192/, size);
     answer = { data: [{ b64_json: b64(SVG) }] };
     await assert.rejects(call({ prompt: "p" }), /not a PNG, JPEG, GIF or WebP/);
     assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "what is not a picture is not kept");

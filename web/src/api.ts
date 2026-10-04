@@ -2,6 +2,7 @@ import { t } from "./i18n";
 import { samplesWav } from "./voice";
 import type { Host, VoiceChoice } from "../../server/src/voice-engines";
 import type { OrbStyle } from "../../server/src/orb-style";
+import type { OutputFormat } from "../../server/src/image-settings";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -1396,7 +1397,7 @@ export interface PictureJob {
 }
 
 /** The file formats of the OpenAI image format. */
-export type OutputFormat = "png" | "jpeg" | "webp";
+export type { OutputFormat };
 
 /**
  * What the page asks of the portal for one picture beyond its description, and

@@ -3,7 +3,7 @@ import http from "node:http";
 import https from "node:https";
 import { BlockList, isIP } from "node:net";
 import { getSetting, putSetting } from "./db.js";
-import { promptWith, type NativeSettings, type OutputFormat } from "./image-settings.js";
+import { MAX_SIZE, TIMEOUT_SECONDS, parseSize, promptWith, type NativeSettings, type OutputFormat } from "./image-settings.js";
 import { decodeBase64, pictureExt } from "./prompt-images.js";
 
 /**
@@ -80,12 +80,6 @@ export interface ImageGenerationConfig {
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
-/**
- * The time a request for a picture may take, in whole seconds: a slow or local model needs minutes, so five by
- * default. Under half a minute almost no endpoint answers, so a typo could not make every request fail; an hour is
- * more than anyone should wait on one picture.
- */
-export const TIMEOUT_SECONDS = { default: 300, min: 30, max: 3600 };
 const validTimeout = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= TIMEOUT_SECONDS.min && (v as number) <= TIMEOUT_SECONDS.max;
 
 /** What is saved, as it is: without the defaults the config fills in. */
@@ -105,7 +99,8 @@ export function imageGenerationConfig(): ImageGenerationConfig {
     enabled: raw.enabled === true,
     baseUrl: text(raw.baseUrl),
     model: text(raw.model),
-    size: text(raw.size),
+    // One saved before the sizes were limited, and outside them, is as good as none.
+    size: typeof raw.size === "string" && typeof parseSize(raw.size) === "string" ? raw.size.trim() : "",
     apiKey: text(raw.apiKey),
     editEnabled: raw.editEnabled === true,
     editBaseUrl: text(raw.editBaseUrl),
@@ -188,11 +183,6 @@ export interface ImageGenerationPatch {
   sdExtras?: boolean;
 }
 
-/** `1024x1024`, or `auto`, as the OpenAI-style APIs take it. */
-export const SIZE = /^(auto|\d{2,5}x\d{2,5})$/;
-/** The same without `auto`, which is no size to limit by, and with no side of zero, which would limit nothing: what a maximum is given as. */
-export const MAX_SIZE = /^[1-9]\d{1,4}x[1-9]\d{1,4}$/;
-
 /** An API address as the settings keep it, or the reason it is not one. */
 function parseBase(value: unknown): { base: string } | { error: string } {
   if (typeof value !== "string") return { error: "The address must be text" };
@@ -231,8 +221,11 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
     patch[field] = given.trim();
   }
   if (b.size !== undefined) {
-    if (typeof b.size !== "string" || (b.size.trim() && !SIZE.test(b.size.trim()))) return 'The size looks like "1024x1024"';
-    patch.size = b.size.trim();
+    if (typeof b.size !== "string") return 'The size looks like "1024x1024"';
+    // The same sizes the Images page and the agent's tool take: a default that the gallery refuses is none.
+    const size = b.size.trim() ? parseSize(b.size) : "";
+    if (typeof size !== "string") return size.error;
+    patch.size = size;
   }
   if (b.editMaxSize !== undefined) {
     if (typeof b.editMaxSize !== "string" || (b.editMaxSize.trim() && !MAX_SIZE.test(b.editMaxSize.trim()))) return 'The maximum size looks like "2048x2048"';

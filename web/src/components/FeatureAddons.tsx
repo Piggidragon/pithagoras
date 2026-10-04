@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuWandSparkles } from "react-icons/lu";
 import { api, type AvailableModel, type Features, type ImagesFeature, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentFeature, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
 import { confirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SwitchRow, inputCls, primaryCls } from "./SettingsUi";
@@ -693,8 +694,8 @@ interface ImagesDraft {
   apiKey: string;
 }
 
-/** What the server takes as a time limit, in seconds (TIMEOUT_SECONDS there). */
-const TIMEOUT = { default: 300, min: 30, max: 3600 };
+/** What the server takes as a time limit, in seconds. */
+const TIMEOUT = TIMEOUT_SECONDS;
 /** Empty is the default, as it is for the model and the size: it takes a saved limit away. */
 const timeoutOk = (typed: string) => typed.trim() === "" || (/^\d+$/.test(typed.trim()) && Number(typed) >= TIMEOUT.min && Number(typed) <= TIMEOUT.max);
 
@@ -708,8 +709,8 @@ interface ImagesEditDraft {
   apiKey: string;
 }
 
-/** What the server takes as a maximum size (MAX_SIZE there): empty is none. */
-const maxSizeOk = (typed: string) => typed.trim() === "" || /^[1-9]\d{1,4}x[1-9]\d{1,4}$/.test(typed.trim());
+/** What the server takes as a maximum size: empty is none. */
+const maxSizeOk = (typed: string) => typed.trim() === "" || MAX_SIZE.test(typed.trim());
 
 const originOf = (address: string): string => {
   try {
