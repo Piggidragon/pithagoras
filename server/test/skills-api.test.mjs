@@ -1,24 +1,20 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import express from "express";
+import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * The Skills page's own routes: what it lists, and what delete and the switch
  * do to the folder of skills pi reads. In this process, with no server around
  * it, so that what loads an extension is only what these routes do.
  */
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-skills-api-"));
-const agent = path.join(home, "agent");
+const home = inProcessHome("pithagoras-skills-api-");
+const agent = process.env.PI_CODING_AGENT_DIR;
 const skills = path.join(agent, "skills");
 const marker = path.join(home, "extension-ran");
-process.env.DATA_DIR = home;
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.PI_CODING_AGENT_DIR = agent;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
 
 const skill = (name, description = "Use it when the tests say so") => `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n# ${name}\n`;
 const put = (file, text) => {

@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-process.env.DATA_DIR=mkdtempSync(tmpdir()+'/voice-presets-');
+import { inProcessHome } from './helpers.mts';
+inProcessHome('voice-presets-');
 const {addVoice,readVoice,listVoices,updateVoice,deleteVoice,VoiceNotFound}=await import('../server/src/voice-presets.js');
 const {getDb}=await import('../server/src/db.js');
 const {validateConfig}=await import('../server/src/api/voice.js');

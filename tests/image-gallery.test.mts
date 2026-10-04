@@ -1,17 +1,11 @@
 import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
-import { createServer, get, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { createServer, get } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { inProcessHome } from "./helpers.mts";
 
-const temp = mkdtempSync(path.join(tmpdir(), "pitha-gallery-"));
-// What it made is not left in the temporary folder, run after run.
-after(() => rmSync(temp, { recursive: true, force: true }));
-process.env.DATA_DIR = temp;
-process.env.SESSION_DIR = path.join(temp, "sessions");
-process.env.PI_CODING_AGENT_DIR = path.join(temp, "agent");
-process.env.AGENT_HOME = path.join(temp, "agent-home");
+const temp = inProcessHome("pitha-gallery-");
 
 const express = (await import("express")).default;
 const gen = await import("../server/src/image-generation.ts");

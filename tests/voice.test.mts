@@ -1,13 +1,11 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import express from 'express';
 import { speechChunks, newSpeech, samplesWav } from '../web/src/voice.js';
-const dir = mkdtempSync(join(tmpdir(), 'pithagoras-voice-'));
-process.env.DATA_DIR = dir;
-process.env.AGENT_HOME = join(dir, 'agent-home');
+import { inProcessHome } from "./helpers.mts";
+const dir = inProcessHome('pithagoras-voice-');
 // No Docker here, whatever this machine has: the managed service is tested on its own.
 process.env.DOCKER_SOCKET = join(dir, 'no-docker.sock');
 const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
@@ -55,7 +53,7 @@ const server = app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.o
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api`;
 after(async () => {
   await Promise.all([new Promise<void>(r => server.close(() => r())), new Promise<void>(r => backend.close(() => r()))]);
-  getDb().close(); rmSync(dir, { recursive: true, force: true });
+  getDb().close();
 });
 const settings = { enabled: true, whisperUrl: `http://127.0.0.1:${port}/inference`, breezeUrl: `http://127.0.0.1:${port}/v1/audio/speech`, instruction: 'A calm English voice.' };
 /** A reference clone in the voice library, made once, for the tests that need a voice with a recording. */

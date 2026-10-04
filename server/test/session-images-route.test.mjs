@@ -2,7 +2,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { freePort, inProcessHome, serverEnv, startServer } from "./server-harness.mjs";
 
 /**
  * The pictures sent with a chat's messages, against the whole server: they are
@@ -11,7 +11,7 @@ import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs
  */
 // The data folder is below a dot folder, as it is for `~/.pithagoras` or
 // `~/.local/share/...`: Express takes a file under one for hidden and answers 404.
-const home = path.join(testHome("pithagoras-image-route-"), ".pithagoras");
+const home = path.join(inProcessHome("pithagoras-image-route-"), ".pithagoras");
 mkdirSync(path.join(home, "agent"), { recursive: true });
 mkdirSync(path.join(home, "agent-home"), { recursive: true });
 process.env.DATA_DIR = home;

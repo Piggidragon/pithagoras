@@ -1,11 +1,8 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { chromium } from "playwright-core";
-import { freePort } from "./server-harness.mjs";
+import { freePort, inProcessHome } from "./server-harness.mjs";
 
 /**
  * The portal's browser tools against a real Chromium over its debugging port,
@@ -13,7 +10,7 @@ import { freePort } from "./server-harness.mjs";
  * each call, a stale ref, a scroll past a sticky sidebar, reading and finding.
  */
 
-const home = mkdtempSync(path.join(tmpdir(), "browser-tools-"));
+inProcessHome("browser-tools-");
 
 const FORM = `<!doctype html><title>Signup</title><h1>Sign up</h1>
 <form onsubmit="event.preventDefault(); const b = document.getElementById('save'); b.disabled = true; b.textContent = 'Saved'; document.getElementById('msg').hidden = false;">
@@ -45,7 +42,6 @@ let base = "";
 after(async () => {
   site.close();
   await browser?.close();
-  rmSync(home, { recursive: true, force: true });
 });
 
 /**
@@ -67,9 +63,6 @@ async function setUp() {
   await new Promise((r) => site.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${site.address().port}`;
   process.env.BROWSER_CDP_URL = `http://127.0.0.1:${cdpPort}`;
-  process.env.DATA_DIR = home;
-  process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-  mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
   const { browserTools } = await import("../dist/browser/tools.js");
   browserTools("chat-1")({ registerTool: (t) => (tools[t.name] = t) });
 }

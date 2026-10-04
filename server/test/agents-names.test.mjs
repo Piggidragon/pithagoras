@@ -1,15 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-agent-names-"));
-process.env.DATA_DIR = home;
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-mkdirSync(process.env.AGENT_HOME, { recursive: true });
+const home = inProcessHome("pithagoras-agent-names-");
 
 const { default: express } = await import("express");
 const { agentOf, agentsRoot, chatsOf, createAgent, deleteAgent, listAgents, slugOf } = await import("../dist/agents.js");
@@ -19,10 +14,7 @@ const { createSession, getDb } = await import("../dist/db.js");
 const listener = express().use("/api", agentsRouter()).listen(0, "127.0.0.1");
 await new Promise((resolve) => listener.once("listening", resolve));
 const base = `http://127.0.0.1:${listener.address().port}/api`;
-test.after(() => {
-  listener.close();
-  rmSync(home, { recursive: true, force: true });
-});
+test.after(() => listener.close());
 
 /** How many times the agents were read from the database while `fn` ran. */
 async function readsOfAgents(fn) {

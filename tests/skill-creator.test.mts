@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { scratch } from "./helpers.mts";
 
 // The built-in skill-creator tells the agent where to write a skill. pi loads skills from `PI_CODING_AGENT_DIR` when
 // that is set, so a path of `$HOME/.pi/agent` writes a skill that never loads.
@@ -22,7 +22,7 @@ test("every place the skill names is the one pi loads skills from, whichever way
 test("the commands it gives write into the agent's folder when one is set, and into the home folder when not", () => {
   const commands = files.join("\n").match(/^(?:mkdir -p|cat|head -5) "\$\{PI_CODING_AGENT_DIR[^\n]*$/gm) ?? [];
   assert.equal(commands.length, 3);
-  const home = mkdtempSync(path.join(tmpdir(), "skill-creator-"));
+  const home = scratch("skill-creator-");
   try {
     const mkdir = commands.find((c) => c.startsWith("mkdir"))!.replace("<skill-name>", "a-skill");
     const run = (env: Record<string, string>) => execFileSync("bash", ["-c", mkdir], { env: { PATH: process.env.PATH!, ...env } });
@@ -32,6 +32,5 @@ test("the commands it gives write into the agent's folder when one is set, and i
     run({ HOME: home });
     assert.ok(existsSync(path.join(home, ".pi", "agent", "skills", "a-skill")));
   } finally {
-    rmSync(home, { recursive: true, force: true });
   }
 });

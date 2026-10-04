@@ -1,10 +1,9 @@
-import { test, after } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { fakeModel, resultsIn } from "./fake-model.mjs";
+import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * The guard as pi runs it: registered by the portal's own client, called by a
@@ -12,11 +11,7 @@ import path from "node:path";
  * the guard's rules call its handlers with calls made by hand; this is the one
  * that would notice pi changing what a call is called or what a refusal does.
  */
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-guard-wiring-"));
-process.env.DATA_DIR = home;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-process.env.SESSION_DIR = path.join(home, "sessions");
+const home = inProcessHome("pithagoras-guard-wiring-");
 mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions"), { recursive: true });
 mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
 
@@ -37,32 +32,9 @@ export default function (pi) {
 
 /** What the model asks for, one call at each request, by how many results are in the conversation. */
 let script = [];
-const model = createServer((req, res) => {
-  let body = "";
-  req.on("data", (d) => { body += d; });
-  req.on("end", () => {
-    const request = JSON.parse(body);
-    const done = request.messages.filter((m) => m.role === "tool").length;
-    res.writeHead(200, { "Content-Type": "text/event-stream" });
-    const chunk = (delta, finish = null) =>
-      `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
-    const next = script[done];
-    res.end(next
-      ? chunk({ role: "assistant", tool_calls: [{ index: 0, id: `call-${done}`, type: "function", function: { name: next.name, arguments: JSON.stringify(next.args) } }] }) + chunk({}, "tool_calls") + "data: [DONE]\n\n"
-      : chunk({ role: "assistant", content: "Done." }) + chunk({}, "stop") + "data: [DONE]\n\n");
-  });
-});
-model.listen(0, "127.0.0.1");
-await once(model, "listening");
-after(() => model.close());
-writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify({
-  providers: {
-    fake: {
-      baseUrl: `http://127.0.0.1:${model.address().port}/v1`, api: "openai-completions", apiKey: "none",
-      models: [{ id: "m", name: "M", reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 100 }],
-    },
-  },
-}));
+const model = await fakeModel((request) => script[resultsIn(request)] ?? "Done.");
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
+
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 

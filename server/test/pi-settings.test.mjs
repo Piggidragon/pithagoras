@@ -2,7 +2,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { freePort, inProcessHome, serverEnv, startServer } from "./server-harness.mjs";
 
 /**
  * pi's settings.json holds the packages, the default model and the switches of
@@ -10,11 +10,9 @@ import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs
  * cannot read is not one it may start over from: the portal's own key would
  * then be all that is left in it.
  */
-const home = testHome("pithagoras-pi-settings-");
+const home = inProcessHome("pithagoras-pi-settings-");
 const agent = path.join(home, "agent");
 const file = path.join(agent, "settings.json");
-process.env.DATA_DIR = home;
-process.env.PI_CODING_AGENT_DIR = agent;
 const { updatePiSettings, writePiSettingsText, inTurnWithSettings, readPiSettings } = await import("../dist/pi-settings.js");
 const db = await import("../dist/db.js");
 

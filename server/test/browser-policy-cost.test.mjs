@@ -2,17 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs, { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // Which conversations disagree with the browser default is asked about on a
 // poll, over every conversation that says anything about tools. It is one read
 // of the MCP file and of the settings for the lot, not for each of them.
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-policy-cost-"));
-process.env.DATA_DIR = home;
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-policy-cost-");
 const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
 writeFileSync(mcp, JSON.stringify({ mcpServers: { chrome: { command: "npx", args: ["--cdp-endpoint", "http://127.0.0.1:9222"] }, other: {} } }));
 

@@ -1,17 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // The HTTP API and the agent's tools make and change routines by the same rules, and these hold them to it.
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-routines-shared-"));
-process.env.DATA_DIR = home;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-routines-shared-");
 
 const { default: express } = await import("express");
 const { routinesRouter } = await import("../dist/api/routines.js");

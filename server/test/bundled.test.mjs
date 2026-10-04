@@ -1,18 +1,17 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { scratch } from "./server-harness.mjs";
 
-const home = realpathSync(mkdtempSync(path.join(tmpdir(), "pithagoras-bundled-")));
+const home = realpathSync(scratch("pithagoras-bundled-"));
 const started = process.cwd();
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const { bundledPath } = await import("../dist/bundled.js");
 
 after(() => {
   process.chdir(started);
-  rmSync(home, { recursive: true, force: true });
 });
 
 test("a folder the repository ships is found beside the server's folder, wherever the portal was started", () => {

@@ -1,22 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // What the channel trust model promises: strangers and nameless senders are turned
 // away once a primary user is named, only the primary user's word approves anything,
 // a conversation never recovers from the least trusted person who spoke in it, and
 // what a sender writes is never taken for the portal's own words.
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-trust-"));
-process.env.DATA_DIR = home;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-process.env.SESSION_DIR = path.join(home, "sessions");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-trust-");
 
 const { addNote, createSession, findChannelSession, getDb, getSession, listAudit, listToolRules, useGrant } = await import("../dist/db.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");

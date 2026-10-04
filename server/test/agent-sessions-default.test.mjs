@@ -1,14 +1,13 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { freePort, inProcessHome, serverEnv, startServer } from "./server-harness.mjs";
 
 /**
  * The Agent tab asks for the first agent's conversations without naming one. The
  * first agent is the one the portal calls that, not an id the code expects: a
  * database whose first agent has another id still has an Agent tab.
  */
-const home = testHome("pithagoras-agent-default-");
-process.env.DATA_DIR = home;
+const home = inProcessHome("pithagoras-agent-default-");
 const { getDb } = await import("../dist/db.js");
 
 let base;

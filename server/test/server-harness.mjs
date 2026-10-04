@@ -22,13 +22,23 @@ after(async () => {
     child.kill();
     await once(child, "exit");
   }));
+});
+// The homes go when the process ends, not in a hook: a test that loads the server's modules
+// closes its database in a hook of its own, which may run after any hook here.
+process.on("exit", () => {
   for (const home of homes) rmSync(home, { recursive: true, force: true });
 });
 
+/** A new folder in the system's temp directory, removed when the process ends: for what a test needs to put things in. */
+export function scratch(prefix) {
+  const folder = mkdtempSync(path.join(tmpdir(), prefix));
+  homes.push(folder);
+  return folder;
+}
+
 /** A new home: the server's data, sessions and pi's agent directory, all in one place. */
 export function testHome(prefix) {
-  const home = mkdtempSync(path.join(tmpdir(), prefix));
-  homes.push(home);
+  const home = scratch(prefix);
   mkdirSync(path.join(home, "agent"), { recursive: true });
   mkdirSync(path.join(home, "agent-home"), { recursive: true });
   return home;
@@ -38,14 +48,34 @@ export const freePort = () => new Promise((resolve) => {
   const s = createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
 
+/** Every folder the server reads and writes, set to a place in `home`: none of them is left to its default. */
+const homeEnv = (home) => ({
+  DATA_DIR: home, BIN_DIR: path.join(home, "bin"), SESSION_DIR: path.join(home, "sessions"), CHANNELS_DIR: path.join(home, "channels"),
+  AGENT_HOME: path.join(home, "agent-home"), WORKSPACE_ROOT: path.join(home, "ws"), PI_CODING_AGENT_DIR: path.join(home, "agent"),
+});
+
+/**
+ * A home for a test that loads the server's modules into its own process, as
+ * `testHome` is for one that starts the server: this process's environment
+ * points every folder into it, so nothing reaches the developer's own pi
+ * settings or a portal's data, and it is removed when the file's tests end.
+ * Call it before the modules are imported (they read the environment as they
+ * load), and `await import(...)` them after it.
+ */
+export function inProcessHome(prefix) {
+  const home = testHome(prefix);
+  Object.assign(process.env, homeEnv(home));
+  mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
+  return home;
+}
+
 /**
  * What the server is started with: everything in `home`, no password, pi on the
  * host. `overrides` change any of it, a test of the login giving it a password.
  */
 export const serverEnv = (home, port, overrides = {}) => ({
   ...process.env,
-  PORT: String(port), DATA_DIR: home, BIN_DIR: path.join(home, "bin"), SESSION_DIR: path.join(home, "sessions"), CHANNELS_DIR: path.join(home, "channels"),
-  AGENT_HOME: path.join(home, "agent-home"), WORKSPACE_ROOT: path.join(home, "ws"), PI_CODING_AGENT_DIR: path.join(home, "agent"),
+  PORT: String(port), ...homeEnv(home),
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
   ...overrides,
 });

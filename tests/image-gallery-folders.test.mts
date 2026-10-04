@@ -1,22 +1,15 @@
 import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { inProcessHome } from "./helpers.mts";
 
 // The gallery lists the pictures that lie in the folders the agent's tools write into, recorded or not. A database from before it did, with its rows, is what these run on.
-const temp = realpathSync(mkdtempSync(path.join(tmpdir(), "pitha-folders-")));
-after(() => rmSync(temp, { recursive: true, force: true }));
-process.env.DATA_DIR = temp;
-process.env.SESSION_DIR = path.join(temp, "sessions");
-process.env.PI_CODING_AGENT_DIR = path.join(temp, "agent");
-process.env.AGENT_HOME = path.join(temp, "agent-home");
-process.env.WORKSPACE_ROOT = path.join(temp, "workspaces");
+const temp = realpathSync(inProcessHome("pitha-folders-"));
 const root = process.env.WORKSPACE_ROOT;
 const home = process.env.AGENT_HOME;
 mkdirSync(root, { recursive: true });
-mkdirSync(home, { recursive: true });
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads. `tag` tells two apart.
 const pad = (head: number[] | Buffer, tag = "", to = 64) => Buffer.concat([Buffer.from(head), Buffer.from(tag), Buffer.alloc(to)]);

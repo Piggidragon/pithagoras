@@ -2,11 +2,11 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import express from "express";
+import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * Taking skills from a git repository, against real repositories that are
@@ -16,15 +16,11 @@ import express from "express";
  * that leads into the portal's own files, an address that goes up out of the
  * clone, and one that has changed between the look and the import.
  */
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-skills-import-"));
-const agent = path.join(home, "agent");
+const home = inProcessHome("pithagoras-skills-import-");
+const agent = process.env.PI_CODING_AGENT_DIR;
 const skills = path.join(agent, "skills");
 const remote = path.join(home, "remote");
 const config = path.join(home, "gitconfig");
-process.env.DATA_DIR = home;
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.PI_CODING_AGENT_DIR = agent;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
 // This machine's own git config, credential helpers and askpass are not part of the test.
 writeFileSync(config, `[url "file://${remote}/"]\n\tinsteadOf = https://github.com/\n[protocol "file"]\n\tallow = always\n`);
 process.env.GIT_CONFIG_GLOBAL = config;

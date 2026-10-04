@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,writeFileSync,readFileSync,statSync,rmSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import { writeFileSync, readFileSync, statSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import {ContainerExecutor} from '../server/src/executors/index.ts';
+import { scratch } from './helpers.mts';
 test('runner uses the portal uid/gid and a pre-created private session directory',async()=>{
- const temp=mkdtempSync(join(tmpdir(),'pitha-runner-'));const saved=process.env.PATH;const prior=process.env.ARG_FILE;
+ const temp=scratch('pitha-runner-');const saved=process.env.PATH;const prior=process.env.ARG_FILE;
  process.env.PATH=temp+':'+saved;process.env.ARG_FILE=join(temp,'args');
  // Behaves like docker for `container inspect`: a missing name exits non-zero
  // with "No such container", which is what the stale-runner reclaim expects.
@@ -23,7 +23,7 @@ test('runner uses the portal uid/gid and a pre-created private session directory
 });
 
 test('provider keys reach the container by name, never as a value on the docker command line',async()=>{
- const temp=mkdtempSync(join(tmpdir(),'pitha-runner-keys-'));const saved={PATH:process.env.PATH,ARG_FILE:process.env.ARG_FILE,KEY_FILE:process.env.KEY_FILE,OPENROUTER_API_KEY:process.env.OPENROUTER_API_KEY,PI_MODEL:process.env.PI_MODEL};
+ const temp=scratch('pitha-runner-keys-');const saved={PATH:process.env.PATH,ARG_FILE:process.env.ARG_FILE,KEY_FILE:process.env.KEY_FILE,OPENROUTER_API_KEY:process.env.OPENROUTER_API_KEY,PI_MODEL:process.env.PI_MODEL};
  process.env.PATH=temp+':'+saved.PATH;process.env.ARG_FILE=join(temp,'args');process.env.KEY_FILE=join(temp,'key');
  process.env.OPENROUTER_API_KEY='sk-or-example-secret-value';process.env.PI_MODEL='some/model';
  // Records its arguments, and the one key as docker would copy it from its environment.

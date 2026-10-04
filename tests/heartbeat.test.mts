@@ -1,15 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import express from 'express';
+import { inProcessHome } from './helpers.mts';
 
-const temp = mkdtempSync(join(tmpdir(), 'pitha-heartbeat-'));
-process.env.DATA_DIR = temp;
-process.env.AGENT_HOME = join(temp, 'agent-home');
-process.env.PI_CODING_AGENT_DIR = join(temp, 'agent');
-process.env.SESSION_DIR = join(temp, 'sessions');
+const temp = inProcessHome('pitha-heartbeat-');
 
 const { inQuietHours, heartbeatDue, setHeartbeat, heartbeat, WATCH_FILE } = await import('../server/src/heartbeat.ts');
 const { createAgent, getAgent } = await import('../server/src/agents.ts');
@@ -18,7 +14,7 @@ const { agentsRouter } = await import('../server/src/api/agents.ts');
 const { guardExtension } = await import('../server/src/pi/guard.ts');
 const { HEARTBEAT_ROLE, NOTE_TOOL } = await import('../server/src/pi/heartbeat-names.ts');
 const { addToolRule, createSession, getDb } = await import('../server/src/db.ts');
-test.after(() => { getDb().close(); rmSync(temp, { recursive: true, force: true }); });
+test.after(() => getDb().close());
 
 const at = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return new Date(2026, 9, 2, h, m); };
 

@@ -1,13 +1,10 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome, scratch } from "./server-harness.mjs";
 
-const home = mkdtempSync(path.join(tmpdir(), "browser-guard-"));
-process.env.DATA_DIR = home;
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("browser-guard-");
 const { guardExtension, ruleAllows, ruleApplies, taintSession, wrapUntrusted } = await import("../dist/pi/guard.js");
 const { BROWSER_UNTRUSTED_GUIDELINE, browserTools, cleanRef } = await import("../dist/browser/tools.js");
 const { addToolRule, listAudit, listToolRules } = await import("../dist/db.js");
@@ -246,7 +243,7 @@ test("a call that is not the primary user's is refused unless it is a read or a 
 
 // --- what somebody who is not the primary user may read ---
 
-const folder = mkdtempSync(path.join(tmpdir(), "guard-read-"));
+const folder = scratch("guard-read-");
 const workspace = path.join(folder, "home");
 const outside = path.join(folder, "elsewhere");
 mkdirSync(path.join(workspace, "notes"), { recursive: true });

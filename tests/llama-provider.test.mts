@@ -1,16 +1,14 @@
-import { after, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome } from "./helpers.mts";
 
 // Which providers are llama.cpp servers: one answer for the prefill progress and for the first spoken turn,
 // by the kind saved on the Providers page, else by name.
-const dir = mkdtempSync(path.join(tmpdir(), "llama-provider-"));
-process.env.PI_CODING_AGENT_DIR = dir;
-process.env.DATA_DIR = dir;
+inProcessHome("llama-provider-");
 const server = (baseUrl: string) => ({ baseUrl, api: "openai-completions", apiKey: "none", models: [{ id: "m" }] });
-writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: {
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR!, "models.json"), JSON.stringify({ providers: {
   "gpu-box": server("http://gpu.example.test:8080/v1"),
   "llama-swap-2": server("http://swap.example.test:8080/v1"),
   "swap-by-kind": server("http://swap2.example.test:8080/v1"),
@@ -18,7 +16,7 @@ writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: {
   "mine": server("http://other.example.test:9000/v1"),
 } }));
 // What the Providers page saved: a name that says nothing, and one that says the wrong thing.
-writeFileSync(path.join(dir, "portal-providers.json"), JSON.stringify({ "gpu-box": "llama-cpp", "swap-by-kind": "llama-swap", "llama-swap-2": "custom" }));
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR!, "portal-providers.json"), JSON.stringify({ "gpu-box": "llama-cpp", "swap-by-kind": "llama-swap", "llama-swap-2": "custom" }));
 
 const { isLlamaProvider } = await import("../server/src/providers.js");
 const { VoiceFirstTurn } = await import("../server/src/pi/voice-first.js");
@@ -58,4 +56,3 @@ test("the prefill progress goes through the same answer", async () => {
   for (const provider of ["openrouter", "mine", "llama-swap-2"]) assert.equal(routed(provider), false, provider);
 });
 
-after(() => rmSync(dir, { recursive: true, force: true }));

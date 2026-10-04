@@ -1,11 +1,11 @@
 import { test, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import https from "node:https";
 import net from "node:net";
 import path from "node:path";
-import { ENTRY, freePort, runToEnd, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { ENTRY, freePort, inProcessHome, runToEnd, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
 /**
  * The login: who gets past it, and what one cookie is worth. Every other test of
@@ -20,11 +20,9 @@ const BROWSER_PASSWORD = "the-browsers-own-password";
 
 // The same login in this process, to make the cookies a server would not hand
 // out: one that has run out.
-process.env.DATA_DIR = path.join(home, "in-process");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "in-process-agent");
+inProcessHome("pithagoras-auth-in-process-");
 process.env.PORTAL_PASSWORD = PASSWORD;
 process.env.PORTAL_SECRET = SECRET;
-mkdirSync(process.env.DATA_DIR, { recursive: true });
 const auth = await import("../dist/auth.js");
 const security = await import("../dist/http-security.js");
 

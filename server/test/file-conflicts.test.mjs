@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { freePort, scratch, serverEnv, startServer, testHome } from "./server-harness.mjs";
 const { holdDataDir } = await import("../dist/instance-lock.js");
 
 /**
@@ -96,7 +95,7 @@ test("the raw MCP file is saved for its owner alone", async () => {
 });
 
 test("the data folder is closed to every other account, whoever made it", async () => {
-  const parent = mkdtempSync(path.join(tmpdir(), "data-mode-"));
+  const parent = scratch("data-mode-");
   const made = path.join(parent, "new", "data");
   assert.equal(await holdDataDir(made), true);
   assert.equal(statSync(made).mode & 0o777, 0o700);

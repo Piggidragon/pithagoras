@@ -1,18 +1,12 @@
-import { after, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-settings-"));
-process.env.DATA_DIR = home;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-settings-");
 
 const db = await import("../dist/db.js");
 const row = (key) => db.getDb().prepare("SELECT value FROM settings WHERE key = ?").get(key);
-after(() => rmSync(home, { recursive: true, force: true }));
 
 test("the stored model defaults are the three keys of them, and nothing else the table holds", () => {
   db.putSetting("browser_password", "hunter2");

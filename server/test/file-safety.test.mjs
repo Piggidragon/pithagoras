@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { inProcessHome } from "./server-harness.mjs";
 
 const dist = (name) => pathToFileURL(new URL(`../dist/${name}`, import.meta.url).pathname).href;
-const home = mkdtempSync(path.join(tmpdir(), "file-safety-"));
-process.env.DATA_DIR = home;
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "pi");
+const home = inProcessHome("file-safety-");
 const { writeFileAtomic } = await import("../dist/atomic-write.js");
 const { writeMcpText, writeMcpFile } = await import("../dist/api/mcp.js");
 const { agentFileStatus, readAgentFile, runWizard, writeAgentFile } = await import("../dist/agent-setup.js");
@@ -78,7 +75,7 @@ test("a write that fails halfway leaves the file as it was, and nothing behind",
 });
 
 test("mcp.json is for its owner alone, and a failed save keeps the servers", { skip: !hasPrlimit && "prlimit is not available" }, () => {
-  const file = path.join(home, "pi", "mcp.json");
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, '{"mcpServers":{"keep":{"url":"http://x"}}}\n', { mode: 0o644 });
   writeMcpFile({ mcpServers: { keep: { url: "http://x" }, token: { bearerToken: "secret" } } });

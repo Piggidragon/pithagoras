@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { inProcessHome } from "./server-harness.mjs";
 
 /**
  * Installing a package twice at once: two `pi install` or two `npm install` into
  * the same folder collide (ENOTEMPTY, a settings file written by both). Here the
  * commands are stand-ins that log when they start and end, and take a moment.
  */
-const home = mkdtempSync(path.join(tmpdir(), "package-installs-"));
+const home = inProcessHome("package-installs-");
 const bin = path.join(home, "bin");
 const log = path.join(home, "log");
 mkdirSync(bin);
@@ -21,7 +21,6 @@ for (const command of ["pi", "npm"]) {
   chmodSync(file, 0o755);
 }
 process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
-process.env.DATA_DIR = home;
 const { pi } = await import("../dist/api/packages.js");
 const { installChannelPackage } = await import("../dist/channels/loader.js");
 const lines = () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean);

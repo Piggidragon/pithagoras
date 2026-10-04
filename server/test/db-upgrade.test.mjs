@@ -2,13 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, openSync, writeSync, closeSync, utimesSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, openSync, writeSync, closeSync, utimesSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { freePort, inProcessHome } from "./server-harness.mjs";
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-upgrade-"));
-process.env.DATA_DIR = home;
+const home = inProcessHome("pithagoras-upgrade-");
 
 const { DamagedDatabase, backupTo, backupsIn, integrityProblems, pruneBackups, runUpgrade } = await import("../dist/db-upgrade-steps.js");
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
@@ -106,7 +105,7 @@ const until = async (ok, ms = 20000) => { const end = Date.now() + ms; while (Da
 test("a whole upgrade on startup: backed up, upgraded with the real migrations, then it returns", async () => {
   const a = fresh("startup");
   oldDatabase(a.file, 500);
-  const run = startUpgrade(a.dir, 47000 + Math.floor(Math.random() * 1000));
+  const run = startUpgrade(a.dir, await freePort());
   const exited = await new Promise((resolve) => run.child.on("exit", resolve));
   assert.equal(exited, 0, run.output());
   assert.match(run.output(), /READY/);
@@ -121,10 +120,12 @@ test("a damaged database on startup keeps the page up with how to repair it, rat
   const a = fresh("startup-damaged");
   oldDatabase(a.file);
   damage(a.file);
-  const port = 48000 + Math.floor(Math.random() * 1000);
+  const port = await freePort();
   const run = startUpgrade(a.dir, port);
   try {
     assert.ok(await until(async () => { try { return (await fetch(`http://127.0.0.1:${port}/api/sessions`)).status === 500; } catch { return false; } }), run.output());
+    // The answers above are this process's page, not whatever else listens on a port: it was there to be had.
+    assert.doesNotMatch(run.output(), /could not be shown/);
     const api = await (await fetch(`http://127.0.0.1:${port}/api/sessions`)).json();
     assert.match(api.error, /damaged/);
     assert.equal(api.upgrading, false);
@@ -224,6 +225,8 @@ test("a database from a newer portal is not opened: the page says so, and the fi
   const run = startUpgrade(a.dir, port);
   try {
     assert.ok(await until(async () => { try { return (await fetch(`http://127.0.0.1:${port}/api/sessions`)).status === 500; } catch { return false; } }), run.output());
+    // The answers above are this process's page, not whatever else listens on a port: it was there to be had.
+    assert.doesNotMatch(run.output(), /could not be shown/);
     const api = await (await fetch(`http://127.0.0.1:${port}/api/sessions`)).json();
     assert.match(api.error, /newer portal/);
     assert.equal(api.upgrading, false);

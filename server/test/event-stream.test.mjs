@@ -1,20 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { get } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // What a page is sent when it opens a chat's event stream or scrolls back in it:
 // the stored text as it is, every event once and in order however long the
 // catching up, and nothing piled up in the server for a reader that is slow.
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-events-"));
-process.env.DATA_DIR = home;
-process.env.SESSION_DIR = path.join(home, "sessions");
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-events-");
 
 const { default: express } = await import("express");
 const { appendEvent, atomically, createSession, eventsSince, getDb } = await import("../dist/db.js");
@@ -22,10 +16,7 @@ const { eventJson, replaySince } = await import("../dist/event-replay.js");
 const { eventsRouter } = await import("../dist/api/events.js");
 const { sessions } = await import("../dist/session-manager.js");
 
-test.after(() => {
-  getDb().close();
-  rmSync(home, { recursive: true, force: true });
-});
+test.after(() => getDb().close());
 
 test("an event is its stored text, put in place as it is", () => {
   const payload = '{"n":1.0,"text":"a\\nb","big":[1e3]}';

@@ -1,18 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { scratch } from "./server-harness.mjs";
 
 // The built web app as the server sends it: compressed where the build left a
 // copy and the browser takes it, and kept for a year where the name says what is
 // in it.
 
-const root = mkdtempSync(path.join(tmpdir(), "pithagoras-web-static-"));
+const root = scratch("pithagoras-web-static-");
 // Below a dot folder, as a build kept under `~/.pithagoras` is: Express takes a
 // file with one in its path for hidden and answers 404, unless it is told the root.
 const dist = path.join(root, ".pithagoras", "web", "dist");
@@ -39,7 +39,6 @@ serveWeb(app, dist);
 const server = app.listen(0);
 test.after(() => {
   server.close();
-  rmSync(root, { recursive: true, force: true });
 });
 
 /** A request as a browser makes one: raw, so that nothing decompresses what it was sent. */

@@ -1,80 +1,74 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fakeDocker } from "./fake-docker.mts";
+import { inProcessHome } from "./helpers.mts";
 
 // How the browser, Understory and the voice service start, stop and remove their containers and download their images,
 // against a fake Docker daemon: one set of rules for all three, since each of them used to carry its own. Nothing of
 // this machine's Docker is touched.
-const dir = mkdtempSync(path.join(tmpdir(), 'docker-lifecycle-'));
-process.env.DATA_DIR = dir;
+const dir = inProcessHome('docker-lifecycle-');
 process.env.DOCKER_SOCKET = path.join(dir, 'docker.sock');
 process.env.PORTAL_CONTAINER_NAME = 'portal-test';
 
 type Box = { running: boolean; labels: Record<string, string> };
 let boxes = new Map<string, Box>();
 let images = new Set<string>();
-let calls: string[] = [];
 // A verb Docker refuses, with what it says, or nothing to say.
 let refuse: Record<string, { status: number; message?: string }> = {};
 // While set, a download does not end, after it has said its first line: an image that is on its way.
 let pullGate: Promise<void> | null = null;
 let pullError: string | null = null;
+// A container that is gone by the time it is removed: the removal is answered "no such container".
+let wentMeanwhile: string | null = null;
 const noSuch = (name: string) => JSON.stringify({ message: `No such container: ${name}` });
 
-const server = http.createServer(async (req, res) => {
-  let raw = ''; for await (const c of req) raw += c;
-  const body = raw ? JSON.parse(raw) : undefined; const url = req.url!; const method = req.method!;
-  calls.push(`${method} ${url}`);
-  res.setHeader('Content-Type', 'application/json');
+const docker = await fakeDocker(process.env.DOCKER_SOCKET!, async ({ method, url, body, res }) => {
   const verb = url.match(/^\/containers\/([^/?]+)\/(start|stop)/);
   const refused = verb && refuse[verb[2]] || method === 'DELETE' && url.startsWith('/containers/') && refuse.remove;
-  if (refused) { res.statusCode = refused.status; return res.end(refused.message ? JSON.stringify({ message: refused.message }) : ''); }
-  if (url === '/containers/portal-test/json') return res.end(JSON.stringify({ Id: 'portal-one', State: { Running: true } }));
+  if (method === 'DELETE' && wentMeanwhile) { boxes.delete(wentMeanwhile); return { status: 404, text: noSuch(wentMeanwhile) }; }
+  if (refused) return { status: refused.status, text: refused.message ? JSON.stringify({ message: refused.message }) : '' };
+  if (url === '/containers/portal-test/json') return { json: { Id: 'portal-one', State: { Running: true } } };
   if (url.startsWith('/images/create')) {
     const q = new URL(url, 'http://docker').searchParams;
     res.write('{"status":"Pulling fs layer"}\n');
     await pullGate;
-    if (pullError) return res.end(`{"error":${JSON.stringify(pullError)}}\n`);
+    if (pullError) { res.end(`{"error":${JSON.stringify(pullError)}}\n`); return 'handled'; }
     images.add(`${q.get('fromImage')}:${q.get('tag')}`);
-    return res.end('{"status":"Download complete"}\n');
+    res.end('{"status":"Download complete"}\n');
+    return 'handled';
   }
-  if (url.startsWith('/images/')) { res.statusCode = images.has(decodeURIComponent(url.slice('/images/'.length, -'/json'.length))) ? 200 : 404; return res.end('{}'); }
-  if (url === '/volumes/create') return res.end('{}');
-  if (url.startsWith('/volumes/')) { res.statusCode = 204; return res.end(); }
-  if (url === '/_ping') return res.end('OK');
+  if (url.startsWith('/images/')) return { status: images.has(decodeURIComponent(url.slice('/images/'.length, -'/json'.length))) ? 200 : 404 };
+  if (url === '/volumes/create') return {};
+  if (url.startsWith('/volumes/')) return { status: 204, text: '' };
+  if (url === '/_ping') return { text: 'OK' };
   const create = url.match(/^\/containers\/create\?name=(.+)$/);
-  if (create) { boxes.set(create[1], { running: false, labels: body.Labels ?? {} }); res.statusCode = 201; return res.end(JSON.stringify({ Id: 'new-one' })); }
+  if (create) { boxes.set(create[1], { running: false, labels: body.Labels ?? {} }); return { status: 201, json: { Id: 'new-one' } }; }
   const named = url.match(/^\/containers\/([^/?]+)(?:\/(json|start|stop|logs))?/);
   const name = named?.[1] ?? '', box = boxes.get(name);
-  if (!named || !box) { res.statusCode = 404; return res.end(noSuch(name)); }
-  if (method === 'DELETE') { boxes.delete(name); res.statusCode = 204; return res.end(); }
-  if (named[2] === 'json') return res.end(JSON.stringify({ Id: `${name}-id`, State: { Running: box.running }, Config: { Labels: box.labels }, HostConfig: { NetworkMode: 'container:portal-one' } }));
-  if (named[2] === 'logs') return res.end('""');
+  if (!named || !box) return { status: 404, text: noSuch(name) };
+  if (method === 'DELETE') { boxes.delete(name); return { status: 204, text: '' }; }
+  if (named[2] === 'json') return { json: { Id: `${name}-id`, State: { Running: box.running }, Config: { Labels: box.labels }, HostConfig: { NetworkMode: 'container:portal-one' } } };
+  if (named[2] === 'logs') return { text: '""' };
   if (named[2] === 'start' || named[2] === 'stop') {
     const on = named[2] === 'start';
     // What Docker answers when it is as asked already.
-    if (box.running === on) { res.statusCode = 304; return res.end(); }
-    box.running = on; res.statusCode = 204; return res.end();
+    if (box.running === on) return { status: 304, text: '' };
+    box.running = on;
+    return { status: 204, text: '' };
   }
-  res.end('{}');
+  return undefined;
 });
-await new Promise<void>(r => server.listen(process.env.DOCKER_SOCKET, r));
 const browser = await import('../server/src/extensions/browser-service.js');
 const understory = await import('../server/src/extensions/understory-service.js');
 const voice = await import('../server/src/extensions/voice-service.js');
 const { getDb, portalBrowserOn, portalBrowserState, setPortalBrowser } = await import('../server/src/db.js');
 const { browserRouter } = await import('../server/src/api/browser.js');
-after(async () => {
-  await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
-  getDb().close(); rmSync(dir, { recursive: true, force: true });
-});
+after(() => getDb().close());
 
-const reset = () => { boxes = new Map(); images = new Set(); calls = []; refuse = {}; pullGate = null; pullError = null; };
+const reset = () => { boxes = new Map(); images = new Set(); docker.reset(); refuse = {}; pullGate = null; pullError = null; };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const until = async (done: () => boolean | Promise<boolean>) => { for (let n = 0; n < 300 && !(await done()); n++) await sleep(10); };
 // A container as each add-on makes it: the labels they check for, and the voice service's own network, so that it is as it wants it.
@@ -93,7 +87,7 @@ test('stopping a container that was removed by hand is as good as stopped, in al
   for (const [what, name, stop] of stoppers) {
     reset();
     await stop();
-    assert.deepEqual(calls.filter(c => c.startsWith('POST')), [`POST /containers/${name}/stop?t=10`], `${what}: asked once, and not an error`);
+    assert.deepEqual(docker.asked().filter(c => c.startsWith('POST')), [`POST /containers/${name}/stop?t=10`], `${what}: asked once, and not an error`);
   }
 });
 
@@ -144,11 +138,11 @@ test('removing a container: a running one is stopped first, one that is stopped 
   for (const [what, name, remove] of removers) {
     reset(); seed(name, true);
     await remove();
-    assert.deepEqual(calls.filter(c => c.startsWith('POST') || c.startsWith('DELETE')), [`POST /containers/${name}/stop?t=10`, `DELETE /containers/${name}?force=true`], `${what}: running`);
+    assert.deepEqual(docker.asked().filter(c => c.startsWith('POST') || c.startsWith('DELETE')), [`POST /containers/${name}/stop?t=10`, `DELETE /containers/${name}?force=true`], `${what}: running`);
     assert.equal(boxes.has(name), false);
     reset(); seed(name, false);
     await remove();
-    assert.deepEqual(calls.filter(c => c.startsWith('POST') || c.startsWith('DELETE')), [`DELETE /containers/${name}?force=true`], `${what}: stopped`);
+    assert.deepEqual(docker.asked().filter(c => c.startsWith('POST') || c.startsWith('DELETE')), [`DELETE /containers/${name}?force=true`], `${what}: stopped`);
     reset();
     await remove();
     assert.equal(boxes.size, 0, `${what}: gone`);
@@ -156,16 +150,11 @@ test('removing a container: a running one is stopped first, one that is stopped 
   // The same removal under the voice service, which also asks whether the container is its own first.
   reset(); seed(VOICE, true);
   await voice.uninstall();
-  assert.deepEqual(calls.filter(c => c.startsWith('POST') || c.startsWith('DELETE')), [`POST /containers/${VOICE}/stop?t=10`, `DELETE /containers/${VOICE}?force=true`]);
+  assert.deepEqual(docker.asked().filter(c => c.startsWith('POST') || c.startsWith('DELETE')), [`POST /containers/${VOICE}/stop?t=10`, `DELETE /containers/${VOICE}?force=true`]);
   // Docker answering "no such container" to the removal, because it went in the meantime, is a removal.
   reset(); seed(BROWSER, true);
-  const base = server.listeners('request')[0] as (...a: unknown[]) => unknown;
-  server.removeAllListeners('request');
-  server.on('request', (req, res) => {
-    if (req.method === 'DELETE') { boxes.delete(BROWSER); res.statusCode = 404; res.end(noSuch(BROWSER)); return; }
-    base(req, res);
-  });
-  try { await browser.remove(); } finally { server.removeAllListeners('request'); server.on('request', base as never); }
+  wentMeanwhile = BROWSER;
+  try { await browser.remove(); } finally { wentMeanwhile = null; }
 });
 
 test('an image that is not there is downloaded with the daemon\'s lines shown, then done, by the browser and by Understory', async () => {
@@ -193,9 +182,9 @@ test('an image that is not there is downloaded with the daemon\'s lines shown, t
   assert.equal(boxes.get(UNDERSTORY)?.running, true);
 
   // An image that is there is not downloaded again, and what was said of the last download is left as it was.
-  calls = [];
+  docker.reset();
   await understory.install();
-  assert.equal(calls.some(c => c.startsWith('POST /images/create')), false);
+  assert.equal(docker.asked().some(c => c.startsWith('POST /images/create')), false);
   assert.deepEqual((await understory.status()).pulling, { active: false, line: 'done' });
 });
 
@@ -204,7 +193,7 @@ test('a second browser install while one is on its way is refused; the agent is 
   const app = express(); app.use(express.json()); app.use('/api', browserRouter());
   const web = await new Promise<http.Server>(r => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const url = `http://127.0.0.1:${(web.address() as AddressInfo).port}/api/browser/install`;
-  const creates = () => calls.filter(c => c.startsWith('POST /containers/create')).length;
+  const creates = () => docker.asked().filter(c => c.startsWith('POST /containers/create')).length;
   const open = gate();
   try {
     const first = fetch(url, { method: 'POST' });

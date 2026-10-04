@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { scratch } from './server-harness.mjs';
 const files = await import('../dist/workspace-files.js');
 const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, openDownload, MAX_EDIT_BYTES } = files;
 
 /** A folder to work in, and one beside it that nothing may reach. */
 function setup() {
-  const top = mkdtempSync(path.join(tmpdir(), 'wsfiles-'));
+  const top = scratch('wsfiles-');
   const dir = path.join(top, 'work');
   const outside = path.join(top, 'outside');
   mkdirSync(dir); mkdirSync(outside);
@@ -208,11 +208,10 @@ test('a download is a plain file opened once, dotfiles included, and nothing els
 });
 
 test('a download from a folder that sits under a dot-folder is not refused for it', () => {
-  const top = mkdtempSync(path.join(tmpdir(), 'wsfiles-'));
+  const top = scratch('wsfiles-');
   const dir = path.join(top, '.hidden', 'home'); mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'a.txt'), 'x');
   assert.equal(drain(openDownload(baseDir(dir), 'a.txt')), 'x');
-  rmSync(top, { recursive: true });
 });
 
 test('a folder that is itself a link is followed once, up front, and checked against where it leads', () => {

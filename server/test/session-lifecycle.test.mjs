@@ -1,21 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // How a chat's pi comes and goes: a Stop while it starts, an edit while it
 // starts, a restart in the middle of a run, a pi nobody uses any more, a file
 // that went missing, and what is kept of what pi says.
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-lifecycle-"));
-process.env.DATA_DIR = home;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-process.env.SESSION_DIR = path.join(home, "sessions");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-lifecycle-");
 mkdirSync(path.join(home, "work"), { recursive: true });
 
 const { appendEvent, createSession, eventsSince, getDb, getSession, updateSession } = await import("../dist/db.js");
@@ -28,10 +22,7 @@ const { routineSupervisor } = await import("../dist/routines/supervisor.js");
 const { beginCanvasWrite, createCanvas, listCanvases, markCanvasRead, saveCanvasPrefix } = await import("../dist/canvases.js");
 const { proxyBaseUrl, startLlamaProxy } = await import("../dist/llama-progress.js");
 
-test.after(() => {
-  getDb().close();
-  rmSync(home, { recursive: true, force: true });
-});
+test.after(() => getDb().close());
 
 /** What stands in for pi: whatever a test needs of it, and a record of what it was asked. */
 class FakePi extends EventEmitter {

@@ -1,16 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // The MCP panel asks whether the adapter is installed each time it opens and after every change. It is answered from
 // pi's settings, which is a read of a file, and not by starting pi to list its packages.
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-mcp-adapter-"));
-const agent = path.join(home, "agent");
-process.env.DATA_DIR = home;
-process.env.PI_CODING_AGENT_DIR = agent;
-mkdirSync(agent, { recursive: true });
+const home = inProcessHome("pithagoras-mcp-adapter-");
+const agent = process.env.PI_CODING_AGENT_DIR;
 // A pi that says nothing and notes that it was asked.
 const bin = path.join(home, "bin");
 const asked = path.join(home, "pi-was-asked");
@@ -26,10 +23,7 @@ app.use("/api", mcpRouter());
 const listener = app.listen(0, "127.0.0.1");
 await new Promise((resolve) => listener.once("listening", resolve));
 const base = `http://127.0.0.1:${listener.address().port}/api`;
-test.after(() => {
-  listener.close();
-  rmSync(home, { recursive: true, force: true });
-});
+test.after(() => listener.close());
 
 const settings = (packages) => writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages }));
 const panel = async () => (await fetch(`${base}/mcp`)).json();

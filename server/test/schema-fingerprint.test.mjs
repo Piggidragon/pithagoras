@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { schemaFingerprint } from "./schema-fingerprint.mjs";
+import { inProcessHome } from "./server-harness.mjs";
 
 // The schema is versioned: a database below SCHEMA_VERSION is checked and backed
 // up before it is changed, and one at it is not. So a change to the schema that
@@ -19,11 +19,7 @@ import { schemaFingerprint } from "./schema-fingerprint.mjs";
 // changed (below) that starts from a database made before it.
 const PINNED = { version: 3, fingerprint: "adcce7e7608d0fb960e55b42357b368bc7ba514d9b9ee4912963e1333375c9e5" };
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-schema-"));
-process.env.DATA_DIR = path.join(home, "fresh");
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.AGENT_HOME = path.join(home, "agent-home");
-mkdirSync(process.env.DATA_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-schema-");
 
 const { SCHEMA_VERSION } = await import("../dist/schema-version.js");
 const { getDb } = await import("../dist/db.js");

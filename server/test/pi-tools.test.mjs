@@ -1,19 +1,13 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // The portal's inline tools, called as pi calls them. pi reads what the model sees from `content`
 // and marks an error only when `execute` throws: a tool that answers with anything else says
 // nothing, and every failure of it reads as success.
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-pi-tools-"));
-process.env.DATA_DIR = home;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.AGENT_HOME = path.join(home, "agent-home");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-pi-tools-");
 
 const { createSession, getDb, setDefaultReportTo } = await import("../dist/db.js");
 const { createAgent } = await import("../dist/agents.js");

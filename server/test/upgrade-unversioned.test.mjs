@@ -1,15 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, existsSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
 
 // A database from before the schema had a version (fixtures/portal-unversioned.db),
 // made by that code itself, at 0718375: two conversations, the event types the
 // newer indexes cover, and settings. An upgrade has to bring it to the current
 // schema without losing any of it, and the portal has to read and write it after.
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-unversioned-"));
-process.env.DATA_DIR = home;
+const home = inProcessHome("pithagoras-unversioned-");
 const file = path.join(home, "portal.db");
 copyFileSync(new URL("./fixtures/portal-unversioned.db", import.meta.url), file);
 

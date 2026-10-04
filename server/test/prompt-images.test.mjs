@@ -1,14 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { inProcessHome, scratch } from "./server-harness.mjs";
 
-const home = mkdtempSync(path.join(tmpdir(), "pithagoras-images-"));
-process.env.DATA_DIR = home;
-process.env.WORKSPACE_ROOT = path.join(home, "ws");
-process.env.PI_CODING_AGENT_DIR = path.join(home, "agent");
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+const home = inProcessHome("pithagoras-images-");
 
 const { parseImages, decodeBase64, saveImages, imagePath, loadImages, MAX_IMAGE_BYTES } = await import("../dist/prompt-images.js");
 const { parseEdit } = await import("../dist/api/images.js");
@@ -73,7 +69,7 @@ test("a picture that arrives as text is read by one set of rules, whether it is 
 });
 
 test("only names made here lead to a file, and only in that chat's folder", () => {
-  const root = mkdtempSync(path.join(tmpdir(), "images-"));
+  const root = scratch("images-");
   const [saved] = saveImages(root, "chat1", parseImages([{ data: PNG }]));
   assert.match(saved.name, /^[0-9a-f-]{36}\.png$/);
   assert.ok(imagePath(root, "chat1", saved.name));
