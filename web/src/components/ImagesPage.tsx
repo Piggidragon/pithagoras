@@ -15,7 +15,7 @@ import { ImageMaker, type Mode } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
 import { ImageViewer } from "./ImageViewer";
 import { PageHeader, Stat } from "./PageHeader";
-import { Empty, btnCls, ghostCls } from "./SettingsUi";
+import { Empty, Segments, btnCls, ghostCls } from "./SettingsUi";
 import type { ViewerPicture } from "../image-viewer";
 
 /** How many pictures a page of the gallery has: enough to fill a screen and some, and few enough to be quick. */
@@ -516,8 +516,8 @@ export function ImagesPage() {
 
         <section aria-label={t("Gallery")}>
           <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Segments label={t("Where from")} value={filter.origin ?? ""} options={ORIGINS} onChange={(origin) => setFilter({ ...filter, origin: origin || undefined })} />
-            <Segments label={t("How it was made")} value={filter.kind ?? ""} options={KINDS} onChange={(kind) => setFilter({ ...filter, kind: kind || undefined })} />
+            <Segments showLabel label={t("Where from")} value={filter.origin ?? ""} options={ORIGINS} onChange={(origin) => setFilter({ ...filter, origin: origin || undefined })} />
+            <Segments showLabel label={t("How it was made")} value={filter.kind ?? ""} options={KINDS} onChange={(kind) => setFilter({ ...filter, kind: kind || undefined })} />
             {/* Said where the boxes are what an edit is made of, and where they are not: that is all the gallery needs to say of them until one is ticked. */}
             {!selecting && everyId.length > 0 && (
               <span className="ml-auto text-xs text-fg-muted">
@@ -542,7 +542,7 @@ export function ImagesPage() {
                 <LuDownload aria-hidden className="h-4 w-4" />
                 {t("Download")}
               </button>
-              <button type="button" onClick={() => void remove([...picked])} className={`${btnCls} hover:bg-danger/10 hover:text-danger`}>
+              <button type="button" onClick={() => void remove([...picked])} className={`${btnCls} hover:!bg-danger/10 hover:text-danger`}>
                 <LuTrash2 aria-hidden className="h-4 w-4" />
                 {t("Delete")}
               </button>
@@ -627,27 +627,6 @@ export function ImagesPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-/** A row of choices of which one holds, the way the audit page filters. */
-function Segments<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { id: T; label: string }[]; onChange: (id: T) => void }) {
-  return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-1">
-      <span className="mr-1 text-[11px] text-fg-subtle">{label}</span>
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          role="radio"
-          aria-checked={value === o.id}
-          onClick={() => onChange(o.id)}
-          className={`rounded-lg px-2.5 py-1 text-xs transition ${value === o.id ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25" : "bg-fg/5 text-fg-muted hover:bg-fg/10"}`}
-        >
-          {t(o.label)}
-        </button>
-      ))}
     </div>
   );
 }

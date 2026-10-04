@@ -132,3 +132,18 @@ test("\"Save mine anyway\" on a project's instructions sends no time", async ({ 
   expect(sent.at(-1)!.body).toEqual({ text: 'mine' });
   expect(on.text).toBe('mine\n');
 });
+
+test("an agent's file buttons say which of them is open", async ({ page }) => {
+  const files = { initialised: true, home: '/a', memory: 'file', files: [{ name: 'MEMORY.md', exists: true, content: '# MEMORY.md\n', mtime: 1000 }, { name: 'SOUL.md', exists: true, content: '# SOUL.md\n', mtime: 1000 }] };
+  await portal(page, (p) => (p === '/api/agents/home/setup' ? { json: files } : undefined));
+  await page.goto('/agents?agent=home&tab=files');
+  const main = page.getByRole('main');
+  const memory = main.getByRole('button', { name: 'MEMORY.md' });
+  await expect(memory).toHaveAttribute('aria-pressed', 'false');
+  await memory.click();
+  await expect(memory).toHaveAttribute('aria-pressed', 'true');
+  await expect(main.getByRole('button', { name: 'SOUL.md' })).toHaveAttribute('aria-pressed', 'false');
+  // A second click closes it, as it always did.
+  await memory.click();
+  await expect(memory).toHaveAttribute('aria-pressed', 'false');
+});

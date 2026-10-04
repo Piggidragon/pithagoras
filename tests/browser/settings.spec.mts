@@ -317,6 +317,23 @@ test("a package's link that is not a web page is not made a link", async ({ page
   await expect(dialog.getByRole('link', { name: 'more' })).toHaveCount(0);
 });
 
+test('a click on the word beside a dropdown, or on its hint, does not open it', async ({ page }) => {
+  await portal(page, { probe: () => ['A'] });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/models');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Add a provider' }).click();
+  const kind = dialog.getByLabel('Kind of provider');
+  await expect(kind).toBeVisible();
+  // Inside a label, either would be passed on to the button and open its list.
+  await dialog.getByText('Kind', { exact: true }).click();
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await kind.locator('xpath=following-sibling::p').click();
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await kind.click();
+  await expect(page.getByRole('listbox')).toBeVisible();
+});
+
 test('a new provider cannot take a name already set up', async ({ page }) => {
   await portal(page, { probe: () => ['A'] });
   await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));

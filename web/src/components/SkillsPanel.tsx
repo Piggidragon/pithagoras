@@ -14,17 +14,13 @@ import {
   LuWrench,
 } from "react-icons/lu";
 import { api, type FoundSkill, type Skill, type SkillDiagnostic, type SkippedSkill } from "../api";
+import { Switch, btnCls, codeAreaCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
+import { useFlash } from "../use-flash";
 
-const inputCls =
-  "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
-const btnCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-2 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40";
-const primaryCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
 
 /**
  * Skills the agent can reach for.
@@ -245,19 +241,7 @@ function SkillRow({
       </button>
 
       {onToggle ? (
-        <button
-          onClick={() => onToggle(!s.enabled)}
-          title={s.enabled ? t("Disable — pi stops loading it") : t("Enable")}
-          className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-            s.enabled ? "bg-accent" : "bg-raised"
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-              s.enabled ? "left-[1.125rem]" : "left-0.5"
-            }`}
-          />
-        </button>
+        <Switch on={s.enabled} onChange={onToggle} label={s.name} title={s.enabled ? t("Disable — pi stops loading it") : t("Enable")} />
       ) : (
         <LuChevronRight className="h-4 w-4 shrink-0 text-fg-faint" />
       )}
@@ -341,7 +325,7 @@ function SkillDetail({
 }) {
   const [draft, setDraft] = useState(s.content);
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved] = useFlash();
   useUnsavedDraft(draft !== s.content);
 
   useEffect(() => setDraft(s.content), [s.name, s.content]);
@@ -385,20 +369,14 @@ function SkillDetail({
           <p className="mt-0.5 truncate font-mono text-[10px] text-fg-faint">{s.path}</p>
         </div>
         {s.editable && (
-          <button
-            onClick={() => act(() => api.setSkillEnabled(s.name, !s.enabled))}
+          <Switch
+            on={s.enabled}
+            onChange={() => act(() => api.setSkillEnabled(s.name, !s.enabled))}
             disabled={busy}
+            label={s.name}
             title={s.enabled ? t("Disable") : t("Enable")}
-            className={`relative mt-1 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40 ${
-              s.enabled ? "bg-accent" : "bg-raised"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                s.enabled ? "left-[1.125rem]" : "left-0.5"
-              }`}
-            />
-          </button>
+            className="mt-1"
+          />
         )}
       </div>
 
@@ -415,7 +393,7 @@ function SkillDetail({
             onChange={(e) => setDraft(e.target.value)}
             rows={18}
             spellCheck={false}
-            className="w-full resize-y rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-accent/60"
+            className={`${codeAreaCls} resize-y`}
           />
           <p className="mt-1 text-[11px] text-fg-faint">
             {tx("The frontmatter at the top is what pi reads — changing {name} renames the skill, and {description} is what the model matches against.", { name: <code>name</code>, description: <code>description</code> })}
@@ -443,8 +421,7 @@ function SkillDetail({
               onClick={() =>
                 act(async () => {
                   await api.saveSkill(s.name, draft);
-                  setSaved(true);
-                  setTimeout(() => setSaved(false), 2000);
+                  flashSaved();
                 })
               }
               disabled={busy || draft === s.content}
@@ -639,6 +616,8 @@ function ImportSkills({
             {found.map((f) => (
               <li key={f.name}>
                 <button
+                  role="checkbox"
+                  aria-checked={chosen.has(f.name)}
                   onClick={() => toggle(f.name)}
                   className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition ${
                     chosen.has(f.name)
@@ -650,7 +629,7 @@ function ImportSkills({
                     className={`mt-0.5 grid h-3.5 w-3.5 shrink-0 place-items-center rounded border ${
                       chosen.has(f.name)
                         ? "border-accent/60 bg-accent/25 text-accent"
-                        : "border-white/20"
+                        : "border-fg/30"
                     }`}
                   >
                     {chosen.has(f.name) && <LuCheck className="h-2.5 w-2.5" />}

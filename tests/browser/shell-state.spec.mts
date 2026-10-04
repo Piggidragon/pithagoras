@@ -9,7 +9,7 @@ const at = new Date().toISOString();
 const chat = (id: string, title: string) =>
   ({ id, title, workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, created_at: at, provider: null, model: null, thinking_level: null });
 
-type Opts = { gone?: boolean; answer?: { ok: boolean; note?: string } };
+type Opts = { gone?: boolean; answer?: { ok: boolean; note?: string }; /** An answer to an extension is not given until this is. */ hold?: Promise<void> };
 
 async function portal(page: Page, opts: Opts = {}) {
   const sessions = ['a', 'b', 'c', 'd'].map((id, i) => chat(id, `Chat ${'ABCD'[i]}`));
@@ -26,6 +26,7 @@ async function portal(page: Page, opts: Opts = {}) {
     else if (/^\/api\/sessions\/\w+$/.test(p)) reply = sessions.find((s) => p.endsWith('/' + s.id));
     else if (p.endsWith('/ui-response')) {
       answered.push(route.request().postDataJSON());
+      await opts.hold;
       reply = opts.answer ?? { ok: true };
     } else if (p.endsWith('/config')) reply = { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
     else if (p.endsWith('/canvases')) reply = [];
@@ -183,4 +184,23 @@ test('the next question of an extension starts empty, whatever the last one was 
   const next = page.getByRole('dialog', { name: 'Second question' });
   await expect(next.getByRole('textbox')).toHaveValue('proposal');
   await expect(next.getByRole('alert')).toHaveCount(0);
+});
+
+test('the answer to a yes-or-no question of an extension looks disabled while it is being sent', async ({ page }) => {
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => (release = resolve));
+  const { answered } = await portal(page, { hold });
+  await page.goto('/s/a');
+  await caughtUp(page);
+  await say(page, { seq: -1, type: 'extension_ui_request', payload: { id: 'q1', method: 'confirm', title: 'Go ahead?', message: 'It will take a minute' } });
+  const dialog = page.getByRole('dialog', { name: 'Go ahead?' });
+  const yes = dialog.getByRole('button', { name: 'Yes' });
+  await expect(yes).toBeEnabled();
+  await yes.click();
+  await expect.poll(() => answered.length).toBe(1);
+  await expect(yes).toBeDisabled();
+  // Dimmed like the other buttons of the settings and the dialogs, not left looking pressable.
+  await expect(yes).toHaveCSS('opacity', '0.4');
+  release();
+  await expect(dialog).toHaveCount(0);
 });

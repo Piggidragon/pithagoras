@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { LuRotateCw, LuTriangleAlert } from "react-icons/lu";
 import { t } from "../i18n";
+import { primarySmCls } from "./SettingsUi";
 
 /**
  * What a page that threw is replaced with, instead of the whole portal going
@@ -36,7 +37,7 @@ export class ErrorBoundary extends Component<{ resetKey: string; children: React
           <button
             type="button"
             onClick={() => this.setState({ error: null })}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20"
+            className={primarySmCls}
           >
             <LuRotateCw className="h-3.5 w-3.5" /> {t("Try again")}
           </button>

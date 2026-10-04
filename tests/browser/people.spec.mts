@@ -66,7 +66,7 @@ test('the last primary user cannot be forgotten or demoted by one click, only af
   await expect(ask).toContainText('every channel lets anybody in');
   await ask.getByRole('button', { name: 'Cancel' }).click();
 
-  await dialog.getByRole('button', { name: 'Colleague', exact: true }).click();
+  await dialog.getByRole('radio', { name: 'Colleague', exact: true }).click();
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('alertdialog')).toContainText("Take away the only primary user's role?");
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
@@ -83,12 +83,25 @@ test('the last primary user cannot be forgotten or demoted by one click, only af
   expect(sent[1].url).toBe('/api/people/tg%3Aowner?force=1');
 });
 
+test('a person\'s role is a radio group, so the one they have is said and not only coloured', async ({ page }) => {
+  await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:kim', 'Kim', 'colleague')]);
+  await page.goto('/settings/people');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: /Kim/ }).click();
+  const role = dialog.getByRole('radiogroup', { name: 'Role' });
+  await expect(role.getByRole('radio', { name: 'Colleague' })).toHaveAttribute('aria-checked', 'true');
+  await expect(role.getByRole('radio', { name: 'Blocked' })).toHaveAttribute('aria-checked', 'false');
+  await role.getByRole('radio', { name: 'Blocked' }).click();
+  await expect(role.getByRole('radio', { name: 'Blocked' })).toHaveAttribute('aria-checked', 'true');
+  await expect(role.getByRole('radio', { name: 'Colleague' })).toHaveAttribute('aria-checked', 'false');
+});
+
 test('with another primary user, demoting somebody asks nothing and sends no force', async ({ page }) => {
   const sent = await portal(page, [person('tg:owner', 'Sam', 'primary'), person('tg:deputy', 'Dee', 'primary')]);
   await page.goto('/settings/people');
   const dialog = page.getByRole('dialog', { name: 'Settings' });
   await dialog.getByRole('button', { name: /Dee/ }).click();
-  await dialog.getByRole('button', { name: 'Guest', exact: true }).click();
+  await dialog.getByRole('radio', { name: 'Guest', exact: true }).click();
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => sent.length).toBe(1);
   expect(sent[0].body.force).toBeUndefined();

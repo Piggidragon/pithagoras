@@ -11,6 +11,7 @@ import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { serialSaver } from "../serial-saver";
 import { cacheModels, cachedModels, catalogueFresh, forgetModels } from "../model-catalogue";
 import { ContextPill } from "./ContextPill";
+import { SwitchTrack } from "./SettingsUi";
 import { t } from "../i18n";
 import { EFFORT_LEVELS, effortLabel } from "../effort";
 
@@ -658,13 +659,7 @@ export function ComposerBar({
               className="flex w-full items-center justify-between text-sm text-fg-muted disabled:opacity-50"
             >
               <span>{t("Thinking")}</span>
-              <span className={`relative h-5 w-9 rounded-full transition ${thinkingOn ? "bg-warn" : "bg-raised"}`}>
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface transition-all ${
-                    thinkingOn ? "left-[1.125rem]" : "left-0.5"
-                  }`}
-                />
-              </span>
+              <SwitchTrack on={thinkingOn} tone="warn" />
             </button>
           ) : (
             <>

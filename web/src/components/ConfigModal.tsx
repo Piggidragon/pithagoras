@@ -62,6 +62,7 @@ import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
+import { useFlash } from "../use-flash";
 
 /** Either a fixed tab or one extension's own configuration page. */
 type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string };
@@ -1201,30 +1202,18 @@ function ExtensionsPanel({
                     </span>
                   )}
                   {ext.enabled !== undefined && (
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={ext.enabled}
-                      aria-label={ext.enabled ? t("Switch off {name}", { name: displayName(ext.name, names) }) : t("Switch on {name}", { name: displayName(ext.name, names) })}
+                    <Switch
+                      on={ext.enabled}
+                      onChange={() => switchPackage(ext)}
+                      label={ext.enabled ? t("Switch off {name}", { name: displayName(ext.name, names) }) : t("Switch on {name}", { name: displayName(ext.name, names) })}
                       title={
                         ext.enabled
                           ? t("On — click to switch it off without uninstalling it")
                           : t("Off — its commands, skills and tools are not loaded. Click to switch it on")
                       }
                       disabled={busy !== null}
-                      onClick={() => switchPackage(ext)}
-                      className="ml-auto shrink-0 disabled:opacity-40"
-                    >
-                      <span
-                        className={`relative block h-5 w-9 rounded-full transition ${ext.enabled ? "bg-accent" : "bg-raised"}`}
-                      >
-                        <span
-                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                            ext.enabled ? "left-[1.125rem]" : "left-0.5"
-                          }`}
-                        />
-                      </span>
-                    </button>
+                      className="ml-auto"
+                    />
                   )}
                   <button
                     disabled={busy !== null}
@@ -1432,7 +1421,7 @@ function AdvancedPanel({
   onError: (e: string) => void;
 }) {
   const [file, setFile] = useState<{ path: string; content: string } | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved] = useFlash();
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -1462,8 +1451,7 @@ function AdvancedPanel({
                 setBusy(true);
                 try {
                   await api.savePiSettings(file.content);
-                  setSaved(true);
-                  setTimeout(() => setSaved(false), 2000);
+                  flashSaved();
                 } catch (e) {
                   onError((e as Error).message);
                 } finally {

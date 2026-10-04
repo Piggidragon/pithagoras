@@ -17,18 +17,14 @@ import {
 import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
 import { api, type Agent, type ReportTarget, type ReportTo, type Routine, type Workspace } from "../api";
+import { Segments, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { below } from "../paths";
 import { pollWhileVisible } from "../poll";
 import { formatDateTime, labelOf, msg, t, tx } from "../i18n";
+import { useFlash } from "../use-flash";
 import { serverTime, sinceThen } from "../time";
 
-const inputCls =
-  "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
-const primaryCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
-const btnCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-2 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40";
 
 const STATUS_STYLE: Record<string, string> = {
   ok: "text-ok",
@@ -78,6 +74,11 @@ const until = (iso: string | null) => {
   return t("in {n}d", { n: Math.round(mins / 1440) });
 };
 
+const MODES: { id: "repeats" | "once"; label: string }[] = [
+  { id: "repeats", label: msg("Repeats") },
+  { id: "once", label: msg("Once") },
+];
+
 /**
  * Picking when. A routine either repeats or happens once, never both.
  *
@@ -101,22 +102,7 @@ function Timing({
 }) {
   return (
     <div>
-      <div className="mb-2 flex gap-1">
-        {(["repeats", "once"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => onMode(m)}
-            className={`rounded-lg px-2.5 py-1 text-xs transition ${
-              mode === m
-                ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25"
-                : "bg-fg/5 text-fg-muted hover:bg-fg/10"
-            }`}
-          >
-            {m === "repeats" ? t("Repeats") : t("Once")}
-          </button>
-        ))}
-      </div>
+      <Segments label={t("Schedule")} className="mb-2 flex gap-1" value={mode} options={MODES} onChange={onMode} />
 
       {mode === "repeats" ? (
         <SchedulePicker value={schedule} onChange={onSchedule} />
@@ -601,7 +587,7 @@ function RoutineDetail({
   const [targets, setTargets] = useState<ReportTarget[]>([]);
   const [fallback, setFallback] = useState<ReportTo | null>(null);
   const [busy, setBusy] = useState<null | "save" | "run">(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved] = useFlash();
   const [runs, setRuns] = useState<{ id: string; title: string }[]>([]);
 
   useEffect(() => {
@@ -685,20 +671,14 @@ function RoutineDetail({
             <span className="font-mono">{r.slug}</span>
           </p>
         </div>
-        <button
-          onClick={() => act("save", () => api.updateRoutine(r.id, { enabled: !r.enabled }))}
+        <Switch
+          on={r.enabled}
+          onChange={() => act("save", () => api.updateRoutine(r.id, { enabled: !r.enabled }))}
           disabled={busy !== null}
+          label={r.name}
           title={r.enabled ? t("Disable") : t("Enable")}
-          className={`relative mt-1 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40 ${
-            r.enabled ? "bg-accent" : "bg-raised"
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-              r.enabled ? "left-[1.125rem]" : "left-0.5"
-            }`}
-          />
-        </button>
+          className="mt-1"
+        />
       </div>
 
       <section className="mb-6 space-y-3">
@@ -733,6 +713,8 @@ function RoutineDetail({
 
         <button
           type="button"
+          role="switch"
+          aria-checked={fresh}
           onClick={() => setFresh(!fresh)}
           className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
         >
@@ -742,21 +724,13 @@ function RoutineDetail({
               {t("Off: one session it keeps, so a run can see what the last one did. On: a clean start every time.")}
             </p>
           </div>
-          <span
-            className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-              fresh ? "bg-accent" : "bg-raised"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                fresh ? "left-[1.125rem]" : "left-0.5"
-              }`}
-            />
-          </span>
+          <SwitchTrack on={fresh} />
         </button>
 
         <button
           type="button"
+          role="switch"
+          aria-checked={guard}
           onClick={() => setGuard(!guard)}
           className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
         >
@@ -766,21 +740,13 @@ function RoutineDetail({
               {t("On: after reading anything untrusted — logs fetched over the network, a web page, mail — this run cannot push, write onto PATH, upload or read credentials. Turn it off for work that reads those things and then has to act on them. Content is still labelled as untrusted, and anything it does that the rules would have stopped is recorded in Audit.")}
             </p>
           </div>
-          <span
-            className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-              guard ? "bg-accent" : "bg-raised"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                guard ? "left-[1.125rem]" : "left-0.5"
-              }`}
-            />
-          </span>
+          <SwitchTrack on={guard} />
         </button>
 
         <button
           type="button"
+          role="switch"
+          aria-checked={browser}
           onClick={() => setBrowser(!browser)}
           className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
         >
@@ -790,17 +756,7 @@ function RoutineDetail({
               {t("Lets this routine drive the agent's browser, which is signed into the agent's own accounts. Off by default. Every page it opens is recorded in Audit.")}
             </p>
           </div>
-          <span
-            className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-              browser ? "bg-accent" : "bg-raised"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                browser ? "left-[1.125rem]" : "left-0.5"
-              }`}
-            />
-          </span>
+          <SwitchTrack on={browser} />
         </button>
 
         {/* Not a label: it would pass a click on the hint to the Select's button. */}
@@ -894,8 +850,7 @@ function RoutineDetail({
                 ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),
               });
-              setSaved(true);
-              setTimeout(() => setSaved(false), 2000);
+              flashSaved();
             })
           }
           disabled={busy !== null || !dirty}

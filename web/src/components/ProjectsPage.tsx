@@ -9,6 +9,7 @@ import { within } from "../paths";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
+import { inputCls, primarySmCls } from "./SettingsUi";
 import { ToolSwitches } from "./ToolSwitches";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
@@ -150,7 +151,7 @@ export function ProjectsPage({
             action={
               <button
                 onClick={() => setCreating(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
+                className={primarySmCls}
               >
                 <LuPlus className="h-4 w-4" /> {t("New project")}
               </button>
@@ -301,8 +302,6 @@ export function ProjectsPage({
   );
 }
 
-const FIELD = "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none placeholder:text-fg-faint focus:border-accent/60";
-
 function NewProject({
   root,
   onClose,
@@ -348,7 +347,7 @@ function NewProject({
           <button
             onClick={submit}
             disabled={!slug || busy}
-            className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
+            className={primarySmCls}
           >
             {busy ? t("Creating…") : t("Create and open")}
           </button>
@@ -363,7 +362,7 @@ function NewProject({
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => isEnter(e) && submit()}
           placeholder={t("Cool Project")}
-          className={`${FIELD} mt-1`}
+          className={`${inputCls} mt-1`}
         />
       </label>
       {name.trim() && (
@@ -378,7 +377,7 @@ function NewProject({
           onChange={(e) => setInstructions(e.target.value)}
           rows={8}
           placeholder={t("What this project is, and how the agent should work in it.")}
-          className={`${FIELD} mt-1 resize-y font-mono text-xs`}
+          className={`${inputCls} mt-1 resize-y font-mono text-xs`}
         />
       </label>
       {/* Shut, like the sections of the voice settings: most projects start with
@@ -460,7 +459,7 @@ function Instructions({
           <button
             onClick={() => void save()}
             disabled={text === null || text === saved || busy}
-            className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
+            className={primarySmCls}
           >
             {busy ? t("Saving…") : t("Save")}
           </button>
@@ -489,7 +488,7 @@ function Instructions({
             onChange={(e) => setText(e.target.value)}
             rows={14}
             placeholder={t("What this project is, and how the agent should work in it.")}
-            className={`${FIELD} resize-y font-mono text-xs`}
+            className={`${inputCls} resize-y font-mono text-xs`}
           />
           <p className="mt-2 text-[11px] text-fg-subtle">
             {tx("Chats started after saving pick this up. One already open does after {command}. Leave it empty to remove the file.", { command: <code>/reload</code> })}

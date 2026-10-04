@@ -3,6 +3,7 @@ import { LuChevronRight, LuRefreshCw } from "react-icons/lu";
 import { api, type PiConfig } from "../api";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
+import { SwitchTrack } from "./SettingsUi";
 import { isEnter } from "../shortcuts";
 import { MENU_WIDTH, anchorLeft } from "../menu-anchor";
 import { useDismiss } from "../use-dismiss";
@@ -313,6 +314,8 @@ export function ContextPill({
 
           <button
             type="button"
+            role="switch"
+            aria-checked={auto}
             onClick={toggleAuto}
             disabled={busy !== null}
             className="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left hover:bg-raised disabled:opacity-50"
@@ -321,17 +324,7 @@ export function ContextPill({
               <p className="text-sm text-fg">{t("Auto-compact")}</p>
               <p className="text-[11px] text-fg-subtle">{t("Summarise automatically before it fills")}</p>
             </div>
-            <span
-              className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-                auto ? "bg-accent" : "bg-raised"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                  auto ? "left-[1.125rem]" : "left-0.5"
-                }`}
-              />
-            </span>
+            <SwitchTrack on={auto} />
           </button>
 
           {keepRecent !== null && (

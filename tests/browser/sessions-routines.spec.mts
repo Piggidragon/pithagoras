@@ -156,6 +156,59 @@ test('a rename that was saved is shown as saved, even when the list then fails t
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+test('a routine\'s switches say what they switch and whether they are on, and its choice of timing is a radio group', async ({ page }) => {
+  await portal(page);
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  // The one beside the name, and the three rows: each is a switch with its state, not a button.
+  await expect(page.getByRole('switch', { name: 'Nightly build' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('switch', { name: /^Injection guard/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('switch', { name: /^Fresh session each run/ })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByRole('switch', { name: /^Browser/ })).toHaveAttribute('aria-checked', 'false');
+  await page.getByRole('switch', { name: /^Fresh session each run/ }).click();
+  await expect(page.getByRole('switch', { name: /^Fresh session each run/ })).toHaveAttribute('aria-checked', 'true');
+  // The knob moves by the switch's own motion, which is keyed on the track being the switch's child.
+  await expect(page.getByRole('switch', { name: /^Fresh session each run/ }).locator('> span > span')).toHaveCount(1);
+
+  const timing = page.getByRole('radiogroup', { name: 'Schedule' });
+  await expect(timing.getByRole('radio', { name: 'Repeats' })).toHaveAttribute('aria-checked', 'true');
+  await expect(timing.getByRole('radio', { name: 'Once' })).toHaveAttribute('aria-checked', 'false');
+  await timing.getByRole('radio', { name: 'Once' }).click();
+  await expect(timing.getByRole('radio', { name: 'Once' })).toHaveAttribute('aria-checked', 'true');
+});
+
+test('a second save soon after the first keeps its "Saved" for as long as the first had', async ({ page }) => {
+  const sent = await portal(page);
+  await page.clock.install({ time: new Date('2026-01-01T10:00:00Z') });
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  const instructions = page.getByText('Build it');
+  await expect(instructions).toBeVisible();
+  await page.clock.pauseAt(new Date('2026-01-01T10:00:10Z'));
+  // The save is over when its button has stopped spinning.
+  const save = page.getByRole('button', { name: /^Save/ });
+  const done = async (saves: number) => {
+    await expect.poll(() => sent.filter((s) => s.method === 'PATCH').length).toBe(saves);
+    await expect(save.locator('svg.animate-spin')).toHaveCount(0);
+  };
+
+  await instructions.fill('Build it once');
+  await save.click();
+  await done(1);
+  await expect(save).toHaveText('Saved');
+  await page.clock.runFor(1500);
+
+  // Edited and saved again, one and a half seconds after the first.
+  await page.locator('textarea').first().fill('Build it twice');
+  await save.click();
+  await done(2);
+  // Two seconds after the first, but only half a second after this one: still said.
+  await page.clock.runFor(600);
+  await expect(save).toHaveText('Saved');
+  await page.clock.runFor(1500);
+  await expect(save).toHaveText('Save');
+});
+
 test.describe('in a browser set to German', () => {
   test.use({ locale: 'de-DE' });
 

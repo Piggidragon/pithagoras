@@ -16,6 +16,13 @@ Plus a page for every extension that exposes configuration.
 There is no Session tab. Model, effort and context all live on the pills under
 the composer, and a second copy here would be two places to keep in sync.
 
+The pages are built from the same few pieces. Something that takes effect the
+moment it is clicked is a switch, and a choice between a few things is a row of
+buttons of which one is picked; a screen reader says which, as "on" or "off" and
+as picked or not, and not only the colour does. An off switch has an edge you can
+see in the light theme too. A page with a **Save** button shows **Saved** beside
+it for two seconds, counted from the last save.
+
 ## Defaults
 
 *(The **Defaults** page; older links call it `general`.)*

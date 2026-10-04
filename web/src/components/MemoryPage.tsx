@@ -36,7 +36,7 @@ import { bounds, colours, layout } from "../memory-graph";
 import { NOTE_LINK, linkNotes } from "../memory-links";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
-import { inputCls } from "./SettingsUi";
+import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
@@ -594,7 +594,7 @@ function Note({
                   onChange={(e) => setDraft({ ...draft, body: e.target.value })}
                   rows={16}
                   spellCheck={false}
-                  className="mt-1 w-full resize-y rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-accent/60"
+                  className={`${codeAreaCls} mt-1 resize-y`}
                 />
               </label>
               <p className="font-mono text-[10px] text-fg-faint">{path}</p>
@@ -605,7 +605,7 @@ function Note({
                 <button
                   type="submit"
                   disabled={busy || !draft.title.trim() || !draft.type.trim()}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
+                  className={primarySmCls}
                 >
                   {busy && <LuRefreshCw className="h-3.5 w-3.5 animate-spin" />}
                   {t("Save")}
@@ -731,7 +731,7 @@ function AfterChange({
             onClick={() => void repair()}
             disabled={busy !== null || nothingToRepair}
             title={nothingToRepair ? t("No links to nothing and no notes nothing links to: nothing for the model to do") : undefined}
-            className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
+            className={primarySmCls}
           >
             {t("Repair with the model")}
           </button>

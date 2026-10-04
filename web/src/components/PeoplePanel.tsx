@@ -10,13 +10,11 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type Person, type Role, type ToolRule } from "../api";
+import { Segments, inputCls, primaryCls } from "./SettingsUi";
 import { labelOf, msg, t, tp, tx } from "../i18n";
+import { useFlash } from "../use-flash";
 import { confirmDialog } from "./ConfirmDialog";
 
-const inputCls =
-  "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
-const primaryCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
 
 const ROLES: { id: Role; label: string; hint: string }[] = [
   { id: "primary", label: msg("Primary"), hint: msg("You. Everything.") },
@@ -225,7 +223,7 @@ function PersonDetail({
   const [tool, setTool] = useState("bash");
   const [pattern, setPattern] = useState("");
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved] = useFlash();
 
   useEffect(() => {
     setName(person.name);
@@ -295,21 +293,7 @@ function PersonDetail({
 
         <div>
           <span className="mb-1 block text-xs text-fg-subtle">{t("Role")}</span>
-          <div className="grid grid-cols-4 gap-1">
-            {ROLES.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => setRole(r.id)}
-                className={`rounded-lg px-2 py-1.5 text-xs transition ${
-                  role === r.id
-                    ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25"
-                    : "bg-fg/5 text-fg-muted hover:bg-fg/10"
-                }`}
-              >
-                {t(r.label)}
-              </button>
-            ))}
-          </div>
+          <Segments label={t("Role")} size="cell" className="grid grid-cols-4 gap-1" value={role} options={ROLES} onChange={setRole} />
           {/* One line for the choice in front of you, rather than four
               descriptions competing for the same attention. */}
           <p className="mt-1 text-[11px] text-fg-faint">
@@ -337,8 +321,7 @@ function PersonDetail({
               if (leaving && !(await confirmDialog({ title: t("Take away the only primary user's role?"), confirmLabel: t("Save"), ...noPrimaryLeft }))) return;
               act(async () => {
                 await api.updatePerson(person.key, { name, role, notes, force: leaving || undefined });
-                setSaved(true);
-                setTimeout(() => setSaved(false), 2000);
+                flashSaved();
               });
             }}
           >

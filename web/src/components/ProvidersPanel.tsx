@@ -14,7 +14,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { formatTokens } from "../transcript";
 import { Select } from "./Select";
-import { Empty, Field, Section, btnCls, ghostCls, inputCls, primaryCls } from "./SettingsUi";
+import { Empty, Field, Section, btnCls, ghostCls, inputCls, inputSmCls, primaryCls } from "./SettingsUi";
 import { t, tp } from "../i18n";
 import { forgetModels } from "../model-catalogue";
 
@@ -545,7 +545,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManual(); } }}
               placeholder={t("Add a model by its id")}
               spellCheck={false}
-              className={`${inputCls} py-1.5 font-mono text-xs`}
+              className={`${inputSmCls} font-mono text-xs`}
               aria-label={t("Model id to add")}
             />
             <button type="button" onClick={addManual} disabled={!manual.trim()} className={btnCls}><LuPlus className="h-4 w-4" /></button>

@@ -15,15 +15,13 @@ import {
 } from "react-icons/lu";
 import { api, type Agent, type BrokenChannelPackage, type Channel, type ChannelKind } from "../api";
 import { Select } from "./Select";
+import { Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { pollWhileVisible } from "../poll";
 import { isEnter } from "../shortcuts";
 import { formatTime, labelOf, msg, t, tp, tx } from "../i18n";
+import { useFlash } from "../use-flash";
 
-const inputCls =
-  "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
-const btnCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-2 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40";
 const STATE_STYLE: Record<string, string> = {
   running: "text-ok",
   starting: "text-warn",
@@ -38,8 +36,6 @@ const STATE_LABEL: Record<string, string> = {
 };
 const stateLabel = (state: string) => labelOf(STATE_LABEL, state);
 
-const primaryCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
 
 /**
  * Channels are two-way links into an agent: each talks as one, the first
@@ -167,6 +163,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
           {kinds.map((k) => (
             <button
               key={k.id}
+              aria-pressed={adding === k.id}
               onClick={() => setAdding(adding === k.id ? null : k.id)}
               className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition ${
                 adding === k.id
@@ -315,6 +312,8 @@ function Toggle({
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={on}
       onClick={() => onChange(!on)}
       className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
     >
@@ -322,17 +321,7 @@ function Toggle({
         <p className="text-sm text-fg">{label}</p>
         <p className="text-[11px] text-fg-subtle">{hint}</p>
       </div>
-      <span
-        className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-          on ? "bg-accent" : "bg-raised"
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-            on ? "left-[1.125rem]" : "left-0.5"
-          }`}
-        />
-      </span>
+      <SwitchTrack on={on} />
     </button>
   );
 }
@@ -409,7 +398,7 @@ function ChannelDetail({
   const [agentId, setAgentId] = useState(ch.agentId);
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved] = useFlash();
 
   useEffect(() => {
     setName(ch.name);
@@ -457,8 +446,7 @@ function ChannelDetail({
         relayTools,
         ...(agentId !== ch.agentId ? { agentId } : {}),
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      flashSaved();
     });
 
   return (
@@ -494,20 +482,14 @@ function ChannelDetail({
             {ch.since && ch.state === "running" ? ` ${t("since {time}", { time: formatTime(ch.since) })}` : ""}
           </p>
         </div>
-        <button
-          onClick={() => act(() => api.updateChannel(ch.id, { enabled: !ch.enabled }))}
+        <Switch
+          on={ch.enabled}
+          onChange={() => act(() => api.updateChannel(ch.id, { enabled: !ch.enabled }))}
           disabled={busy}
+          label={ch.name}
           title={ch.enabled ? t("Disable") : t("Enable")}
-          className={`relative mt-1 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40 ${
-            ch.enabled ? "bg-accent" : "bg-raised"
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-              ch.enabled ? "left-[1.125rem]" : "left-0.5"
-            }`}
-          />
-        </button>
+          className="mt-1"
+        />
       </div>
 
       {ch.error && (

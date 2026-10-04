@@ -23,10 +23,12 @@ import { api, ApiError, type Agent, type AgentSession, type AgentSetup as Setup 
 import { AgentSetup } from "./AgentSetup";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
+import { primarySmCls } from "./SettingsUi";
 import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
+import { useFlash } from "../use-flash";
 import { when } from "../time";
 
 /**
@@ -372,7 +374,7 @@ function AgentView({
                   }
                 }}
                 disabled={starting}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40"
+                className={primarySmCls}
               >
                 {starting ? (
                   <LuRefreshCw className="h-4 w-4 animate-spin" />
@@ -658,7 +660,7 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
   const [open, setOpen] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, flashSaved] = useFlash();
   // When the file was read: the agent writes these files too (MEMORY.md above all), and a save from an older copy must not replace what it wrote since.
   const [readAt, setReadAt] = useState(0);
   const [changed, setChanged] = useState(false);
@@ -685,8 +687,7 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
       onSaved(next);
       setReadAt(next.files.find((f) => f.name === file.name)?.mtime ?? 0);
       setChanged(false);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      flashSaved();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setChanged(true);
       else setError((e as Error).message);
@@ -713,6 +714,7 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
         {setup.files.map((f) => (
           <button
             key={f.name}
+            aria-pressed={open === f.name}
             onClick={() => {
               if (open === f.name) setOpen(null);
               else show(f);

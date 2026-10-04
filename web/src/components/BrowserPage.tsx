@@ -9,6 +9,7 @@ import {
   LuShieldCheck,
 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
+import { inputCls } from "./SettingsUi";
 import { api, type BrowserStatus } from "../api";
 import { pollWhileVisible } from "../poll";
 import { t, tx } from "../i18n";
@@ -266,7 +267,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
               setDirty(true);
             }}
             placeholder={"*.google.com\ngithub.com"}
-            className="w-full rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs outline-none transition placeholder:text-fg-faint focus:border-accent/60"
+            className={`${inputCls} font-mono text-xs`}
           />
           <p className="mt-1.5 text-[11px] text-fg-faint">
             {t("Checked when the agent asks for a URL, and every allowed one is recorded in Audit. A page that redirects itself is not covered — that needs a filtering proxy, which is not built yet.")}

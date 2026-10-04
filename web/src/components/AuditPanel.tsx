@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuTrash2, LuUserX } from "react-icons/lu";
 import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
+import { Segments } from "./SettingsUi";
 import { api, type AuditEntry } from "../api";
 import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
@@ -169,19 +170,7 @@ function AuditPanel({ onError }: { onError: (e: string | null) => void }) {
       </PageHeader>
 
       <div className="mb-3 flex flex-wrap items-center gap-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            className={`rounded-lg px-2.5 py-1 text-xs transition ${
-              filter === f.id
-                ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25"
-                : "bg-fg/5 text-fg-muted hover:bg-fg/10"
-            }`}
-          >
-            {t(f.label)}
-          </button>
-        ))}
+        <Segments label={t("Which decisions to show")} value={filter} options={FILTERS} onChange={setFilter} />
         <span className="ml-auto text-xs text-fg-faint">{shown.filter((e) => e.kind !== "cleared").length}</span>
         <button
           onClick={clear}

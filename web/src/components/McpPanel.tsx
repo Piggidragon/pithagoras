@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Select } from "./Select";
 import {
   LuChevronLeft,
@@ -16,17 +16,17 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type McpConfigView, type McpServerEntry, type McpServerView } from "../api";
-import { t, tx } from "../i18n";
+import { Field, Segments, btnCls, codeAreaCls, inputCls, primaryCls, primarySmCls } from "./SettingsUi";
+import { msg, t, tx } from "../i18n";
 
-const inputCls =
-  "w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm outline-none transition placeholder:text-fg-faint focus:border-accent/60";
-const btnCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-fg/5 px-3 py-2 text-sm text-fg transition hover:bg-fg/10 disabled:opacity-40";
-const primaryCls =
-  "inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/20 disabled:opacity-40";
-const monoCls = `${inputCls} font-mono text-xs leading-relaxed`;
 
 type Transport = "stdio" | "http" | "socket";
+
+const TRANSPORTS: { id: Transport; label: string }[] = [
+  { id: "stdio", label: msg("Local process") },
+  { id: "http", label: "HTTP" },
+  { id: "socket", label: msg("Unix socket") },
+];
 
 /** Lines in, list out — blank lines dropped. Used for args, filters and pairs. */
 const lines = (text: string): string[] =>
@@ -326,7 +326,7 @@ function ImportBox({
         {tx("Accepts a whole config, a bare {key} map, or a single server object.", { key: <span className="font-mono">mcpServers</span> })}
       </p>
       <textarea
-        className={monoCls}
+        className={codeAreaCls}
         rows={7}
         spellCheck={false}
         placeholder={"{\n  \"mcpServers\": {\n    \"filesystem\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/data\"]\n    }\n  }\n}"}
@@ -476,21 +476,7 @@ function ServerForm({
         </Field>
 
         <Field label={t("Transport")}>
-          <div className="flex gap-2">
-            {(["stdio", "http", "socket"] as Transport[]).map((kind) => (
-              <button
-                key={kind}
-                onClick={() => setTransport(kind)}
-                className={`rounded-lg px-3 py-2 text-sm transition ${
-                  transport === kind
-                    ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25"
-                    : "bg-fg/5 text-fg-muted hover:bg-fg/10"
-                }`}
-              >
-                {kind === "stdio" ? t("Local process") : kind === "http" ? "HTTP" : t("Unix socket")}
-              </button>
-            ))}
-          </div>
+          <Segments label={t("Transport")} size="md" className="flex gap-2" value={transport} options={TRANSPORTS} onChange={setTransport} />
         </Field>
 
         {transport === "stdio" && (
@@ -505,7 +491,7 @@ function ServerForm({
             </Field>
             <Field label={t("Arguments")} hint={t("One per line")}>
               <textarea
-                className={monoCls}
+                className={codeAreaCls}
                 rows={3}
                 spellCheck={false}
                 value={args}
@@ -515,7 +501,7 @@ function ServerForm({
             </Field>
             <Field label={t("Environment")} hint={t("KEY=value per line; ${VAR} is expanded at launch")}>
               <textarea
-                className={monoCls}
+                className={codeAreaCls}
                 rows={2}
                 spellCheck={false}
                 value={env}
@@ -541,7 +527,7 @@ function ServerForm({
             </Field>
             <Field label={t("Headers")} hint={t("Name: value per line")}>
               <textarea
-                className={monoCls}
+                className={codeAreaCls}
                 rows={2}
                 spellCheck={false}
                 value={headers}
@@ -604,7 +590,7 @@ function ServerForm({
 
         <Field label={t("Only these tools")} hint={t("One name or glob per line; leave empty for all")}>
           <textarea
-            className={monoCls}
+            className={codeAreaCls}
             rows={2}
             spellCheck={false}
             value={includeTools}
@@ -613,7 +599,7 @@ function ServerForm({
         </Field>
         <Field label={t("Except these tools")} hint={t("One name or glob per line")}>
           <textarea
-            className={monoCls}
+            className={codeAreaCls}
             rows={2}
             spellCheck={false}
             value={excludeTools}
@@ -688,7 +674,7 @@ function GlobalSettings({
         <LuPlug className="h-3.5 w-3.5 text-fg-faint" />
         <h3 className="text-sm font-medium text-fg">{t("Adapter settings")}</h3>
         {dirty && (
-          <button className={`${primaryCls} ml-auto py-1.5`} onClick={save}>
+          <button className={`${primarySmCls} ml-auto`} onClick={save}>
             {t("Save")}
           </button>
         )}
@@ -745,7 +731,7 @@ function RawEditor({
   return (
     <div className="mt-2">
       <textarea
-        className={monoCls}
+        className={codeAreaCls}
         rows={14}
         spellCheck={false}
         value={text}
@@ -770,36 +756,6 @@ function RawEditor({
         {t("Save file")}
       </button>
     </div>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  // A Select is a button: inside a label, a click anywhere on the label —
-  // the hint too — is passed on to it and opens the list, or shuts and opens
-  // it again. It is named by its own aria-label instead.
-  if (isValidElement<{ "aria-label"?: string }>(children) && children.type === Select) {
-    return (
-      <div className="block">
-        <span className="mb-1 block text-xs text-fg-subtle">{label}</span>
-        {cloneElement(children, { "aria-label": label })}
-        {hint && <span className="mt-1 block text-xs text-fg-faint">{hint}</span>}
-      </div>
-    );
-  }
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs text-fg-subtle">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-xs text-fg-faint">{hint}</span>}
-    </label>
   );
 }
 

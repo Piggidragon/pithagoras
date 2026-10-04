@@ -5,6 +5,7 @@ import { isEnter, isEscape } from "../shortcuts";
 import { t } from "../i18n";
 import { useLeaveRef } from "../motion";
 import { useDialogFocus } from "../dialog-focus";
+import { codeAreaCls, inputCls, primarySmCls } from "./SettingsUi";
 
 export interface UiRequest {
   id: string;
@@ -123,7 +124,7 @@ export function ExtensionDialog({
                   rows={10}
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
-                  className="w-full resize-y rounded-lg border border-line bg-raised/60 px-3 py-2 font-mono text-xs text-fg outline-none focus:border-accent/60"
+                  className={`${codeAreaCls} resize-y text-fg`}
                 />
               ) : (
                 <input
@@ -132,7 +133,7 @@ export function ExtensionDialog({
                   onChange={(e) => setValue(e.target.value)}
                   onKeyDown={(e) => isEnter(e) && respond({ value })}
                   placeholder={request.placeholder}
-                  className="w-full rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-faint focus:border-accent/60"
+                  className={`${inputCls} text-fg`}
                 />
               )}
               <div className="mt-3 flex justify-end gap-2">
@@ -145,7 +146,7 @@ export function ExtensionDialog({
                 <button
                   disabled={busy}
                   onClick={() => respond({ value })}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20 disabled:opacity-40"
+                  className={primarySmCls}
                 >
                   <LuCheck className="h-3.5 w-3.5" /> {t("Submit")}
                 </button>
@@ -165,7 +166,7 @@ export function ExtensionDialog({
               <button
                 disabled={busy}
                 onClick={() => respond({ value: true })}
-                className="rounded-lg bg-accent/12 px-3 py-1.5 text-sm text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
+                className={primarySmCls}
               >
                 {t("Yes")}
               </button>
