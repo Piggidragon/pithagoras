@@ -138,7 +138,7 @@ export function imagesRouter(): Router {
         if (typeof ids === "string") return res.status(400).json({ error: ids });
         return res.json({ pictures: picturesById(ids) });
       }
-      const { origin, kind, before, limit } = req.query;
+      const { origin, kind, before, limit, again } = req.query;
       if (origin !== undefined && !(typeof origin === "string" && ORIGINS.has(origin))) return res.status(400).json({ error: "origin is page, chat or folder" });
       if (kind !== undefined && !(typeof kind === "string" && KINDS.has(kind))) return res.status(400).json({ error: "kind is generated, edited, uploaded or unknown" });
       if (before !== undefined && !(typeof before === "string" && /^\d+:[0-9a-f]+$/.test(before))) return res.status(400).json({ error: "before is the next of the page before" });
@@ -149,6 +149,8 @@ export function imagesRouter(): Router {
           ...(origin ? { origin: origin as PictureOrigin } : {}),
           ...(kind ? { kind: kind as PictureKind } : {}),
           ...(typeof before === "string" ? { before } : {}),
+          // A page asking again for a list it has: see ListQuery.again.
+          ...(again === "1" ? { again: true } : {}),
           limit: asked,
         }),
       );

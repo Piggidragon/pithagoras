@@ -702,9 +702,10 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   /** A page of the gallery, newest first; `before` is the `next` of the page before. */
-  galleryPage: (query: { origin?: PictureOrigin; kind?: PictureKind; before?: string; limit?: number } = {}) => {
+  galleryPage: (query: { origin?: PictureOrigin; kind?: PictureKind; before?: string; limit?: number; again?: boolean } = {}) => {
     const params = new URLSearchParams();
-    for (const [name, value] of Object.entries(query)) if (value !== undefined) params.set(name, String(value));
+    // `again` is a switch the server reads as 1: the page asks again for a list it has, and the files are not looked through again at once.
+    for (const [name, value] of Object.entries(query)) if (value !== undefined && value !== false) params.set(name, value === true ? "1" : String(value));
     return json<GalleryPage>(`/api/images${params.size ? `?${params}` : ""}`);
   },
   /** Some pictures of the gallery by their ids, as far as they are there. */

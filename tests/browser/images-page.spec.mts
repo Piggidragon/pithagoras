@@ -252,6 +252,26 @@ test('Images in the sidebar opens the page: the form first, the gallery under it
   await expect(page.getByText('2', { exact: true }).first()).toBeVisible();
 });
 
+test('the portal is asked to look through its folders when the page opens and with Refresh, and not on each tick of the timer', async ({ page }) => {
+  await page.clock.install();
+  const p = await portal(page, { pictures: [pic({ prompt: 'One', age: 5 })] });
+  await page.goto('/images');
+  await expect(tile(page, 'One')).toBeVisible();
+  const lists = () => p.state.listed.filter((q) => !q.includes('ids='));
+  // (The dev build is in strict mode, which opens the page twice.)
+  const opened = lists().length;
+  expect(lists().every((q) => q === '?limit=48')).toBe(true);
+  // The half minute: asked again for the top of what it has, which the portal need not look through the folders for.
+  await page.clock.runFor(31_000);
+  await expect.poll(() => lists().length).toBeGreaterThan(opened);
+  expect(lists().slice(opened).every((q) => q.includes('again=1'))).toBe(true);
+  // Refresh is asking to look.
+  const before = lists().length;
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect.poll(() => lists().length).toBe(before + 1);
+  expect(lists().at(-1)).toBe('?limit=48');
+});
+
 test('with nothing made yet the gallery says so, and a gallery that cannot be read says that', async ({ page }) => {
   await portal(page);
   await page.goto('/images');

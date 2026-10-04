@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -576,4 +576,31 @@ test("forgetting pictures finds what was made of each by an index, with each sta
   }
   assert.ok(unlinks <= 1, `${unlinks} statements made for 300 pictures`);
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM images WHERE id LIKE 'lambda-%'").get().n, 0);
+});
+
+test("a page that asks again for the top of its list does not make the portal look through every folder each time", async () => {
+  const folder = project("again");
+  put(folder, "first.png", png("first"));
+  assert.ok(names(await listed()).includes("first.png"), "opening the page looks");
+  // Put there by hand, so that nothing recorded it: only a look finds it.
+  put(folder, "second.png", png("second"));
+  const again = async () => (await call("GET", "/images?again=1&limit=100")).body;
+  assert.ok(!names(await again()).includes("second.png"), "a page asking again, a moment after a look, is told what that look found");
+  assert.ok(names(await listed()).includes("second.png"), "the Refresh button looks at once");
+  // A file that went is dropped by a look as well.
+  rmSync(path.join(folder, GENERATED_DIR, "first.png"));
+  assert.ok(names(await again()).includes("first.png"));
+  assert.ok(!names(await listed()).includes("first.png"));
+
+  // Asking again after the minute looks.
+  put(folder, "third.png", png("third"));
+  mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  try {
+    mock.timers.tick(gallery.LOOK_AGAIN_MS - 1000);
+    assert.ok(!gallery.listPictures({ again: true, limit: 100 }).pictures.some((p) => p.fileName === "third.png"));
+    mock.timers.tick(2000);
+    assert.ok(gallery.listPictures({ again: true, limit: 100 }).pictures.some((p) => p.fileName === "third.png"), "found after a minute");
+  } finally {
+    mock.timers.reset();
+  }
 });

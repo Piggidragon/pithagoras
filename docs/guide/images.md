@@ -335,6 +335,10 @@ link followed out of it, and what its bytes say it is.
   when it is new or has changed, so a gallery of hundreds stays quick.
 - The list is refreshed when you return to the tab, every half minute while it is on
   screen, and with **Refresh**, so what the agent makes while you are here shows up.
+  What the agent's tools save is listed at once; the look through the folders for
+  pictures nobody listed, and for files that are gone, is made when the page is
+  opened and with **Refresh**, and while the page stays open at most once a minute,
+  so a gallery of thousands does not keep the portal busy.
 
 ## What it takes from the endpoint
 

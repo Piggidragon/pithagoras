@@ -129,10 +129,13 @@ export function ImagesPage() {
     );
   }, [filterKey]);
 
-  /** The top of the list again, joined to what is loaded: a picture was made, or taken away, or the agent made one in a chat. */
-  const refreshTop = useCallback(() => {
+  /**
+   * The top of the list again, joined to what is loaded: a picture was made, or taken away, or the agent made one in a chat.
+   * The portal does not look through the folders for pictures nobody listed more than once a minute, unless `look` says so: the Refresh button.
+   */
+  const refreshTop = useCallback((look = false) => {
     const mine = asked.current;
-    api.galleryPage({ ...latestFilter.current, limit: PAGE }).then(
+    api.galleryPage({ ...latestFilter.current, limit: PAGE, again: !look }).then(
       (page) => {
         if (asked.current !== mine) return;
         setList((cur) => {
@@ -471,7 +474,7 @@ export function ImagesPage() {
           title={t("Images")}
           description={t("Make and change pictures with the image endpoint you set up, without a chat, and keep what the agent made in chats.")}
           action={
-            <button type="button" onClick={() => { refreshTop(); poll(); }} className={btnCls} title={t("Look for new pictures")}>
+            <button type="button" onClick={() => { refreshTop(true); poll(); }} className={btnCls} title={t("Look for new pictures")}>
               <LuRefreshCw aria-hidden className="h-4 w-4" />
               {t("Refresh")}
             </button>

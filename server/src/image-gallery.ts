@@ -615,15 +615,27 @@ export interface ListQuery {
   /** The `next` of the page before. */
   before?: string;
   limit?: number;
+  /**
+   * A page that asks again for the top of a list it has, as on a timer: the look
+   * through the files is not made again within LOOK_AGAIN_MS of the last one.
+   * What the tools save is listed when it is saved, so only a file put there
+   * some other way waits for it; opening the page and its Refresh button look at once.
+   */
+  again?: boolean;
 }
 
 export const DEFAULT_PAGE = 48;
 export const MAX_PAGE = 100;
 
+/** How long a page that asks again is told what the last look found: the look is a stat for each picture and a read of every folder. */
+export const LOOK_AGAIN_MS = 60_000;
+let lastLook = 0;
+
 /** A page of the list, newest first, the next one's start, and what there is in all. */
 export function listPictures(query: ListQuery = {}): { pictures: GalleryPicture[]; next: string | null; total: number; pageBytes: number } {
   // The whole list is looked at when it is looked at from the top, not once for every page of it. What is gone goes first, then what has come that nobody listed.
-  if (!query.before) {
+  if (!query.before && !(query.again && Date.now() - lastLook < LOOK_AGAIN_MS)) {
+    lastLook = Date.now();
     pruneMissing();
     try {
       scanFolders();
