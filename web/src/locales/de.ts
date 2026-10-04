@@ -2048,12 +2048,14 @@ const de: Locale = {
     "Drop": "Verwerfen",
     "Dropping the stash": "Der Stash wird verworfen",
     // components/git/DiffView.tsx
+    "{shown} of {total} lines shown": "{shown} von {total} Zeilen gezeigt",
     "A binary file — its changes are not shown here.": "Eine Binärdatei — ihre Änderungen werden hier nicht gezeigt.",
     "Renamed, with nothing in it changed.": "Umbenannt, ohne dass sich darin etwas geändert hat.",
     "No changes in the text — only its mode, or nothing at all.": "Keine Änderungen am Text — nur an den Rechten, oder gar keine.",
     "Changes to {path}": "Änderungen an {path}",
     "This diff is too large to show whole — it stops here.": "Dieser Diff ist zu groß, um ganz gezeigt zu werden — er hört hier auf.",
     // components/git/GitPanel.tsx
+    "Could not read the repository, so what is shown may be out of date: {error}": "Das Repository konnte nicht gelesen werden, daher ist das Gezeigte vielleicht nicht mehr aktuell: {error}",
     "History": "Verlauf",
     "Branches": "Branches",
     "Pull requests": "Pull Requests",
@@ -2102,6 +2104,7 @@ const de: Locale = {
     "Commits": "Commits",
     "Nothing on this branch that {base} does not have.": "Auf diesem Branch gibt es nichts, was {base} nicht hat.",
     // components/git/Pulls.tsx
+    "Could not ask GitHub about this branch: {error}": "GitHub konnte zu diesem Branch nicht befragt werden: {error}",
     "approved": "genehmigt",
     "changes requested": "Änderungen angefordert",
     "review required": "Review erforderlich",
@@ -2172,6 +2175,8 @@ const de: Locale = {
     "In conflict": "In Konflikt",
     "binary": "binär",
     // components/git/views.tsx
+    "Mark resolved": "Als gelöst markieren",
+    "Show the other {n} files": { one: "Die anderen {n} Datei zeigen", other: "Die anderen {n} Dateien zeigen" },
     "No longer changed — it was committed, discarded, or put back as it was.": "Nicht mehr geändert — sie wurde committet, verworfen oder in den alten Zustand zurückversetzt.",
     "Nothing to show: nothing of it is staged.": "Nichts zu zeigen: nichts davon ist gestaget.",
     "Nothing to show: no changes in its text.": "Nichts zu zeigen: keine Änderungen am Text.",

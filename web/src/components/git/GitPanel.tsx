@@ -184,8 +184,12 @@ export const GitPanel = memo(function GitPanel({
   }, [state, gh, sessionId, reload, act, busy, onOpenFile]);
 
   if (!state) {
-    return loadError ? <ErrorNote>{loadError}</ErrorNote> : <Quiet>{t("Loading…")}</Quiet>;
+    return loadError ? <ErrorNote onRetry={() => void reload()}>{loadError}</ErrorNote> : <Quiet>{t("Loading…")}</Quiet>;
   }
+  // A read that failed after an earlier one worked: what is shown is the last state, not this one.
+  const stale = loadError && (
+    <ErrorNote onRetry={() => void reload()}>{t("Could not read the repository, so what is shown may be out of date: {error}", { error: loadError })}</ErrorNote>
+  );
 
   if (!state.repo) {
     return (
@@ -195,6 +199,7 @@ export const GitPanel = memo(function GitPanel({
           {t("Make it one (git init)")}
         </TextButton>
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
+        {stale}
       </div>
     );
   }
@@ -210,6 +215,7 @@ export const GitPanel = memo(function GitPanel({
             {t(busy.label, busy.vars)}…
           </p>
         )}
+        {stale}
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
         {said && (
           <p role="status" className="mx-2 mt-2 flex items-start gap-1 rounded-lg bg-fg/5 px-2 py-1.5 font-mono text-[11px] text-fg-subtle">

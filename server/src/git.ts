@@ -1350,8 +1350,10 @@ async function needGh(repo: Repo): Promise<GhState> {
 }
 
 const PR_LIST_FIELDS = "number,title,author,headRefName,baseRefName,isDraft,state,updatedAt,url,reviewDecision,additions,deletions";
+// `isCrossRepository` tells a branch of a fork from one of this repository: `headRefName` alone is
+// the name in the fork, which `main` may be too.
 const PR_FIELDS =
-  "number,title,body,author,state,isDraft,headRefName,baseRefName,url,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,additions,deletions,changedFiles,files,commits,comments,reviews,createdAt,updatedAt";
+  "number,title,body,author,state,isDraft,headRefName,baseRefName,isCrossRepository,headRepositoryOwner,url,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,additions,deletions,changedFiles,files,commits,comments,reviews,createdAt,updatedAt";
 
 function checkNumber(n: unknown): string {
   const text = String(n);

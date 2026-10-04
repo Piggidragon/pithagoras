@@ -311,6 +311,21 @@ test("pull requests go through gh: a branch not on GitHub is pushed first, the b
   await assert.rejects(g.pullRequest(r, "7; ls"), { status: 400 });
 });
 
+test("a pull request is asked for with whether its branch is in a fork, which its name alone does not say", async () => {
+  const remote = path.join(home, `remote${++n}.git`);
+  execFileSync("git", ["init", "-q", "--bare", remote]);
+  const dir = repo();
+  sh(dir, "remote", "add", "origin", remote);
+  sh(dir, "push", "-q", "-u", "origin", "main");
+  const r = await open(dir);
+  await g.ghState(r, true);
+  writeFileSync(ghLog, "");
+  await g.pullRequest(r, 7);
+  const fields = /^pr view 7 --json (.+)$/m.exec(readFileSync(ghLog, "utf8"))?.[1].split(",");
+  assert.ok(fields?.includes("isCrossRepository"), "a fork's `main` is not the branch called main here");
+  assert.ok(fields?.includes("headRefName"));
+});
+
 test("without gh, pull requests say how to get them", async () => {
   const dir = repo();
   const r = await open(dir);
