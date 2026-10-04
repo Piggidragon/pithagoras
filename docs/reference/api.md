@@ -282,6 +282,7 @@ The session routes answer 409 until Voice is enabled in Settings → Add-ons. Se
 | `GET /api/sessions/:id/canvases` · `POST` | List; `{ title }` creates one |
 | `PUT /api/sessions/:id/canvases/:cid` | `{ revision, title, content }` — 409 when `revision` is stale |
 | `POST /api/sessions/:id/canvases/:cid/persist` | Store a temporary canvas |
+| `POST /api/sessions/:id/canvases/:cid/restore` | `{ revision }` — put back the text from before a write that was cut off (`restorable` in the canvas). 409 when `revision` is stale, a write is going on, or there is no earlier text |
 | `DELETE /api/sessions/:id/canvases/:cid` | Delete |
 
 ## Portal settings

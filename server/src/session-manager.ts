@@ -21,6 +21,7 @@ import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { forgetBrowserSession } from "./browser/tools.js";
+import { forgetCanvases } from "./canvases.js";
 import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
 import { describeToolCall } from "./tool-summary.js";
@@ -2572,6 +2573,8 @@ class SessionManager extends EventEmitter {
   removeFiles(sessionId: string): void {
     this.drafts.delete(sessionId);
     this.stops.delete(sessionId);
+    // Its temporary canvases are in memory only, so no row delete reaches them.
+    forgetCanvases(sessionId);
     // Each on its own: pi's folder is the one that can refuse, and the pictures
     // are what would then stay downloadable.
     for (const [what, remove] of [

@@ -134,7 +134,9 @@ function schema(db: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'saved',
       active_call TEXT,
       agent_read_revision INTEGER,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      -- The text from before a write that is going on, or was cut off: see restoreCanvas.
+      previous_content TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases(session_id);
 
@@ -544,6 +546,11 @@ function migrate(d: Database.Database): void {
   if (peopleCols.length && !peopleCols.includes("renamed")) {
     d.exec("ALTER TABLE people ADD COLUMN renamed INTEGER NOT NULL DEFAULT 0");
     d.exec("UPDATE people SET renamed = 1 WHERE notes != ''");
+  }
+  // The text from before a write, kept until the write has ended (see canvases.ts).
+  const canvasCols = (d.prepare("PRAGMA table_info(canvases)").all() as { name: string }[]).map((c) => c.name);
+  if (canvasCols.length && !canvasCols.includes("previous_content")) {
+    d.exec("ALTER TABLE canvases ADD COLUMN previous_content TEXT");
   }
   const agentCols = (d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name);
   for (const col of ["voice", "quiet_start", "quiet_end", "last_heartbeat", "heartbeat_status"]) {

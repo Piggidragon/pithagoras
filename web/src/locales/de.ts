@@ -251,6 +251,7 @@ const de: Locale = {
     "Writing live": "Wird live geschrieben",
     "Edited by you": "Von dir bearbeitet",
     "Partial draft retained": "Teilentwurf erhalten",
+    "Restore the version before the interrupted write": "Die Fassung vor dem abgebrochenen Schreiben wiederherstellen",
     "Auto-saved": "Automatisch gesichert",
     "Temporary": "Vorläufig",
     "Stored": "Gespeichert",

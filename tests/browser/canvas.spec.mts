@@ -87,3 +87,32 @@ test('a canvas deleted while it is being edited ends the edit, and its draft sta
  await page.getByLabel('Close canvas',{exact:true}).click();
  await expect(page.getByLabel('Session canvas workspace')).toHaveCount(0);
 });
+
+test('a document that a cut-off write left half done can be put back as it was',async({page})=>{
+ await page.route('**/api/browser',r=>r.fulfill({json:{running:false,install:{container:'stopped'},sessions:[]}}));
+ await page.route('**/api/voice',r=>r.fulfill({json:{enabled:false}}));
+ await page.route('**/api/sessions/test/commands',r=>r.fulfill({json:{commands:[]}}));
+ await page.route('**/api/sessions/test/config',r=>r.fulfill({status:503,json:{}}));
+ await page.route('**/api/sessions/test/canvases',r=>r.fulfill({json:[]}));
+ let asked:any;
+ await page.route('**/api/sessions/test/canvases/canvas-1/restore',r=>{
+  asked=r.request().postDataJSON();
+  return r.fulfill({json:{id:'canvas-1',title:'A document',content:'The whole of the document.',revision:4,status:'edited',active_call:null,updated_at:'',persisted:true,restorable:false}});
+ });
+ await page.goto('/tests/voice.html');
+ const row={id:'canvas-1',title:'A document',content:'The wh',revision:3,status:'interrupted',active_call:null,updated_at:'',persisted:true,restorable:true};
+ await page.evaluate(row=>{(window as any).canvasFeed.connected(true);(window as any).canvasFeed.message({type:'snapshot',canvases:[row]});},row);
+ await page.getByLabel('Session canvases',{exact:true}).click();
+ const restore=page.getByRole('button',{name:'Restore the version before the interrupted write'});
+ await expect(restore).toBeEnabled();
+ // Not while the agent is writing, and not when there is nothing to go back to.
+ await page.evaluate(row=>(window as any).canvasFeed.message({type:'update',canvas:row}),{...row,status:'writing',active_call:'call-2'});
+ await expect(restore).toHaveCount(0);
+ await page.evaluate(row=>(window as any).canvasFeed.message({type:'update',canvas:row}),{...row,restorable:false});
+ await expect(restore).toHaveCount(0);
+ await page.evaluate(row=>(window as any).canvasFeed.message({type:'update',canvas:row}),row);
+ await restore.click();
+ expect(asked).toEqual({revision:3});
+ await expect(page.locator('.canvas-document')).toContainText('The whole of the document.');
+ await expect(restore).toHaveCount(0);
+});

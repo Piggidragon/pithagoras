@@ -11,7 +11,9 @@ works during chat and voice mode. Documents can contain plain text or Markdown.
 
 Ask the agent to create a canvas and write into it. The text appears live while
 its write arguments stream, rather than waiting for the entire tool call.
-Decoded text is retained as it arrives, in memory for temporary canvases and in SQLite for stored canvases. If interrupted, the current text remains as a **Partial draft retained**; incomplete JSON escapes are not invented. Stored partial drafts also survive server restarts.
+Decoded text is retained as it arrives, in memory for temporary canvases and in SQLite for stored canvases. A stored canvas is written to the database about once a second at most while the text streams in, and once more when the write ends, so a long document does not slow the other chats; a server that stops in the middle of a write loses at most the last moment of it. If interrupted, the current text remains as a **Partial draft retained**; incomplete JSON escapes are not invented. Stored partial drafts also survive server restarts.
+
+A write that replaces the document and is cut off (you stopped it, the model ran out of output or failed, the server restarted) leaves only what had streamed in, and the rest of the old document would be gone. So the portal keeps the document as it was before the write until the write is done. While the draft is partial, **Restore the version before the interrupted write** puts that text back, as a revision of its own: you can still copy the partial draft first. It is let go as soon as a write goes through, or you edit the document yourself, and a write that is tried again after a cut-off keeps the text from before the first one.
 
 Choose **Edit inline**, make changes in the same panel, and **Apply changes** (temporary) or **Save changes** (stored).
 Your save marks the canvas **Edited by you**. The AI must read it before making
@@ -42,4 +44,4 @@ the canvas gets more width than the terminal. Minimizing a document does not
 remove it or discard an unsaved edit.
 
 Stored canvases live in the `canvases` table of the existing session database and are
-removed when their owning session is deleted. Include `portal.db` in backups.
+removed when their owning session is deleted, and so are the temporary ones, which go from memory at once. Include `portal.db` in backups.
