@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { bundledPath } from "../bundled.js";
 import { dataFolder } from "../data-dir.js";
+import { oneAtATime } from "../one-at-a-time.js";
 import { isUnderText, isWithinText } from "../within.js";
 
 const run = promisify(execFile);
@@ -198,7 +199,13 @@ export const invalidate = () => {
  * worth supporting: `user/repo`, `github:user/repo#tag`, a git URL, an https
  * tarball, or a plain npm name.
  */
-export async function installChannelPackage(spec: string): Promise<string> {
+export function installChannelPackage(spec: string): Promise<string> {
+  // One at a time: two npm installs into the same folder collide.
+  return installing(() => installChannelPackageNow(spec));
+}
+const installing = oneAtATime();
+
+async function installChannelPackageNow(spec: string): Promise<string> {
   const dir = channelsDir();
   if (!existsSync(path.join(dir, "package.json"))) {
     // npm needs somewhere to record the dependency, or it walks up and installs

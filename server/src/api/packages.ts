@@ -5,6 +5,7 @@ import { piSettingsPath, writePiSettingsText } from "../pi-settings.js";
 import { packageRemoved } from "../db.js";
 import express, { type Router } from "express";
 import { searchCatalog } from "../catalog.js";
+import { oneAtATime } from "../one-at-a-time.js";
 
 const run = promisify(execFile);
 
@@ -15,7 +16,13 @@ const run = promisify(execFile);
  * They install under $HOME/.pi/agent, which the image points at a persistent
  * volume — otherwise every rebuild would silently wipe installed packages.
  */
-export async function pi(args: string[]): Promise<{ stdout: string; stderr: string }> {
+export function pi(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  // What changes the package folder and pi's settings goes one at a time: two at once collide on the same npm prefix and settings.json.
+  return args[0] === "list" ? runPi(args) : changing(() => runPi(args));
+}
+const changing = oneAtATime();
+
+async function runPi(args: string[]): Promise<{ stdout: string; stderr: string }> {
   try {
     return await run("pi", args, { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
   } catch (e) {

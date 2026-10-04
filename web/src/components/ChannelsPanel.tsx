@@ -50,6 +50,8 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
   const [home, setHome] = useState("");
   const [spec, setSpec] = useState("");
   const [installing, setInstalling] = useState(false);
+  // The same, readable by a second Enter that comes before the draw.
+  const installingNow = useRef(false);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -86,6 +88,9 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
   };
 
   const install = async () => {
+    // Enter in the field gets here without the disabled button's say.
+    if (installingNow.current) return;
+    installingNow.current = true;
     setInstalling(true);
     try {
       await api.installChannelPackage(spec.trim());
@@ -94,6 +99,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
     } catch (e) {
       onError((e as Error).message);
     } finally {
+      installingNow.current = false;
       setInstalling(false);
     }
   };

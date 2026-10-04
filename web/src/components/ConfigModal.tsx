@@ -53,7 +53,7 @@ import { ProvidersPanel } from "./ProvidersPanel";
 import { EffortPicker, Empty, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { PackageCatalog } from "./PackageCatalog";
-import { packageName } from "../package-names";
+import { packageName, webLink } from "../package-names";
 import { prefetchSettings, useCached } from "../settings-cache";
 import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
@@ -1065,6 +1065,8 @@ function ExtensionsPanel({
 }) {
   const [spec, setSpec] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // The same, readable by a second Enter that comes before the draw.
+  const busyRef = useRef(false);
   /** What the last switch did to the conversations that were open. */
   const [note, setNote] = useState<(() => string) | null>(null);
   // The names given in Settings → Tools. A package is one thing and should be
@@ -1079,6 +1081,9 @@ function ExtensionsPanel({
   }, []);
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
+    // Enter in the name field gets here without the disabled button's say: a second install into the same folder collides with the first.
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(label);
     setNote(null);
     try {
@@ -1088,6 +1093,7 @@ function ExtensionsPanel({
     } catch (e) {
       onError((e as Error).message);
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };
@@ -1338,9 +1344,9 @@ function ExtensionPanel({
           {ext.description && <p className="text-xs text-fg-subtle">{ext.description}</p>}
           <p className="mt-0.5 truncate font-mono text-[10px] text-fg-faint">{ext.spec}</p>
         </div>
-        {ext.homepage && (
+        {webLink(ext.homepage) && (
           <a
-            href={ext.homepage}
+            href={webLink(ext.homepage)}
             target="_blank"
             rel="noreferrer"
             className="shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-fg/10 hover:text-fg"
