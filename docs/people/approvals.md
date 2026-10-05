@@ -34,9 +34,15 @@ matched against each picture of a call and one for all of them would match none.
 Nothing is put to you that an approval could not make run. The guard keeps
 some things from everybody who is not you, whatever is allowed: a write to the
 agent's own instructions, a place where secrets are kept, your private notes (see
-[roles](/people/roles#what-a-colleague-may-do)). If the agent asks for one of those,
-the question is refused before it reaches you, and it tells the person it is not
-something it can do for them.
+[roles](/people/roles#what-a-colleague-may-do)). A read is never asked for: where
+it is allowed it needs no approval, and an approval does not open the rest. And a
+conversation that has read something untrusted refuses a push, an upload, a
+subagent or a schedule after an approval as before it (see
+[the injection guard](/guide/security#limiting-what-happens-next)), so it is not
+asked for one there, and an approval you gave earlier is not used up on a call
+that is refused. If the agent asks for any of these, the question is refused
+before it reaches you, and it tells the person it is not something it can do for
+them.
 
 The agent chooses neither the recipient nor the route. A session working for
 somebody else must not be able to pick who hears from it.

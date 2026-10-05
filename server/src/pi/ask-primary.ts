@@ -67,10 +67,11 @@ export function askPrimaryTool(sessionId: string) {
           return fail("This conversation has nowhere to send an answer back to.");
         }
         // An approval opens what a rule could open, not what the guard keeps from
-        // everybody who is not the primary user: asked anyway, they would be told
-        // that something could be done once, and it could not.
+        // everybody who is not the primary user, and not what it refuses once this
+        // conversation has read something untrusted: asked anyway, they would be
+        // told that something could be done once, and it could not.
         const wanted = typeof p.actionTool === "string" ? p.actionTool : "bash";
-        const never = typeof p.action === "string" && p.action.trim() ? approvalCannotHelp(wanted, p.action.trim(), session.workspace) : undefined;
+        const never = typeof p.action === "string" && p.action.trim() ? approvalCannotHelp(wanted, p.action.trim(), session.workspace, sessionId) : undefined;
         if (never) {
           return fail(
             `That cannot be approved: ${never}. Not even the primary user can allow it for somebody else, ` +

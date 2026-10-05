@@ -639,9 +639,17 @@ export function unrunnable(toolName: string, input: Record<string, unknown>, wor
  * approval cannot open (see unrunnable), so asking the primary user for it would
  * have them say yes to something that cannot happen.
  */
-export function approvalCannotHelp(toolName: string, action: string, workspace: string | undefined): string | undefined {
+export function approvalCannotHelp(toolName: string, action: string, workspace: string | undefined, portalSessionId?: string): string | undefined {
   if (toolName === EDIT_IMAGE_TOOL) return undefined;
-  return unrunnable(toolName, toolName === "bash" ? { command: action } : { path: action }, workspace);
+  // A read is never asked for: where it is allowed it needs no approval, and an approval does not open the rest.
+  if (PATH_READERS.has(toolName)) return "it is a read, which needs no approval where it is allowed and is held to the folder of this conversation where it is not";
+  const input = toolName === "bash" ? { command: action } : { path: action };
+  const never = unrunnable(toolName, input, workspace);
+  if (never) return never;
+  // A conversation that has read something untrusted refuses a push, an upload, a subagent or a schedule after
+  // an approval as it did before it, and an approval spent on one would be gone.
+  const rule = portalSessionId ? taintRuleFor(portalSessionId, toolName, input) : undefined;
+  return rule ? `this conversation has read content from outside, and what it asks for is ${rule.why}` : undefined;
 }
 
 /** The opening of an envelope, as every one of them begins: a fresh id of eight bytes. */
@@ -683,9 +691,10 @@ export function wrapUntrusted(text: string): string {
 
 /**
  * The taint of each running conversation, by the portal's session id, so that
- * the portal can mark one that read something outside a tool call: see taintSession.
+ * the portal can mark one that read something outside a tool call (see
+ * taintSession) and say whether the rules for a tainted one hold it now.
  */
-const taints = new Map<string, () => void>();
+const taints = new Map<string, { mark: () => void; holds: () => boolean }>();
 
 /**
  * Marks a conversation as having read untrusted content, as a tool result that
@@ -694,8 +703,16 @@ const taints = new Map<string, () => void>();
  */
 export function taintSession(portalSessionId: string): boolean {
   const taint = taints.get(portalSessionId);
-  taint?.();
+  taint?.mark();
   return Boolean(taint);
+}
+
+/**
+ * The rule that would refuse this call in a conversation that has read something
+ * untrusted, when it has and the rules are enforced there; otherwise undefined.
+ */
+function taintRuleFor(portalSessionId: string, toolName: string, input: Record<string, unknown>): Rule | undefined {
+  return taints.get(portalSessionId)?.holds() ? RULES.find((rule) => rule.hit(toolName, input)) : undefined;
 }
 
 /**
@@ -743,7 +760,7 @@ export function guardExtension(
     // content, and this factory runs once per session.
     let tainted = false;
     if (portalSessionId) {
-      const taint = () => { tainted = true; };
+      const taint = { mark: () => { tainted = true; }, holds: () => tainted && enforceTaint };
       taints.set(portalSessionId, taint);
       // Only its own: a reload starts the next one before this one is gone.
       pi.on("session_shutdown", () => { if (taints.get(portalSessionId) === taint) taints.delete(portalSessionId); });
@@ -843,6 +860,9 @@ export function guardExtension(
         // being able to read back later.
         if (asBrowser.url) note("browsed", asBrowser.url);
       }
+      // The rule that refuses this call because the conversation has read something untrusted, if any.
+      // It refuses whatever allows the call, so a one-off approval is not spent on it first: see below.
+      const heldByTaint = tainted && enforceTaint ? RULES.find((r) => r.hit(event.toolName, event.input ?? {})) : undefined;
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -885,6 +905,8 @@ export function guardExtension(
         role !== "primary" &&
         !READ_ONLY.has(event.toolName) &&
         !allowedByRule(role, event.toolName, event.input ?? {}, key, note) &&
+        // Not an approval that the taint refuses after all: it is refused below, with its own reason, and keeps its use.
+        !heldByTaint &&
         !granted()
       ) {
         console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}`);
@@ -909,7 +931,7 @@ export function guardExtension(
       }
 
       if (!tainted) return undefined;
-      const rule = RULES.find((r) => r.hit(event.toolName, event.input ?? {}));
+      const rule = heldByTaint ?? RULES.find((r) => r.hit(event.toolName, event.input ?? {}));
       if (!rule) return undefined;
 
       // Recorded even when it does not block: "this ran with the guard off" is

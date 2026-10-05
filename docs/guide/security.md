@@ -41,16 +41,22 @@ new tool starts outside the list. The taint is read from the conversation again
 whenever pi reloads, so reopening a chat does not clear it.
 
 Not everything untrusted arrives as a tool result. What a routine reported into a
-chat while it sat idle, or an answer passed back from the primary user, comes in
-with the next message in a block that says what it is, and the words themselves
-are wrapped in the same marker: another run wrote them after reading whatever it
-read. A message that carries one taints the conversation as a result would, and
-`routine_run`, which hands a run's output back, is untrusted for the same reason.
-What the portal itself says to you, such as the word that a stranger got in touch
-or that it restarted, is not kept as a note and taints nothing. Nor is a question
-that a colleague or guest puts to you through the agent: it reaches you as a message,
-your answer goes back to them, and your own chat keeps no note of it. An outsider who
-writes to a bot cannot make your own chat refuse a routine or a push.
+chat while it sat idle comes in with the next message in a block that says what it
+is, and the words themselves are wrapped in the same marker: another run wrote them
+after reading whatever it read. A message that carries one taints the conversation
+as a result would, and `routine_run`, which hands a run's output back, is untrusted
+for the same reason. What the portal itself says to you, such as the word that a
+stranger got in touch or that it restarted, is not kept as a note and taints
+nothing. Nor is a question that a colleague or guest puts to you through the agent:
+it reaches you as a message, your answer goes back to them, and your own chat keeps
+no note of it. An outsider who writes to a bot cannot make your own chat refuse a
+routine or a push.
+
+Your answer is not a note either, in the conversation of the person who asked. It
+is relayed to them, and the agent is handed it as the answer to its question; the
+agent's own reply to them is in its transcript already. So an approved push runs in
+a colleague's conversation that has read nothing untrusted, and **Always allow**
+leaves that conversation able to use the rule.
 
 ## Limiting what happens next
 

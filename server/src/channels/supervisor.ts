@@ -316,6 +316,8 @@ class ChannelSupervisor {
    * `note` is off. Words an outsider got into it — a guest's question to the
    * primary user — are not for the agent: a note taints the conversation for
    * good (see notesBlock), and the answer reaches the one who asked without it.
+   * Nor are the answer that is relayed back and the reply of the turn it
+   * resumes: the first is the primary user's own, the second the agent's.
    */
   async send(
     slug: string,
@@ -388,7 +390,9 @@ class ChannelSupervisor {
         const full = pending.length ? `${prompt}\n\n${notesBlock(pending.map((n) => n.text))}` : prompt;
         return { message: full, onAccepted: () => consumeNotes(sessionId, pending.map(n => n.id)) };
       })) ?? "");
-      if (reply) await this.send(question.channel_slug, question.channel_key, reply);
+      // Not a note: the agent wrote it, so it is in its own transcript, and kept as a note it would
+      // taint the conversation at the next message and refuse the pushes it was just allowed.
+      if (reply) await this.send(question.channel_slug, question.channel_key, reply, undefined, false);
     } catch (e) {
       console.error(`[portal] could not resume ${sessionId}: ${(e as Error).message}`);
     }
@@ -535,13 +539,18 @@ class ChannelSupervisor {
         recordApproval(question, asking, approves, always);
         let how: "sent" | "queued";
         try {
+          // Not a note either: the primary user's own words are not somebody else's, and the resumed
+          // turn below hands the agent the answer. A note taints the conversation for good, and an
+          // approved push is refused in a tainted one after the approval has been spent on it.
           how = await this.send(
             question.channel_slug,
             question.channel_key,
             `${primaryName()} says: ${answer}` +
               (approves && question.action
                 ? `\n\n(Approved: you may now run \`${question.action}\` once.)`
-                : "")
+                : ""),
+            undefined,
+            false
           );
         } catch (e) {
           return `Could not get that back to ${question.person_name}: ${(e as Error).message}`;
