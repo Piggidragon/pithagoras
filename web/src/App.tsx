@@ -481,12 +481,14 @@ function Shell({
         setLoadedSession(sessionId);
         // Only now do we know where the replayed window starts, and therefore
         // whether the conversation continues above it.
+        const asked = loadedAgain.current;
         setEvents((prev) => {
           const oldest = prev.find((e) => e.seq > 0)?.seq;
           if (oldest === undefined) return prev;
           api
             .olderEvents(sessionId, oldest, 1)
-            .then((r) => setMoreBefore(r.events.length > 0))
+            // The answer for a chat that was left, or one loaded again since, says nothing of the one shown now.
+            .then((r) => asked === loadedAgain.current && setMoreBefore(r.events.length > 0))
             .catch(() => {});
           return prev;
         });

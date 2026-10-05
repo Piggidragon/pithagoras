@@ -171,6 +171,12 @@ function persistComposerHeight(height: number) {
   local.set(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
 }
 
+/** `list` with one `id` taken out. */
+function without(list: string[], id: string): string[] {
+  const at = list.indexOf(id);
+  return at < 0 ? list : list.filter((_, i) => i !== at);
+}
+
 export function Chat({
   session,
   events,
@@ -223,7 +229,10 @@ export function Chat({
   const [voiceMode, setVoiceMode] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
-  const [sending, setSending] = useState(false);
+  // Sends and uploads on their way, by the chat they are for: this is one component for every chat, and what is
+  // still going on in one must not hold up another (one id for each thing going on).
+  const [sendingIn, setSendingIn] = useState<string[]>([]);
+  const sending = sendingIn.includes(session.id);
   // Which sent message is being rewritten, and what went wrong with the last
   // thing done to one — shown in the transcript, where the message is.
   const [editing, setEditing] = useState<number | null>(null);
@@ -236,7 +245,8 @@ export function Chat({
   // Pictures waiting to go with the next message, kept per chat like the words.
   const [attached, setAttached] = useState<Attachment[]>(() => pending.get(session.id));
   // Pictures being read or files being uploaded: the message waits for them.
-  const [adding, setAdding] = useState(0);
+  const [addingIn, setAddingIn] = useState<string[]>([]);
+  const adding = addingIn.filter((id) => id === session.id).length;
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
   const [boxOf, setBoxOf] = useState(session.id);
@@ -1190,7 +1200,7 @@ export function Chat({
           else await onClientCommand(command.name, command.args);
           return;
         }
-        setSending(true);
+        setSendingIn((l) => [...l, sent]);
         try {
           // Mid-run, typed words steer the run — taken in after the step it is on
           // — rather than waiting for it to finish, which on a long run looked
@@ -1203,7 +1213,7 @@ export function Chat({
               : undefined,
           );
         } finally {
-          setSending(false);
+          setSendingIn((l) => without(l, sent));
         }
       } catch (e) {
         if (fromBox) putBack(sent, msg, images);
@@ -1248,11 +1258,13 @@ export function Chat({
   };
 
   const attempt = async (fn: () => Promise<void>) => {
+    const id = session.id;
     setActionError(null);
     try {
       await fn();
     } catch (e) {
-      setActionError((e as Error).message);
+      // What was asked may be answered when another chat is open: the complaint is not for that one.
+      if (currentSession.current === id) setActionError((e as Error).message);
     }
   };
 
@@ -1264,11 +1276,14 @@ export function Chat({
     openAgent,
     edit: setEditing,
     cancelEdit: () => setEditing(null),
-    saveEdit: (seq, next) =>
-      attempt(async () => {
+    saveEdit: (seq, next) => {
+      const id = session.id;
+      return attempt(async () => {
         await onEditMessage(seq, next);
-        setEditing(null);
-      }),
+        // Not the message of that number in the chat open now.
+        if (currentSession.current === id) setEditing(null);
+      });
+    },
     // The same as editing without changing a word. After a Stop this is what clears the half-finished
     // answer out of the agent's memory instead of stacking a second question on top of it.
     retry: (seq, text) => {
@@ -1325,7 +1340,7 @@ export function Chat({
     const id = session.id;
     const { images, others } = sortFiles(files);
     setActionError(null);
-    setAdding((n) => n + 1);
+    setAddingIn((l) => [...l, id]);
     const problems: string[] = [];
     try {
       problems.push(...(await pending.add(id, images)));
@@ -1343,7 +1358,7 @@ export function Chat({
         else drafts.set(id, drafts.get(id).trim() ? `${drafts.get(id).trimEnd()}\n${note}` : note);
       }
     } finally {
-      setAdding((n) => n - 1);
+      setAddingIn((l) => without(l, id));
       if (problems.length && currentSession.current === id) setActionError(problems.join(" "));
     }
   };

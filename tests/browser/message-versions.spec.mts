@@ -183,6 +183,143 @@ test('earlier messages asked for in a chat that was then left are not put above 
   await expect(page.getByText('B question', { exact: true })).toBeVisible();
 });
 
+/**
+ * A rewrite of the message in chat A is sent, and answered only when chat B is open with a message of its own half rewritten.
+ * Gives B's editor.
+ */
+async function editAnsweredAfterLeaving(page: Page, answer: { status?: number; json: unknown }) {
+  await portal(page, { second: true });
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let asked = 0;
+  await page.route('**/api/sessions/a/messages/100/edit', async (route) => {
+    asked++;
+    await held;
+    await route.fulfill(answer);
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(100, 'A question', 'A answer'));
+  await page.getByRole('button', { name: /^Edit — replaces/ }).click();
+  await page.getByRole('textbox', { name: 'Edit message' }).fill('A question, rewritten');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect.poll(() => asked).toBe(1);
+  await page.getByText('Chat B').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/b/events?since=0']);
+  await replay(page, turn(200, 'B question', 'B answer'));
+  await page.getByRole('button', { name: /^Edit — replaces/ }).click();
+  const editor = page.getByRole('textbox', { name: 'Edit message' });
+  await editor.fill('B question, half rewritten');
+  release();
+  await page.waitForTimeout(500);
+  return editor;
+}
+
+test('a rewrite that went through after its chat was left leaves the message being rewritten in the chat open now alone', async ({ page }) => {
+  const editor = await editAnsweredAfterLeaving(page, { json: { ok: true } });
+  await expect(editor).toHaveValue('B question, half rewritten');
+});
+
+test('a rewrite that failed after its chat was left is not shown in the chat open now', async ({ page }) => {
+  const editor = await editAnsweredAfterLeaving(page, { status: 409, json: { error: 'A EDIT FAILED' } });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(editor).toHaveValue('B question, half rewritten');
+});
+
+test('a message still on its way in a chat that was left does not hold up the Send of the chat open now, and its failure is not shown there', async ({ page }) => {
+  await portal(page, { second: true });
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let askedA = 0;
+  const sentB: unknown[] = [];
+  await page.route('**/api/sessions/a/prompt', async (route) => {
+    askedA++;
+    await held;
+    await route.fulfill({ status: 500, json: { error: 'A SEND FAILED' } });
+  });
+  await page.route('**/api/sessions/b/prompt', (route) => {
+    sentB.push(route.request().postDataJSON());
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(100, 'A question', 'A answer'));
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.fill('to A, slowly');
+  await box.press('Enter');
+  await expect.poll(() => askedA).toBe(1);
+  await page.getByText('Chat B').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/b/events?since=0']);
+  await replay(page, turn(200, 'B question', 'B answer'));
+  await box.fill('to B');
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
+  await box.press('Enter');
+  await expect.poll(() => sentB).toEqual([{ message: 'to B' }]);
+  release();
+  await page.waitForTimeout(500);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('a file still being uploaded in a chat that was left does not hold up the Send of the chat open now', async ({ page }) => {
+  await portal(page, { second: true });
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let asked = 0;
+  await page.route('**/api/sessions/a/upload**', async (route) => {
+    asked++;
+    await held;
+    await route.fulfill({ json: { path: 'notes.txt', size: 5 } });
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(100, 'A question', 'A answer'));
+  await page.locator('input[type=file]').first().setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('notes') });
+  await expect.poll(() => asked).toBe(1);
+  await page.getByText('Chat B').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/b/events?since=0']);
+  await replay(page, turn(200, 'B question', 'B answer'));
+  await page.getByRole('textbox', { name: 'Message' }).fill('to B');
+  await expect(page.getByText('Adding…')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
+  release();
+});
+
+test('the answer to whether a chat that was left has earlier messages does not decide it for the chat open now', async ({ page }) => {
+  await portal(page, { second: true });
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let peeksB = 0;
+  let askedB = 0;
+  // The short chat's own look above it is slow, and comes when the long one is open.
+  await page.route('**/api/sessions/a/events/before**', async (route) => {
+    await held;
+    await route.fulfill({ json: { events: [], more: false } });
+  });
+  await page.route('**/api/sessions/b/events/before**', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('limit') === '1') {
+      peeksB++;
+      return route.fulfill({ json: { events: [ev(1, 'portal_prompt', { message: 'x' })], more: true } });
+    }
+    askedB++;
+    await route.fulfill({ json: { events: turn(1, 'B old question', 'B old answer'), more: false } });
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(100, 'A question', 'A answer'));
+  await page.getByText('Chat B').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/b/events?since=0']);
+  await replay(page, Array.from({ length: 60 }, (_, i) => turn(200 + 2 * i, `B question ${i}`, `B answer ${i}`)).flat());
+  await expect.poll(() => peeksB).toBeGreaterThan(0);
+  release();
+  await page.waitForTimeout(500);
+  // Read up to the top of it: what is there is asked for, as the chat's own look above it said.
+  const scroller = page.locator('.chat-list').locator('..');
+  await expect.poll(async () => {
+    await scroller.evaluate((el) => (el.scrollTop = 0));
+    return askedB;
+  }, { timeout: 5000 }).toBeGreaterThan(0);
+});
+
 test('a message with one version has no switch', async ({ page }) => {
   const state = await portal(page);
   state.versions = {};
