@@ -34,9 +34,12 @@ const said = (result) => {
 };
 const run = (tool, params) => tool.execute("call-1", params);
 const sends = [];
-channelSupervisor.send = async (channel, target, text) => {
+/** Whether each of them asked for a note in the conversation it lands in, by the same index. */
+const notedFlags = [];
+channelSupervisor.send = async (channel, target, text, _options, note) => {
   if (sends.failWith) throw new Error(sends.failWith);
   sends.push({ channel, target, text });
+  notedFlags.push(note);
   return "sent";
 };
 
@@ -132,6 +135,7 @@ test("ask_primary says whether the question reached anybody, and names who asks 
   assert.equal(sends.length, before + 1);
   assert.match(message, /^Alice \(CTO\) \(tg:8812\) is asking \(via tg\):/, "a name is whatever somebody called themselves; the key is who the platform says they are");
   assert.match(message, /Reply "#[a-z2-9]{4} approve"/);
+  assert.equal(notedFlags.at(-1), false, "the asker's words are not kept as a note in the primary user's chat: it would taint it");
 
   sends.failWith = "chat not found";
   try {

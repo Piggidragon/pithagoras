@@ -311,12 +311,18 @@ class ChannelSupervisor {
    * Deliberately not routed through a session: this is the portal talking, not
    * the agent mid-conversation, and pushing it through the channel's session
    * would leave a message in the transcript that nobody sent.
+   *
+   * What it says is kept as a note for the conversation it lands in, unless
+   * `note` is off. Words an outsider got into it — a guest's question to the
+   * primary user — are not for the agent: a note taints the conversation for
+   * good (see notesBlock), and the answer reaches the one who asked without it.
    */
   async send(
     slug: string,
     target: string,
     text: string,
-    options?: { label: string; reply: string }[]
+    options?: { label: string; reply: string }[],
+    note = true
   ): Promise<"sent" | "queued"> {
     if (!text.trim()) return "sent";
     const live = this.liveBySlug(slug);
@@ -334,7 +340,7 @@ class ChannelSupervisor {
             : `Channel "${slug}" is not running`
         );
       }
-      addNote(session.id, text, true);
+      addNote(session.id, text, true, note);
       return "queued";
     }
 
@@ -342,7 +348,7 @@ class ChannelSupervisor {
     // The agent said this, so its conversation has to know it said it. Without
     // this, a routine reports into a chat and the follow-up question — "what did
     // you mean by that?" — reaches an agent with no idea what "that" is.
-    if (session) addNote(session.id, text);
+    if (session && note) addNote(session.id, text);
     return "sent";
   }
 

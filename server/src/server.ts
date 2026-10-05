@@ -1462,8 +1462,26 @@ adoptPortalBrowser();
 // The memory tidied up at its set time, when the portal runs Understory.
 scheduleDreams();
 
-async function shutdown(signal: string) {
+/**
+ * The stop is one, however many signals ask for it: a second Ctrl-C does, and so
+ * does a package that ends its own children on SIGTERM and raises the signal
+ * again, as pi-lens does. A second run found the shells already taken out of the
+ * list, had nothing to wait for, and ended the portal before the first run's two
+ * seconds were up, with whatever the shells' jobs ignoring a hangup left running.
+ */
+let stopping: Promise<void> | undefined;
+function shutdown(signal: string): Promise<void> {
+  if (stopping) {
+    console.log(`${signal} received — already stopping`);
+    return stopping;
+  }
+  return (stopping = stop(signal));
+}
+
+async function stop(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
+  // However long the rest takes, and no longer than docker waits before it kills.
+  setTimeout(() => process.exit(0), 10_000).unref();
   routineSupervisor.stop();
   // Alongside the rest: their shells are given a moment to wind down.
   const shells = endAllTerminals();
@@ -1473,9 +1491,8 @@ async function shutdown(signal: string) {
   server.close(() => process.exit(0));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds
-  // below, which is as long as docker waits before it kills.
+  // of the timer above.
   server.closeAllConnections();
-  setTimeout(() => process.exit(0), 10_000).unref();
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));

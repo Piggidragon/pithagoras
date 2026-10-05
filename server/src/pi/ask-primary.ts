@@ -107,7 +107,10 @@ export function askPrimaryTool(sessionId: string) {
                   { label: "Always allow", reply: `#${row.id} always` },
                   { label: "Deny", reply: `#${row.id} no` },
                 ]
-              : undefined
+              : undefined,
+            // The asker's words in the primary user's own conversation would taint it for good,
+            // and the answer is read before the agent sees the message.
+            false
           );
         } catch (e) {
           return fail(`Could not reach them: ${(e as Error).message}`);

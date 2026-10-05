@@ -12,9 +12,11 @@ import { inProcessHome } from "./server-harness.mjs";
 
 const home = inProcessHome("pithagoras-trust-");
 
-const { addNote, createSession, eventsSince, findChannelSession, getDb, getSession, listAudit, listToolRules, setDefaultReportTo, useGrant } = await import("../dist/db.js");
+const { addNote, createSession, eventsSince, findChannelSession, getDb, getSession, listAudit, listToolRules, pendingNotes, setDefaultReportTo, useGrant } = await import("../dist/db.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
 const { CommandFailed, sessions } = await import("../dist/session-manager.js");
+const { guardExtension } = await import("../dist/pi/guard.js");
+const { askPrimaryTool } = await import("../dist/pi/ask-primary.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { askQuestion, getQuestion } = await import("../dist/questions.js");
 const { FRAMING_TAGS, neutralise } = await import("../dist/channels/framing.js");
@@ -151,6 +153,63 @@ test("a stranger is announced to the primary user only once it got through, and 
     // The word is the portal's to the primary user, not the agent's own speech: kept as a note it would
     // taint the next conversation that read it, and an outsider chooses the name in it.
     assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM notes").get().n, 0);
+  } finally {
+    channelSupervisor.running.delete("tg-fake");
+    setDefaultReportTo(null);
+  }
+});
+
+test("a guest's question to the primary user reaches their chat, and is not a note that taints it for good", async () => {
+  useStubAsk();
+  roster();
+  createSession({ id: "owners-chat", title: "Sam", workspace: home, executor: "host", channel_slug: "tg", channel_key: "tg:report" });
+  createSession({ id: "gus-chat", title: "Gus", workspace: home, executor: "host", channel_slug: "tg", channel_key: "tg:chat:gus" });
+  getDb().prepare("UPDATE sessions SET last_person_key = 'tg:gus' WHERE id = 'gus-chat'").run();
+  setDefaultReportTo({ channel: "tg", target: "report" });
+  // The guard of the primary user's own conversation, as pi has it running.
+  const guard = {};
+  guardExtension("t", () => ({ role: "primary", key: "tg:owner" }), "owners-chat", true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
+  const schedule = () => guard.tool_call({ toolName: "routine_create", input: { name: "morning" } });
+  const ask = (question) => {
+    let tool;
+    askPrimaryTool("gus-chat")({ registerTool: (t) => (tool = t) });
+    return tool.execute("call-1", { question });
+  };
+  const spoken = [];
+  const replies = [];
+  channelSupervisor.running.set("tg-fake", {
+    slug: "tg",
+    state: "running",
+    since: "",
+    signature: "",
+    controller: new AbortController(),
+    send: async (target, text) => void spoken.push({ target, text }),
+  });
+  try {
+    await say("owner", "hello", "report");
+    assert.equal(schedule(), undefined, "nothing was read that is not theirs");
+
+    // A channel that can speak first: the question goes out at once, and the agent of that chat is not handed it.
+    await ask("Gus asks if the office is open tomorrow.");
+    assert.equal(spoken.length, 1);
+    assert.match(spoken[0].text, /^Gus \(tg:gus\) is asking \(via tg\):\n\nGus asks if the office is open tomorrow\./);
+    assert.equal(spoken[0].target, "report");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM notes").get().n, 0, "no note, so nothing of the guest's words reaches the primary user's agent");
+    turns.length = 0;
+    await say("owner", "remind me every morning", "report");
+    assert.doesNotMatch(turns[0].message, /Gus asks|is asking/);
+    assert.equal(schedule(), undefined, "their next message is not one that read something untrusted");
+
+    // A channel that cannot: the question waits and goes out with the reply to their next message, still not a note.
+    channelSupervisor.running.get("tg-fake").send = undefined;
+    await ask("Gus asks if the car is free.");
+    assert.equal(spoken.length, 1, "nothing was sent out of the blue");
+    assert.equal(pendingNotes("owners-chat").length, 0, "held for delivery only, not for the agent");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM notes WHERE pending_delivery = 1").get().n, 1);
+    await say("owner", "and another", "report", { onReply: (text) => replies.push(text) });
+    assert.match(replies.join("\n"), /Gus asks if the car is free\./, "it arrived with their next message");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM notes WHERE pending_delivery = 1").get().n, 0, "delivered once");
+    assert.equal(schedule(), undefined, "and it did not taint the conversation");
   } finally {
     channelSupervisor.running.delete("tg-fake");
     setDefaultReportTo(null);

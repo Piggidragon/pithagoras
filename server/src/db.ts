@@ -1469,10 +1469,18 @@ export function setDefaultReportTo(to: ReportTo | null): void {
   putSetting("report_target", to?.target ?? "");
 }
 
-/** Something the portal said into a conversation, waiting to join its context. */
-export function addNote(sessionId: string, text: string, pendingDelivery = false): void {
+/**
+ * Something the portal said into a conversation, waiting to join its context.
+ *
+ * With `forAgent` off it is only kept for delivery, as consumed already: the agent
+ * is never handed it, and the conversation is not tainted by it.
+ */
+export function addNote(sessionId: string, text: string, pendingDelivery = false, forAgent = true): void {
   getDb()
-    .prepare("INSERT INTO notes (session_id, text, pending_delivery) VALUES (?, ?, ?)")
+    .prepare(
+      `INSERT INTO notes (session_id, text, pending_delivery, consumed_at)
+       VALUES (?, ?, ?, ${forAgent ? "NULL" : "datetime('now')"})`
+    )
     .run(sessionId, text, pendingDelivery ? 1 : 0);
 }
 

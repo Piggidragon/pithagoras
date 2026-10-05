@@ -47,7 +47,9 @@ are wrapped in the same marker: another run wrote them after reading whatever it
 read. A message that carries one taints the conversation as a result would, and
 `routine_run`, which hands a run's output back, is untrusted for the same reason.
 What the portal itself says to you, such as the word that a stranger got in touch
-or that it restarted, is not kept as a note and taints nothing: an outsider who
+or that it restarted, is not kept as a note and taints nothing. Nor is a question
+that a colleague or guest puts to you through the agent: it reaches you as a message,
+your answer goes back to them, and your own chat keeps no note of it. An outsider who
 writes to a bot cannot make your own chat refuse a routine or a push.
 
 ## Limiting what happens next
