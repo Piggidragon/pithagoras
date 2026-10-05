@@ -377,3 +377,21 @@ export async function stopJob(workspace: string, key: string): Promise<boolean> 
   }, 3000).unref();
   return true;
 }
+
+/**
+ * Stops the jobs that are running in a folder that is being deleted, with the chats that started them: with the
+ * chats gone nothing would list them or stop them, and they would keep their ports and memory in a folder that is
+ * no more. How many were stopped. Never fails: a job that cannot be read is left, as it would be by any stop.
+ */
+export async function stopJobsIn(workspace: string): Promise<number> {
+  if (!BACKGROUND_SUPPORTED) return 0;
+  let stopped = 0;
+  try {
+    for (const job of await listJobs(workspace)) {
+      if (job.state !== "exited" && (await stopJob(workspace, job.key))) stopped++;
+    }
+  } catch {
+    // What could not be read is not stopped.
+  }
+  return stopped;
+}

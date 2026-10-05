@@ -78,7 +78,7 @@ import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { adoptPortalBrowser, browserRouter, pinConnection } from "./api/browser.js";
 import { endAllTerminals, terminalRouter } from "./api/terminal.js";
-import { BACKGROUND_SUPPORTED, MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
+import { BACKGROUND_SUPPORTED, MARKER, clearFinished, listJobs, readOutput, stopJob, stopJobsIn } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
@@ -517,6 +517,8 @@ app.delete("/api/projects/:name", async (req, res) => {
       // go last, together, so that either all are removed or none.
       for (const run of runs) await sessions.discard(run.id);
       for (const chat of chats) await sessions.discard(chat.id);
+      // The jobs they started go with them: nothing would be left to list or stop them.
+      const jobsStopped = await stopJobsIn(project.path);
       // A routine can have been given this place while those were stopped. It
       // was not held, so it is looked for again, with nothing awaited from here
       // until the folder is gone.
@@ -533,7 +535,7 @@ app.delete("/api/projects/:name", async (req, res) => {
         for (const chat of chats) deleteSession(chat.id);
       })();
       for (const chat of chats) sessions.removeFiles(chat.id);
-      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff });
+      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff, jobsStopped });
     } finally {
       // The chats that were not deleted take messages again.
       sessions.reopen([...runs, ...chats].map((s) => s.id));
@@ -576,6 +578,8 @@ app.delete("/api/agents/:id", async (req, res) => {
     try {
       for (const run of runs) await sessions.discard(run.id);
       for (const chat of chats) await sessions.discard(chat.id);
+      // The jobs they started go with them, in a folder that is kept as well: nothing would be left to list or stop them.
+      const jobsStopped = await stopJobsIn(agent.home);
       deleteAgent(agent.id, { deleteFolder: req.query.folder === "delete" });
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       if (req.query.folder === "delete") forgetPicturesIn(agent.home);
@@ -589,7 +593,7 @@ app.delete("/api/agents/:id", async (req, res) => {
         for (const chat of chats) deleteSession(chat.id);
       })();
       for (const chat of chats) sessions.removeFiles(chat.id);
-      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff, routinesDeleted: removed });
+      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff, routinesDeleted: removed, jobsStopped });
     } finally {
       sessions.reopen([...runs, ...chats].map((s) => s.id));
       release();

@@ -14,7 +14,7 @@ import { resolveChannelSession, scopeKey, unscopeKey } from "../agent.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { sessions, CommandFailed, stripThinkingMarkers } from "../session-manager.js";
 import { ruleApplies, taintSession } from "../pi/guard.js";
-import { readAnswer, recordAnswer, type QuestionRow } from "../questions.js";
+import { readAnswer, recordAnswer, waitingQuestions, type QuestionRow } from "../questions.js";
 import { recordApproval } from "../approvals.js";
 import {
   getPerson,
@@ -748,7 +748,25 @@ class ChannelSupervisor {
     // A channel with no way to relay mid-run had nowhere to put these, so they
     // ride out with the answer instead.
     const clean = stripThinkingMarkers(reply ?? "");
-    return owed.length && !packageReply ? [...owed, clean].join("\n\n") : clean;
+    const said = owed.length && !packageReply ? [...owed, clean].join("\n\n") : clean;
+    // A message of the primary user's that did not start with a waiting question's id was no answer to it, and their
+    // agent knows nothing of the question (what the asker wrote is no note, see ask_primary). So the portal says it
+    // itself, after the agent's words and once for each question: they would otherwise answer without the id, and
+    // the one who asked would wait for good.
+    const reminder = person?.role === "primary" ? this.remindOfQuestions() : "";
+    return reminder ? (said ? `${said}\n\n${reminder}` : reminder) : said;
+  }
+
+  /** The questions told about already, by id: for this run of the portal, which is enough to not say it twice. */
+  private reminded = new Set<string>();
+
+  /** What to tell the primary user of the questions that wait for them and that they have not been told of. */
+  private remindOfQuestions(): string {
+    const waiting = waitingQuestions().filter((q) => !this.reminded.has(q.id));
+    if (!waiting.length) return "";
+    for (const q of waiting) this.reminded.add(q.id);
+    const list = waiting.map((q) => `#${q.id} from ${q.person_name}`).join(", ");
+    return `Still waiting for your answer: ${list}. Start a message with the id to answer it, as "#${waiting[0].id} <your answer>".`;
   }
 
   /** One line for the boot log. */

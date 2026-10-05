@@ -77,6 +77,13 @@ export function askQuestion(input: {
   return getQuestion(id)!;
 }
 
+/** The questions asked in the last day that nobody has answered, oldest first. */
+export function waitingQuestions(): QuestionRow[] {
+  return getDb()
+    .prepare("SELECT * FROM questions WHERE answered_at IS NULL AND asked_at > datetime('now', '-1 day') ORDER BY asked_at ASC, rowid ASC")
+    .all() as QuestionRow[];
+}
+
 export const getQuestion = (id: string): QuestionRow | undefined =>
   getDb().prepare("SELECT * FROM questions WHERE id = ?").get(id) as QuestionRow | undefined;
 

@@ -284,7 +284,9 @@ export function routinesRouter(): Router {
     const row = rowById(req.params.id);
     if (!row) return res.status(404).json({ error: "Not found" });
     try {
-      res.json(toApi(await routineSupervisor.run(row, "manual")));
+      const after = await routineSupervisor.run(row, "manual");
+      if (!after) return res.status(404).json({ error: `"${row.name}" was deleted while it ran` });
+      res.json(toApi(after));
     } catch (e) {
       res.status(409).json({ error: (e as Error).message });
     }

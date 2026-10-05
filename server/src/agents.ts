@@ -116,6 +116,31 @@ function freeFor(home: string, name: string): boolean {
   }
 }
 
+/** The name recorded in an agent's folder, as `sameName` compares it; none for a folder from before it was recorded. */
+function recordedName(home: string): string | undefined {
+  try {
+    return sameName(readFileSync(path.join(home, NAME_FILE), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The folder kept from an agent that was named `name` when it was deleted, which no agent has. Not the folder
+ * `name` makes: an agent that was renamed keeps the folder it was made in, and takes that one up again under its
+ * last name. Where two were kept under one name, the one `name` would make, else the first.
+ */
+function keptFolderOf(name: string, taken: Set<string>, own: string): string | undefined {
+  let folders: string[];
+  try {
+    folders = readdirSync(agentsRoot(), { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith(".")).map((d) => d.name).sort();
+  } catch {
+    return undefined;
+  }
+  const kept = folders.filter((f) => !taken.has(f) && f !== DEFAULT_AGENT && recordedName(path.join(agentsRoot(), f)) === sameName(name));
+  return kept.includes(own) ? own : kept[0];
+}
+
 const checkName = (name: unknown): string => {
   if (typeof name !== "string" || !name.trim()) throw new AgentError("An agent needs a name", 400);
   if (name.trim().length > 60) throw new AgentError("An agent's name is at most 60 characters", 400);
@@ -138,7 +163,7 @@ export function createAgent(input: { name: unknown }): Agent {
   const name = checkName(input.name);
   const taken = new Set(listAgents().map((a) => a.id));
   const base = slugOf(name);
-  let id = base;
+  let id = keptFolderOf(name, taken, base) ?? base;
   for (let n = 2; taken.has(id) || id === DEFAULT_AGENT || !freeFor(path.join(agentsRoot(), id), name); n++) id = `${base}-${n}`;
   const home = path.join(agentsRoot(), id);
   mkdirSync(home, { recursive: true });
@@ -150,7 +175,11 @@ export function createAgent(input: { name: unknown }): Agent {
 export function renameAgent(id: string, name: unknown): Agent {
   const agent = getAgent(id);
   if (!agent) throw new AgentError("No such agent", 404);
-  getDb().prepare("UPDATE agents SET name = ? WHERE id = ?").run(checkName(name), id);
+  const named = checkName(name);
+  // The folder keeps its name, and says whose it is now: kept when the agent is deleted, it is taken up again by
+  // an agent of this name, and not by one that is given the name it was made with.
+  if (isWithinText(agentsRoot(), agent.home) && existsSync(agent.home)) writeFileAtomic(path.join(agent.home, NAME_FILE), named);
+  getDb().prepare("UPDATE agents SET name = ? WHERE id = ?").run(named, id);
   return getAgent(id)!;
 }
 

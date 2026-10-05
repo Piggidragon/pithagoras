@@ -13,6 +13,7 @@ const { routineTools } = await import("../dist/pi/routine-tools.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
 const { freeSlug } = await import("../dist/slug.js");
 const { createSession, getDb } = await import("../dist/db.js");
+const { sessions } = await import("../dist/session-manager.js");
 
 async function withApi(fn) {
   const app = express();
@@ -26,6 +27,7 @@ async function withApi(fn) {
       headers: { "Content-Type": "application/json" },
       body: body && JSON.stringify(body),
     });
+    call.status = res.status;
     return res.json();
   };
   try {
@@ -95,6 +97,29 @@ test("a one-off that has run is armed again by a new time through the agent's to
       assert.equal(r.next_run, later);
     }
   });
+});
+
+test("a routine that is deleted while it runs is said to be, by the API and by the agent's tool", async () => {
+  const ask = sessions.ask;
+  const stop = sessions.stop;
+  // The run itself: the person deletes the routine while it is going.
+  const deleteWhileRunning = (slug) => async () => (getDb().prepare("DELETE FROM routines WHERE slug = ?").run(slug), "done");
+  sessions.stop = async () => {};
+  try {
+    await withApi(async (call) => {
+      const made = await call("POST", "/routines", { name: "Slow one", schedule: "@daily", instructions: "x" });
+      sessions.ask = deleteWhileRunning(made.slug);
+      const answer = await call("POST", `/routines/${made.id}/run`);
+      assert.equal(call.status, 404);
+      assert.equal(answer.error, '"Slow one" was deleted while it ran');
+    });
+    await run("routine_create", { name: "Slow two", schedule: "@daily", instructions: "x" });
+    sessions.ask = deleteWhileRunning("slow-two");
+    assert.equal(await failure("routine_run", { routine: "slow-two" }), '"Slow two" was deleted while it ran');
+  } finally {
+    sessions.ask = ask;
+    sessions.stop = stop;
+  }
 });
 
 test("a free slug is the name's own, else the first of -2, -3 that is not taken", () => {

@@ -19,7 +19,7 @@ const { CommandFailed, sessions } = await import("../dist/session-manager.js");
 const { guardExtension } = await import("../dist/pi/guard.js");
 const { askPrimaryTool } = await import("../dist/pi/ask-primary.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { askQuestion, getQuestion } = await import("../dist/questions.js");
+const { askQuestion, getQuestion, recordAnswer } = await import("../dist/questions.js");
 const { FRAMING_TAGS, neutralise } = await import("../dist/channels/framing.js");
 const { cleanName, getPerson, hasPrimary, isOnlyPrimary, lower, personKey, rename, seen, setRole } = await import("../dist/people.js");
 
@@ -215,6 +215,30 @@ test("a guest's question to the primary user reaches their chat, and is not a no
     channelSupervisor.running.delete("tg-fake");
     setDefaultReportTo(null);
   }
+});
+
+test("an answer the primary user wrote without the question's id is no answer, and they are told once what still waits and how to give it", async () => {
+  useStubAsk();
+  roster();
+  const ask = (question) =>
+    askQuestion({ sessionId: "gus-chat", personKey: "tg:gus", personName: "Gus", channelSlug: "tg", channelKey: "chat:gus", question });
+  const lunch = ask("Is lunch at noon on Friday?");
+  const first = await say("owner", "Yes, lunch is at noon.", "report");
+  assert.match(first, new RegExp(`^ok\\n\\nStill waiting for your answer: #${lunch.id} from Gus\\. Start a message with the id`));
+  assert.equal(getQuestion(lunch.id).answered_at, null, "it was not taken for the answer");
+  assert.doesNotMatch(turns[0].message, /Gus|Friday|#\w{4}\b/, "and the agent of that chat was handed nothing of the question");
+
+  // Told once for a question: the next message is not nagged.
+  assert.equal(await say("owner", "and another thing", "report"), "ok");
+  // A new question is told of by itself, and one that was answered is not waited for.
+  const car = ask("Is the car free?");
+  const gone = ask("Was it a long walk?");
+  recordAnswer(gone.id, "no");
+  const next = await say("owner", "hello again", "report");
+  assert.match(next, new RegExp(`Still waiting for your answer: #${car.id} from Gus\\.`));
+  assert.doesNotMatch(next, new RegExp(lunch.id + "|" + gone.id));
+  // Not told to the people who cannot answer it.
+  assert.equal(await say("kim", "hi", "chat:kim"), "ok");
 });
 
 test("a question is not put to the primary user for an approval that could not make the action run", async () => {

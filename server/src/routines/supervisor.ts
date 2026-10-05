@@ -182,8 +182,11 @@ class RoutineSupervisor {
    * Not awaited by the tick: a routine that takes twenty minutes must not hold
    * up every other one, and the next tick skips it because it is still marked
    * as running.
+   *
+   * Answers the routine as the run left it, or nothing when it was deleted
+   * while it ran.
    */
-  async run(row: RoutineRow, trigger: "schedule" | "manual"): Promise<RoutineRow> {
+  async run(row: RoutineRow, trigger: "schedule" | "manual"): Promise<RoutineRow | undefined> {
     if (this.running.has(row.slug)) throw new Error(`"${row.name}" is already running`);
     if (this.held.has(row.slug)) throw new Error(`"${row.name}" cannot run while the folder it runs in is being deleted`);
     this.running.add(row.slug);
@@ -235,7 +238,7 @@ class RoutineSupervisor {
       this.refreshSchedules([row.id]);
     }
 
-    return getDb().prepare("SELECT * FROM routines WHERE id = ?").get(row.id) as RoutineRow;
+    return getDb().prepare("SELECT * FROM routines WHERE id = ?").get(row.id) as RoutineRow | undefined;
   }
 
   private finish(id: string, status: string, output: string, ms: number): void {

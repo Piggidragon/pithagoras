@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
@@ -64,6 +66,58 @@ test("renaming keeps the folder", async () => {
   assert.equal(renamed.body.home, path.join(home, "agents", "research-bot"));
 });
 
+test("an agent renamed and deleted with its folder kept comes back under its last name, and a new one given its first name does not get its files", async () => {
+  const vega = (await call("POST", "/api/agents", { name: "Vega" })).body;
+  writeFileSync(path.join(vega.home, "notes.md"), "Vega's notes.\n");
+  assert.equal((await call("PATCH", `/api/agents/${vega.id}`, { name: "Lyra" })).status, 200);
+  assert.equal(readFileSync(path.join(vega.home, ".agent-name"), "utf8"), "Lyra", "the folder says whose it is now");
+  assert.equal((await call("DELETE", `/api/agents/${vega.id}`)).status, 200);
+
+  const stranger = (await call("POST", "/api/agents", { name: "Vega" })).body;
+  assert.notEqual(stranger.home, vega.home);
+  assert.ok(!existsSync(path.join(stranger.home, "notes.md")), "the folder that was kept for Lyra is not Vega's");
+  const lyra = (await call("POST", "/api/agents", { name: "Lyra" })).body;
+  assert.equal(lyra.home, vega.home, "found by the name it was given last, not by the folder name");
+  assert.equal(readFileSync(path.join(lyra.home, "notes.md"), "utf8"), "Vega's notes.\n");
+  assert.equal((await call("DELETE", `/api/agents/${stranger.id}?folder=delete`)).status, 200);
+  assert.equal((await call("DELETE", `/api/agents/${lyra.id}?folder=delete`)).status, 200);
+});
+
+/** A job as the agent's tool call starts one: marked as the portal's, in the folder, in a Unix session of its own. */
+async function withJob(folder, run) {
+  const job = spawn("sleep", ["60"], { cwd: folder, detached: true, stdio: "ignore", env: { ...process.env, PITHAGORAS_AGENT: "1" } });
+  const ended = once(job, "exit");
+  try {
+    await run();
+    await Promise.race([ended, new Promise((_, reject) => setTimeout(() => reject(new Error("the job is still running")), 10_000))]);
+  } finally {
+    try {
+      process.kill(-job.pid, "SIGKILL");
+    } catch {
+      // Gone, as it should be.
+    }
+  }
+}
+
+test("deleting an agent stops the jobs its chats started, in a folder that is kept as well", async () => {
+  const made = (await call("POST", "/api/agents", { name: "Jobber" })).body;
+  await withJob(made.home, async () => {
+    const gone = await call("DELETE", `/api/agents/${made.id}`);
+    assert.equal(gone.status, 200, JSON.stringify(gone.body));
+    assert.equal(gone.body.jobsStopped, 1);
+  });
+});
+
+test("deleting a project stops the jobs its chats started", async () => {
+  const project = await call("POST", "/api/projects", { name: "Jobs" });
+  assert.equal(project.status, 200, JSON.stringify(project.body));
+  await withJob(project.body.path, async () => {
+    const gone = await call("DELETE", `/api/projects/${project.body.name}?discard=1`);
+    assert.equal(gone.status, 200, JSON.stringify(gone.body));
+    assert.equal(gone.body.jobsStopped, 1);
+  });
+});
+
 test("the first agent is not deleted", async () => {
   assert.equal((await call("DELETE", "/api/agents/home")).status, 409);
   const { status } = await call("DELETE", "/api/agents/nobody");
@@ -77,8 +131,11 @@ test("deleting an agent removes its chats, and its folder only when asked", asyn
   assert.ok(existsSync(path.join(home, "agents", "research-bot", "SOUL.md")), "kept by default");
   assert.ok(!(await call("GET", "/api/agents")).body.agents.some((a) => a.id === "research-bot"));
 
-  // Made again under the same name, it takes its folder up again.
-  const back = await call("POST", "/api/agents", { name: "Research Bot" });
+  // Made again under the name it was given last, it takes its folder up again: not under the one it was made with.
+  const other = await call("POST", "/api/agents", { name: "Research Bot" });
+  assert.notEqual(other.body.home, path.join(home, "agents", "research-bot"), "the folder was kept for Scout");
+  assert.equal((await call("DELETE", `/api/agents/${other.body.id}?folder=delete`)).status, 200);
+  const back = await call("POST", "/api/agents", { name: "Scout" });
   assert.equal(back.body.id, "research-bot");
   assert.equal(back.body.initialised, true);
 

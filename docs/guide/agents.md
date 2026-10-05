@@ -17,11 +17,11 @@ setup: who it is, and who it works for. Its home is made in `agents/` beside the
 first agent's home, named after it (`agents/research-bot` for *Research Bot*;
 accents are dropped, so *Jürgen* is `agents/jurgen`, and a name in another
 alphabet is `agents/agent-` and a short code), and its files are written there.
-The name is kept in the folder, in `.agent-name`. A folder that is already
-there, kept when an agent of the same name was deleted, is taken up as it is:
-the files in it stay as they were, and only the ones that are missing are
-written. A folder kept by an agent of another name is left alone: the new one
-gets the next free name, `agents/<name>-2`.
+The name is kept in the folder, in `.agent-name`. A folder that was kept when an
+agent of the same name was deleted is taken up as it is: the files in it stay as
+they were, and only the ones that are missing are written. A folder kept by an
+agent of another name is left alone: the new one gets the next free name,
+`agents/<name>-2`.
 
 A card opens that agent (`/agents?agent=research-bot`), with **New
 conversation** to start one with it and four tabs: **Conversations**,
@@ -30,7 +30,8 @@ conversation** to start one with it and four tabs: **Conversations**,
 the top beside its name; the palette on it opens the avatar customizer. Each
 agent's avatar is its own, and voice mode shows the avatar of the agent the
 chat is with (the first agent's for a chat in a project). Its
-name, with the pencil beside it, renames it; the folder keeps its name.
+name, with the pencil beside it, renames it; the folder keeps its name, and
+`.agent-name` in it takes the new one.
 **Agents** at the top goes back to the cards.
 
 The **Files** tab edits `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` and `WATCH.md`.
@@ -109,13 +110,15 @@ A routine can run in any agent's home: choose the agent under **Runs in**.
 ## Deleting one
 
 The bin next to an agent's name deletes it. Its chats are stopped and deleted
-with it. It asks what to do with its folder, and with it, its routines:
+with it, and so are the [background jobs](/guide/extensions#subagents-and-background-jobs) they started in its
+folder (a dev server, a watcher), which nothing could show or stop afterwards.
+It asks what to do with its folder, and with it, its routines:
 
 - **Keep its folder**: its files and memory stay, and so do the pictures its chats
   made, in the [Images page](/guide/images), and its routines, switched off. Make an
-  agent with the same name and it picks them all up again; a routine of its that is
-  left on the Routines page meanwhile says that the agent whose home it was has been
-  deleted.
+  agent with the name it had when it was deleted (its last one, if it was renamed)
+  and it picks them all up again; a routine of its that is left on the Routines page
+  meanwhile says that the agent whose home it was has been deleted.
 - **Delete its folder too**: the folder and everything in it are removed, and its
   routines with it, so that an agent you make later under the same name starts clean.
   What its routines did stays in their chats, and a routine you make later under the

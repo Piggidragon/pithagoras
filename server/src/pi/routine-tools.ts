@@ -283,6 +283,7 @@ export function routineTools(sessionId?: string) {
         const row = byName(p.routine ?? "");
         if (!row) return bad(`No routine called "${p.routine}"`);
         const after = await routineSupervisor.run(row, "manual");
+        if (!after) return bad(`"${row.name}" was deleted while it ran`);
         const output = (after.last_output ?? "").trim();
         return after.last_status === "ok"
           ? ok(output || "Ran, with no output.")

@@ -61,6 +61,12 @@ The `#abcd` prefix is what makes it an answer rather than a remark. It is
 matched only at the start of a message and only against a question still
 waiting, so a message that merely begins with a hash reaches the agent normally.
 
+An answer written without the id is just such a message: your agent does not know
+of the question, since nothing the person wrote is put into your conversation. So
+the portal adds a line to the reply to your next message, once for each question,
+saying which questions still wait and how to answer them. Only questions from the
+last day are named.
+
 ::: tip Buttons are the text
 A button's payload is exactly the message it stands for. Tapping **Approve
 once** sends `#abcd approve` down the same path as typing it, so nothing behaves

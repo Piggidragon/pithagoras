@@ -42,7 +42,7 @@ them. See [Projects](/guide/projects).
 | `PUT /api/projects/:name/instructions` | `{ text, mtime? }` → writes `AGENTS.md` whole; blank removes it. With `mtime`, a file that has changed since is not overwritten: 409. |
 | `GET /api/projects/:name/tools` | `{ tools, live, off, names }`, shaped like a conversation's list: every tool the portal has seen and whether it is on for chats in this project, with `defaultOn` the portal-wide default. `live` is always false |
 | `PUT /api/projects/:name/tools` | `{ off: string[] }` — the tools chats in this project start with; what is not named is on. Stored as the difference from the portal-wide default, and told to the running chats in the project. Answers `{ off, applied }` |
-| `DELETE /api/projects/:name` | Deletes its chats (with their conversation files) and its folder; 409 while one is running |
+| `DELETE /api/projects/:name` | Deletes its chats (with their conversation files) and its folder; 409 while one is running. The jobs the chats started are stopped (`jobsStopped`) |
 
 ## Sessions
 
@@ -404,8 +404,8 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | --- | --- |
 | `GET /api/agents` | `{ agents }`, each `{ id, name, home, first, initialised, chats, channels, orb, voice, heartbeat, unread }` |
 | `POST /api/agents` | `{ name, setup? }` — a new agent and its folder; `setup` takes the wizard's answers. A folder kept from a deleted agent of the same name is taken up again, and the files in it are not rewritten: `kept` in the answer names the ones that were left as they were. |
-| `PATCH /api/agents/:id` | `{ name }` — its folder stays where it is |
-| `DELETE /api/agents/:id` | Deletes it and its chats, and its folder with `?folder=delete`. Refused for the first agent, for one a channel talks as, and while one of its chats or routines is working. Its routines are switched off (`routinesSwitchedOff`), or with `?folder=delete` deleted (`routinesDeleted`); their runs are kept either way. |
+| `PATCH /api/agents/:id` | `{ name }` — its folder stays where it is, and records the new name in `.agent-name`, which is what makes an agent of that name take the folder up again once this one is deleted with it kept |
+| `DELETE /api/agents/:id` | Deletes it and its chats, and its folder with `?folder=delete`. Refused for the first agent, for one a channel talks as, and while one of its chats or routines is working. The jobs its chats started in its folder are stopped (`jobsStopped`). Its routines are switched off (`routinesSwitchedOff`), or with `?folder=delete` deleted (`routinesDeleted`); their runs are kept either way. |
 | `GET /api/agents/:id/setup` | Setup status and its editable files, each `{ name, exists, content, mtime }` |
 | `POST /api/agents/:id/setup` | Writes the identity files that are not there from the wizard's answers; the others are left, and `kept` names them |
 | `PUT /api/agents/:id/files/:name` | `{ content, mtime? }` — saves one of its files whole. With `mtime` (0 for a file that was not there), a file that has changed since is not overwritten: 409. A link is refused. |
@@ -466,7 +466,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `POST /api/routines` | Create a recurring or one-off routine. Its slug is its name's, or the next free one: not one whose runs are still kept after a routine was deleted, so that it does not continue that conversation. An explicit `slug` is taken as it is, and reconnects the routine to the runs that slug had. |
 | `PATCH /api/routines/:id` | Update a routine. |
 | `DELETE /api/routines/:id` | Delete a routine. |
-| `POST /api/routines/:id/run` | Start a run now. |
+| `POST /api/routines/:id/run` | Start a run now; it answers when the run ends. A routine deleted while it ran is answered 404. |
 | `POST /api/routines/preview` | The next three runs of a schedule, without saving it: `{ expression, runs }`. |
 | `GET /api/routines/:id/sessions` | List the routine's runs. |
 | `GET /api/routines/report-targets` | List available report destinations. |
