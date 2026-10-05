@@ -79,9 +79,8 @@ export function askQuestion(input: {
 
 /**
  * What the primary user is shown of a question beside its words: the action it
- * would allow, exactly as it would run, and how to answer. One text for the
- * question when it is put to them and for the reminder of it, so that an
- * approval is always one of something they have read.
+ * would allow, exactly as it would run, and how to answer, so that an approval
+ * is always one of something they have read.
  */
 export function offerOf(q: QuestionRow): string {
   if (!q.action) return `Reply with "#${q.id} <your answer>" and I will pass it back to them.`;
@@ -94,13 +93,6 @@ export function offerOf(q: QuestionRow): string {
 /** A question that could not be put to anybody: it waits for nobody, and nobody is asked to answer it. */
 export function dropQuestion(id: string): void {
   getDb().prepare("DELETE FROM questions WHERE id = ?").run(id);
-}
-
-/** The questions asked in the last day that nobody has answered, oldest first. */
-export function waitingQuestions(): QuestionRow[] {
-  return getDb()
-    .prepare("SELECT * FROM questions WHERE answered_at IS NULL AND asked_at > datetime('now', '-1 day') ORDER BY asked_at ASC, rowid ASC")
-    .all() as QuestionRow[];
 }
 
 export const getQuestion = (id: string): QuestionRow | undefined =>

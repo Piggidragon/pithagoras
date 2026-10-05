@@ -67,13 +67,16 @@ The `#abcd` prefix is what makes it an answer rather than a remark. It is
 matched only at the start of a message and only against a question still
 waiting, so a message that merely begins with a hash reaches the agent normally.
 
-An answer written without the id is just such a message: your agent does not know
-of the question, since nothing the person wrote is put into your conversation. So
-the portal adds a note to the reply to your next message, once for each question,
-with who asked, what they asked and the command an approval would run, so that
-you never answer one you have not read. Only questions from the last day are
-named. A question that could not be sent to you at all is dropped, and the one who
-asked is told so.
+An answer written without the id is just such a message: it goes to your agent
+like any other and answers nothing, so the person who asked keeps waiting. Your
+agent knows nothing of the question, since nothing the person wrote is put into
+your conversation. A question is shown to you where it was sent (the place
+[routine reports](/guide/routines) go), and nowhere else: the portal never
+repeats it in another conversation, which may be a group that guests and
+colleagues read. Answer it there, with its id. When that channel cannot be
+written to first, the question waits and goes out with the reply to your next
+message in it. A question that could not be sent to you at all is dropped, and the
+one who asked is told so.
 
 ::: tip Buttons are the text
 A button's payload is exactly the message it stands for. Tapping **Approve

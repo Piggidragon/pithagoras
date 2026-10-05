@@ -119,8 +119,8 @@ export function askPrimaryTool(sessionId: string) {
             false
           );
         } catch (e) {
-          // Nobody was told of it, so nothing is waiting for an answer: the reminder to the primary user would
-          // name it, and they would answer, or approve, what they never saw.
+          // Nobody was told of it, so nothing is waiting for an answer, and the id of a question nobody has seen
+          // is not one to leave answerable.
           dropQuestion(row.id);
           return fail(`Could not reach them: ${(e as Error).message}`);
         }

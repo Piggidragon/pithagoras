@@ -14,7 +14,7 @@ import { resolveChannelSession, scopeKey, unscopeKey } from "../agent.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { sessions, CommandFailed, stripThinkingMarkers } from "../session-manager.js";
 import { ruleApplies, taintSession } from "../pi/guard.js";
-import { offerOf, readAnswer, recordAnswer, waitingQuestions, type QuestionRow } from "../questions.js";
+import { readAnswer, recordAnswer, type QuestionRow } from "../questions.js";
 import { recordApproval } from "../approvals.js";
 import {
   getPerson,
@@ -536,7 +536,6 @@ class ChannelSupervisor {
         const { question, answer, approves, always } = pending;
 
         const asking = findChannelSession(scopeKey(question.channel_slug, question.channel_key));
-        recordApproval(question, asking, approves, always);
         let how: "sent" | "queued";
         try {
           // Not a note either: the primary user's own words are not somebody else's, and the resumed
@@ -553,8 +552,13 @@ class ChannelSupervisor {
             false
           );
         } catch (e) {
+          // Nothing was written down, and the question is still open: answered again, it is passed on once it can be.
           return `Could not get that back to ${question.person_name}: ${(e as Error).message}`;
         }
+        // Only once the answer is on its way, so that an approval is never left standing for a refusal the
+        // primary user was told of. The relay is awaited and the grant follows it at once, before the person
+        // it is for can have read the answer.
+        recordApproval(question, asking, approves, always);
         recordAudit({
           kind: "answered",
           tool: question.action_tool || "",
@@ -757,30 +761,7 @@ class ChannelSupervisor {
     // A channel with no way to relay mid-run had nowhere to put these, so they
     // ride out with the answer instead.
     const clean = stripThinkingMarkers(reply ?? "");
-    const said = owed.length && !packageReply ? [...owed, clean].join("\n\n") : clean;
-    // A message of the primary user's that did not start with a waiting question's id was no answer to it, and their
-    // agent knows nothing of the question (what the asker wrote is no note, see ask_primary). So the portal says it
-    // itself, after the agent's words and once for each question: they would otherwise answer without the id, and
-    // the one who asked would wait for good.
-    const reminder = person?.role === "primary" ? this.remindOfQuestions() : "";
-    return reminder ? (said ? `${said}\n\n${reminder}` : reminder) : said;
-  }
-
-  /** The questions told about already, by id: for this run of the portal, which is enough to not say it twice. */
-  private reminded = new Set<string>();
-
-  /**
-   * What to tell the primary user of the questions that wait for them and that they have not been told of.
-   * Each with what it asks and what an approval would run, as the question itself reads: one that is still
-   * queued for the conversation it was meant for has not been shown to them, and an id alone would have them
-   * answer, or approve, what they have not seen. This is the portal's own reply, not a note: it taints nothing.
-   */
-  private remindOfQuestions(): string {
-    const waiting = waitingQuestions().filter((q) => !this.reminded.has(q.id));
-    if (!waiting.length) return "";
-    for (const q of waiting) this.reminded.add(q.id);
-    const asked = waiting.map((q) => `#${q.id} from ${q.person_name} (${q.person_key}) asked:\n\n${q.question}\n\n${offerOf(q)}`);
-    return `Still waiting for your answer:\n\n${asked.join("\n\n")}`;
+    return owed.length && !packageReply ? [...owed, clean].join("\n\n") : clean;
   }
 
   /** One line for the boot log. */

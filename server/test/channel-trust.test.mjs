@@ -19,7 +19,7 @@ const { CommandFailed, sessions } = await import("../dist/session-manager.js");
 const { guardExtension } = await import("../dist/pi/guard.js");
 const { askPrimaryTool } = await import("../dist/pi/ask-primary.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { askQuestion, getQuestion, recordAnswer } = await import("../dist/questions.js");
+const { askQuestion, getQuestion } = await import("../dist/questions.js");
 const { FRAMING_TAGS, neutralise } = await import("../dist/channels/framing.js");
 const { cleanName, getPerson, hasPrimary, isOnlyPrimary, lower, personKey, rename, seen, setRole } = await import("../dist/people.js");
 
@@ -217,39 +217,26 @@ test("a guest's question to the primary user reaches their chat, and is not a no
   }
 });
 
-test("an answer the primary user wrote without the question's id is no answer, and they are told once what still waits and how to give it", async () => {
+test("an answer the primary user wrote without the question's id is no answer, and the portal says nothing of a waiting question in any conversation, a group included", async () => {
   useStubAsk();
   roster();
-  const ask = (question) =>
-    askQuestion({ sessionId: "gus-chat", personKey: "tg:gus", personName: "Gus", channelSlug: "tg", channelKey: "chat:gus", question });
-  const lunch = ask("Is lunch at noon on Friday?");
-  // One from days ago, which nobody is waiting for any more.
-  const stale = ask("Was the old plan fine?");
-  getDb().prepare("UPDATE questions SET asked_at = datetime('now', '-2 days') WHERE id = ?").run(stale.id);
-  // Not told to the people who cannot answer it: a colleague writes while there is something to tell, so that a reminder
-  // for everybody who writes would show.
-  assert.equal(await say("kim", "hi", "chat:kim"), "ok");
-  assert.equal(await say("gus", "hi", "chat:gus"), "ok");
-  const first = await say("owner", "Yes, lunch is at noon.", "report");
-  assert.match(first, new RegExp(`^ok\\n\\nStill waiting for your answer:\\n\\n#${lunch.id} from Gus \\(tg:gus\\) asked:\\n\\nIs lunch at noon on Friday\\?\\n\\nReply with "#${lunch.id} <your answer>"`));
-  assert.equal(getQuestion(lunch.id).answered_at, null, "it was not taken for the answer");
-  assert.doesNotMatch(turns[0].message, /Gus|Friday|#\w{4}\b/, "and the agent of that chat was handed nothing of the question");
-
-  // Told once for a question: the next message is not nagged.
+  const lunch = askQuestion({ sessionId: "gus-chat", personKey: "tg:gus", personName: "Gus", channelSlug: "tg", channelKey: "chat:gus", question: "Is lunch at noon on Friday?", actionTool: "bash", action: "cat lunch/menu.txt" });
+  // A group where a guest has spoken, and the chat the question went to: whoever reads the reply to the owner there reads it.
+  assert.equal(await say("kim", "hi all", "group"), "ok");
+  assert.equal(await say("gus", "hi", "group"), "ok");
+  assert.equal(await say("owner", "Yes, lunch is at noon.", "group"), "ok", "nothing of the question, who asked it or what it would run is said into a conversation others read");
+  assert.equal(await say("owner", "Yes, lunch is at noon.", "report"), "ok", "nor into the chat it was sent to: it was shown there");
   assert.equal(await say("owner", "and another thing", "report"), "ok");
-  // A new question is told of by itself, and one that was answered is not waited for.
-  const car = ask("Is the car free?");
-  const gone = ask("Was it a long walk?");
-  recordAnswer(gone.id, "no");
-  const next = await say("owner", "hello again", "report");
-  assert.match(next, new RegExp(`Still waiting for your answer:\\n\\n#${car.id} from Gus`));
-  assert.doesNotMatch(next, new RegExp(lunch.id + "|" + gone.id + "|" + stale.id));
-  assert.doesNotMatch(first, new RegExp(stale.id), "only the last day's questions are named");
+  assert.equal(getQuestion(lunch.id).answered_at, null, "it was not taken for the answer: only the id does that");
+  for (const turn of turns.filter((t) => t.speaker === "tg:owner")) {
+    assert.doesNotMatch(turn.message, /Gus|Friday|menu|#\w{4}\b/, "and the agent was handed nothing of it: what the asker wrote is no note");
+  }
 });
 
-test("a question that did not reach the primary user is not left waiting, and one that waits for them to speak is named with what it asks", async () => {
+test("a question that did not reach the primary user is not left waiting, and one that waits for them to speak is shown in the chat it was sent to and nowhere else", async () => {
   roster();
   createSession({ id: "gus-chat", title: "Gus", workspace: home, executor: "host", channel_slug: "tg", channel_key: "tg:chat:gus" });
+  createSession({ id: "owners-chat", title: "Sam", workspace: home, executor: "host", channel_slug: "tg", channel_key: "tg:report" });
   getDb().prepare("UPDATE sessions SET last_person_key = 'tg:gus' WHERE id = 'gus-chat'").run();
   setDefaultReportTo({ channel: "tg", target: "report" });
   let down = true;
@@ -273,18 +260,18 @@ test("a question that did not reach the primary user is not left waiting, and on
     // The asker is told it could not be passed on, and the primary user was never shown it: nothing is left to answer.
     await assert.rejects(tool.execute("call", { question: "May I run the deploy?", actionTool: "bash", action: "./deploy.sh" }), /Could not reach them: Telegram answered 502/);
     assert.deepEqual(waiting(), [], "a question nobody was told of waits for nobody");
-    assert.doesNotMatch(await say("owner", "hello", "report"), /Still waiting/, "and is not named, for them to answer without having seen it");
 
-    // One that waits for them to write first is named wherever they write first: with its words and what it would run.
+    // One that waits for them to write first comes with the reply to their next message in that chat, as it is, and is said nowhere else.
     down = false;
     channelSupervisor.running.get("tg-fake").send = undefined;
     await tool.execute("call", { question: "May I run the deploy?", actionTool: "bash", action: "./deploy.sh" });
     const [queued] = waiting();
-    const named = await say("owner", "hello from the other chat", "chat:other");
-    assert.match(named, new RegExp(`#${queued.id} from Gus \\(tg:gus\\)`));
-    assert.match(named, /May I run the deploy\?/, "what was asked");
-    assert.match(named, /It wants to run, exactly once:\n\n {4}\.\/deploy\.sh\n/, "what approving would run, exactly");
-    assert.match(named, new RegExp(`"#${queued.id} approve"`), "and how to say yes to that");
+    assert.equal(await say("owner", "hello from the other chat", "chat:other"), "ok", "not in another conversation");
+    const replies = [];
+    await say("owner", "hello", "report", { onReply: (text) => replies.push(text) });
+    const shown = replies.join("\n");
+    assert.match(shown, new RegExp(`#${queued.id} approve`), "there, with how to say yes to what it asks");
+    assert.match(shown, /It wants to run, exactly once:\n\n {4}\.\/deploy\.sh\n/, "and what approving would run, exactly");
   } finally {
     channelSupervisor.running.delete("tg-fake");
     setDefaultReportTo(null);
@@ -568,6 +555,49 @@ test("an approval makes the action run in the conversation that asked: neither t
     await settle();
     assert.equal(notes(), 0);
     assert.match(guard.tool_call({ toolName: "bash", input: { command: "git status" } }).reason, /not your primary user/);
+  } finally {
+    channelSupervisor.running.delete("tg-fake");
+  }
+});
+
+test("an approval is written down once the answer is on its way: when it cannot be passed on, no grant or rule stands, and the question can be answered again", async () => {
+  useStubAsk();
+  roster();
+  await say("kim", "hi", "kim");
+  const asking = findChannelSession("tg:kim");
+  const action = "git push origin main";
+  let down = true;
+  const spoken = [];
+  channelSupervisor.running.set("tg-fake", {
+    slug: "tg",
+    state: "running",
+    since: "",
+    signature: "",
+    controller: new AbortController(),
+    send: async (target, text) => {
+      if (down) throw new Error("Telegram answered 502");
+      spoken.push({ target, text });
+    },
+  });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const grants = () => getDb().prepare("SELECT COUNT(*) AS n FROM grants").get().n;
+  try {
+    const question = askQuestion({ sessionId: asking.id, personKey: "tg:kim", personName: "Kim", channelSlug: "tg", channelKey: "kim", question: "May I publish?", actionTool: "bash", action });
+    assert.match(await say("owner", `#${question.id} always`, "owner"), /^Could not get that back to Kim: Telegram answered 502/);
+    await settle();
+    assert.deepEqual(listToolRules(), [], "no standing rule for an answer that was not passed on");
+    assert.equal(grants(), 0, "and no one-off approval");
+    assert.equal(getQuestion(question.id).answered_at, null, "the question is still open");
+    assert.equal(audit("answered").length, 0);
+
+    // Then they decide against it: nothing of the first answer is left behind.
+    down = false;
+    assert.match(await say("owner", `#${question.id} no`, "owner"), /^Passed on to Kim\./);
+    await settle();
+    assert.deepEqual(listToolRules(), []);
+    assert.equal(grants(), 0);
+    assert.ok(getQuestion(question.id).answered_at);
+    assert.match(spoken[0].text, /^Sam says: no/);
   } finally {
     channelSupervisor.running.delete("tg-fake");
   }
