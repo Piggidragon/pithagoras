@@ -237,21 +237,23 @@ function PersonDetail({
   const [saved, flashSaved] = useFlash();
 
   // The fields are filled from the person for another person, or when nothing typed
-  // would be lost. This form's own save sets them from what the server kept (it keeps
-  // the name and the notes trimmed, so what was typed is not what is stored), which
-  // the reload that follows then finds as they are: there is no change for an effect
-  // to wait for when the trimmed text is what was stored before.
-  const filled = useRef(person.key);
+  // would be lost: when they still say what the person said before. This form's own
+  // save sets them from what the server kept (it keeps the name and the notes trimmed,
+  // so what was typed is not what is stored), which the reload that follows then finds
+  // as they are: there is no change for an effect to wait for when the trimmed text
+  // is what was stored before.
+  const differs = (from: Person) => name !== from.name || role !== from.role || notes !== from.notes;
+  const dirty = differs(person);
+  const filled = useRef(person);
   useEffect(() => {
     const was = filled.current;
-    filled.current = person.key;
-    if (person.key === was && dirty) return;
+    if (person.key === was.key && differs(was) && dirty) return;
+    filled.current = person;
     setName(person.name);
     setRole(person.role);
     setNotes(person.notes);
   }, [person.key, person.name, person.role, person.notes]);
 
-  const dirty = name !== person.name || role !== person.role || notes !== person.notes;
   useUnsavedDraft(dirty);
   /** Said when this would leave nobody primary, which opens every channel to anybody. */
   const noPrimaryLeft = {
@@ -344,7 +346,7 @@ function PersonDetail({
               act(async () => {
                 const { person: stored } = await api.updatePerson(person.key, { name, role, notes, force: leaving || undefined });
                 // Not for a person the form has moved on from while this was on its way.
-                if (filled.current === stored.key) {
+                if (filled.current.key === stored.key) {
                   setName(stored.name);
                   setRole(stored.role);
                   setNotes(stored.notes);

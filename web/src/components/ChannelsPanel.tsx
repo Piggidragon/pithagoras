@@ -421,15 +421,29 @@ function ChannelDetail({
   const [busy, setBusy] = useState(false);
   const [saved, flashSaved] = useFlash();
 
+  // Whether the fields say something other than `from` does: a draft, against what they were filled from.
+  const differs = (from: Channel) =>
+    name !== from.name ||
+    slug !== from.slug ||
+    relayProgress !== from.relayProgress ||
+    relayTools !== from.relayTools ||
+    agentId !== from.agentId ||
+    instructions !== (from.instructions ?? "") ||
+    kind?.fields.some((f) => (values[f.key] ?? "") !== (from.config[f.key] ?? ""));
+  const dirty = differs(ch);
+  useUnsavedDraft(!!dirty);
+
   // What the form was last filled from: the fields are filled again from the channel
-  // for another channel, after this form's own save, or when nothing typed would be lost.
-  // A change of `updated_at` that is no save of this form (the enable switch saves at
-  // once) must not take a draft away.
-  const filled = useRef({ id: ch.id, own: false });
+  // for another channel, after this form's own save, or when nothing typed would be lost,
+  // that is, when they still say what the channel said before. A change of `updated_at`
+  // that is no save of this form (the enable switch saves at once, and another admin or
+  // tab can change a channel) must not take a draft away, and must not be missed by a
+  // form that has none.
+  const filled = useRef({ id: ch.id, own: false, from: ch });
   useEffect(() => {
     const was = filled.current;
-    filled.current = { id: ch.id, own: false };
-    if (ch.id === was.id && !was.own && dirty) return;
+    if (ch.id === was.id && !was.own && differs(was.from) && dirty) return;
+    filled.current = { id: ch.id, own: false, from: ch };
     setName(ch.name);
     setValues({ ...ch.config });
     setInstructions(ch.instructions ?? "");
@@ -442,16 +456,6 @@ function ChannelDetail({
   useEffect(() => {
     api.agents().then((r) => setAgents(r.agents), () => setAgents([]));
   }, []);
-
-  const dirty =
-    name !== ch.name ||
-    slug !== ch.slug ||
-    relayProgress !== ch.relayProgress ||
-    relayTools !== ch.relayTools ||
-    agentId !== ch.agentId ||
-    instructions !== (ch.instructions ?? "") ||
-    kind?.fields.some((f) => (values[f.key] ?? "") !== (ch.config[f.key] ?? ""));
-  useUnsavedDraft(!!dirty);
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);

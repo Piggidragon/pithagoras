@@ -604,15 +604,30 @@ function RoutineDetail({
   const [saved, flashSaved] = useFlash();
   const [runs, setRuns] = useState<{ id: string; title: string }[]>([]);
 
+  // Whether the fields say something other than `from` does: a draft, against what they were filled from.
+  const differs = (from: Routine) =>
+    name !== from.name ||
+    mode !== from.mode ||
+    (mode === "repeats" ? schedule !== from.schedule : toLocalInput(from.runAt) !== runAt) ||
+    instructions !== from.instructions ||
+    fresh !== from.freshSession ||
+    guard !== from.guard ||
+    browser !== from.browser ||
+    workspace !== (from.workspace ?? "") ||
+    report !== reportValue(from);
+  const dirty = differs(r);
+
   // What the form was last filled from: the fields are filled again from the routine
-  // for another routine, after this form's own save, or when nothing typed would be lost.
-  // A change of the routine's `updatedAt` that is no save of this form (the enable
-  // switch saves at once) must not take a draft away.
-  const filled = useRef({ id: r.id, own: false });
+  // for another routine, after this form's own save, or when nothing typed would be lost,
+  // that is, when they still say what the routine said before. A change of the routine's
+  // `updatedAt` that is no save of this form (the enable switch saves at once, and the
+  // agent can change a routine) must not take a draft away, and must not be missed
+  // by a form that has none.
+  const filled = useRef({ id: r.id, own: false, from: r });
   useEffect(() => {
     const was = filled.current;
-    filled.current = { id: r.id, own: false };
-    if (r.id === was.id && !was.own && dirty) return;
+    if (r.id === was.id && !was.own && differs(was.from) && dirty) return;
+    filled.current = { id: r.id, own: false, from: r };
     setName(r.name);
     setMode(r.mode);
     setSchedule(r.schedule || "0 9 * * *");
@@ -641,17 +656,6 @@ function RoutineDetail({
       .then((x) => setRuns(x.sessions.map((s) => ({ id: s.id, title: s.title }))))
       .catch(() => {});
   }, [r.id, r.lastRun]);
-
-  const dirty =
-    name !== r.name ||
-    mode !== r.mode ||
-    (mode === "repeats" ? schedule !== r.schedule : toLocalInput(r.runAt) !== runAt) ||
-    instructions !== r.instructions ||
-    fresh !== r.freshSession ||
-    guard !== r.guard ||
-    browser !== r.browser ||
-    workspace !== (r.workspace ?? "") ||
-    report !== reportValue(r);
 
   const act = async (which: "save" | "run", fn: () => Promise<unknown>) => {
     setBusy(which);

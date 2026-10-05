@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
 
-async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string } = {}) {
+async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string; /** A change to the routine that is made on the server, as the agent's routine_update does: the next list has it. */ server?: { next?: Record<string, unknown> } } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
@@ -18,7 +18,11 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (p === '/api/sessions') return { sessions: [session, other], executor: 'host' };
     if (p === '/api/sessions/s1' && method === 'PATCH' && opts.renameFails) return reply(500, { error: 'disk full' });
     if (p === '/api/sessions/s1' && method === 'PATCH') { session.title = body.title; return session; }
-    if (p === '/api/routines' && method === 'GET') return { routines: [routine] };
+    if (p === '/api/routines' && method === 'GET') {
+      if (opts.server?.next) Object.assign(routine, opts.server.next);
+      if (opts.server) opts.server.next = undefined;
+      return { routines: [routine] };
+    }
     if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
     if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: String(Date.now()) }); return routine; }
     if (p === '/api/routines/r1/sessions') return { sessions: [] };
@@ -233,6 +237,32 @@ test('switching a routine on or off does not take back what was typed in it and 
   expect(sent[1].body.instructions).toBe('Build it, then test it');
   // Saved, the form is the routine again.
   await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeDisabled();
+});
+
+test('a routine that the server changed while its form was open is shown as it is now, unless something was typed in it', async ({ page }) => {
+  const server: { next?: Record<string, unknown> } = {};
+  const sent = await portal(page, { server });
+  await page.clock.install();
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  const instructions = page.locator('textarea').first();
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  await expect(instructions).toHaveValue('Build it');
+  await expect(save).toBeDisabled();
+
+  // Nothing typed: the agent's routine_update rewrites it, and the poll brings it. The form takes it and has nothing to save.
+  server.next = { instructions: 'Build it, then deploy it to staging', updatedAt: '2' };
+  await page.clock.runFor(6000);
+  await expect(instructions).toHaveValue('Build it, then deploy it to staging');
+  await expect(save).toBeDisabled();
+
+  // Something typed: a change on the server does not take it back.
+  await instructions.fill('Build it, then test it');
+  server.next = { instructions: 'Build it, then deploy it to production', updatedAt: '3' };
+  await page.clock.runFor(6000);
+  await expect(instructions).toHaveValue('Build it, then test it');
+  await expect(save).toBeEnabled();
+  expect(sent.filter((s) => s.method === 'PATCH')).toEqual([]);
 });
 
 test('a save of a routine that the server refuses says so inside the routine, where it was asked for', async ({ page }) => {

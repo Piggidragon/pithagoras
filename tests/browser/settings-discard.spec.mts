@@ -85,6 +85,36 @@ test("Escape over a person's notes that were typed in asks first", async ({ page
   await asksBeforeClosing(page, notes, 'Reviews the pull requests.');
 });
 
+test("a person that a channel renamed while their page was open is shown as they are now, unless something was typed in it", async ({ page }) => {
+  const kim = { key: 'tg:kim', name: 'Kim', role: 'colleague', notes: '', first_seen: '', last_seen: null, announced_at: null, renamed: 0 };
+  let live = kim;
+  await portal(page, { '/api/tool-rules': { rules: [] } }, (ask) => {
+    if (ask.path === '/api/people') return { people: [live] };
+    if (ask.path === '/api/tool-rules' && ask.method === 'POST') return { rules: [] };
+  });
+  await page.goto('/settings/people');
+  await settings(page).getByRole('button', { name: /Kim/ }).click();
+  const notes = settings(page).getByPlaceholder(/Their role, what they work on/);
+  // Their notes changed on the server, and the page reloads the people when a rule is added.
+  live = { ...kim, notes: 'Reviews the pull requests.' };
+  await settings(page).getByRole('textbox', { name: 'Pattern' }).fill('ls*');
+  await settings(page).getByRole('button', { name: 'Allow' }).click();
+  await expect(notes).toHaveValue('Reviews the pull requests.');
+  // Nothing of theirs was typed in: no question on the way out.
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+
+  // Something typed: the next reload does not take it back.
+  await page.goto('/settings/people');
+  await settings(page).getByRole('button', { name: /Kim/ }).click();
+  await notes.fill('Plays the cello.');
+  live = { ...kim, notes: 'Reviews the pull requests and the plans.' };
+  await settings(page).getByRole('textbox', { name: 'Pattern' }).fill('ls*');
+  await settings(page).getByRole('button', { name: 'Allow' }).click();
+  await expect(settings(page).getByRole('textbox', { name: 'Pattern' })).toHaveValue('');
+  await expect(notes).toHaveValue('Plays the cello.');
+});
+
 const CHANNEL = {
   id: 'c1', slug: 'ops', kind: 'bot', name: 'Ops bot', enabled: true, config: {}, secretsSet: [], instructions: '', relayProgress: true, relayTools: false,
   agentId: 'home', sessionCount: 0, state: 'running', log: [], created_at: '', updated_at: '1',
@@ -112,6 +142,32 @@ test("Escape over a channel's settings that were changed, and over a channel bei
   const added = settings(page).getByRole('textbox', { name: 'Name', exact: true });
   await added.fill('A bot of mine');
   await asksBeforeClosing(page, added, 'A bot of mine');
+});
+
+test("a channel that the server changed while its page was open is shown as it is now, unless something was typed in it", async ({ page }) => {
+  let live = CHANNEL;
+  await portal(page, CHANNELS, (ask) => (ask.path === '/api/channels' ? { ...CHANNELS['/api/channels'], channels: [live] } : undefined));
+  await page.clock.install();
+  await page.goto('/settings/channels');
+  await settings(page).getByRole('button', { name: /Ops bot/ }).click();
+  const instructions = settings(page).getByRole('textbox', { name: 'Instructions' });
+  await expect(instructions).toHaveValue('');
+
+  // Nothing typed: changed in another tab, and the poll brings it. The page has nothing to discard.
+  live = { ...CHANNEL, instructions: 'Answer in German.', updated_at: '2' };
+  await page.clock.runFor(5000);
+  await expect(instructions).toHaveValue('Answer in German.');
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+
+  // Something typed: the next change does not take it back.
+  await page.goto('/settings/channels');
+  await settings(page).getByRole('button', { name: /Ops bot/ }).click();
+  await instructions.fill('Answer in French.');
+  live = { ...CHANNEL, instructions: 'Answer in Dutch.', updated_at: '3' };
+  await page.clock.runFor(5000);
+  await expect(instructions).toHaveValue('Answer in French.');
+  await asksBeforeClosing(page, instructions, 'Answer in French.');
 });
 
 test('Escape over a new skill that was begun asks first', async ({ page }) => {
