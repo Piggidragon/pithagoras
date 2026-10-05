@@ -91,3 +91,53 @@ test("an adapter cache that is missing or not readable does not fail the removal
   assert.equal((await del("jira")).status, 200);
   assert.ok(!names().includes("jira_search"));
 });
+
+const adapter = (name) => ({ name, source: "pi-mcp-adapter", package: "npm:pi-mcp-adapter@2.18.0" });
+
+test("a chat that still has the removed server loaded does not bring its tools back", async () => {
+  seed();
+  assert.equal((await del("jira")).status, 200);
+  const { PORTAL_BROWSER_TOOLS } = await import("../dist/tool-policy.js");
+  // What the chat's registry reports when its tool switches are opened.
+  db.rememberTools([
+    adapter("jira_search"),
+    adapter("notes_read"),
+    adapter("mcp"),
+    adapter("mcpScript"),
+    { name: "jira_other", source: "pi-web-access", package: "npm:pi-web-access" },
+    ...PORTAL_BROWSER_TOOLS.map((name) => ({ name, source: "browser", package: null })),
+  ]);
+  const seen = names();
+  assert.ok(!seen.includes("jira_search"), "the removed server's tool is not remembered again");
+  for (const kept of ["notes_read", "mcp", "mcpScript", "jira_other", ...PORTAL_BROWSER_TOOLS]) assert.ok(seen.includes(kept), kept);
+});
+
+test("with an mcp.json that cannot be read nothing is taken for a removed server", () => {
+  seed();
+  writeFileSync(mcpFile, "{ broken");
+  db.rememberTools([adapter("tracker_open")]);
+  assert.ok(names().includes("tracker_open"));
+});
+
+test("a server with a hyphen in its name loses its tools: the adapter writes the name with underscores", async () => {
+  write({ "brave-search": { command: "brave" }, brave: { command: "b" }, jira: { command: "jira-mcp" } });
+  db.putSetting("tools_seen", "[]");
+  db.rememberTools([adapter("brave_search_web"), adapter("brave_news"), adapter("jira_search")]);
+  writeFileSync(cacheFile, JSON.stringify({ version: 1, servers: { "brave-search": { tools: [] }, brave: { tools: [] }, jira: { tools: [] } } }));
+  assert.equal((await del("brave-search")).status, 200);
+  assert.deepEqual(names(), ["brave_news", "jira_search"], "the shorter name's tool is not the hyphenated one's");
+  assert.deepEqual(Object.keys(cache().servers).sort(), ["brave", "jira"]);
+});
+
+test("another package's tool is kept when a removed server's name starts it", async () => {
+  write({ web: { command: "web-mcp" }, jira: { command: "jira-mcp" } });
+  db.putSetting("tools_seen", "[]");
+  db.rememberTools([adapter("web_fetch_page"), adapter("jira_search")]);
+  // Reported by a project's own settings, which is no package of the user's, and by a package.
+  db.putSetting(
+    "tools_seen",
+    JSON.stringify([...db.knownTools(), { name: "web_search", source: "pi-web-access", package: "npm:pi-web-access" }, { name: "web_code", source: "local-folder", package: null }]),
+  );
+  assert.equal((await del("web")).status, 200);
+  assert.deepEqual(names(), ["jira_search", "web_code", "web_search"]);
+});

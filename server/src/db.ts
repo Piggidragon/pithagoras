@@ -4,7 +4,7 @@ import { packageIndex, packageKey, packageLabel, toolAvailability } from "./exte
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
 import { PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
-import { browserServers, dropMcpCache, mcpServerNames, serversAndBrowsers } from "./api/mcp.js";
+import { browserServers, dropMcpCache, mcpServerNames, readMcpFile, serversAndBrowsers } from "./api/mcp.js";
 import { mkdirSync, realpathSync } from "node:fs";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
@@ -2263,15 +2263,25 @@ export function forgetPackageTools(spec: string): void {
 export function mcpServersRemoved(before: string[], after: string[]): void {
   const removed = before.filter((name) => !after.includes(name));
   if (!removed.length) return;
-  const own: readonly string[] = [...PORTAL_BROWSER_TOOLS, "mcp", "mcpScript"];
   const all = knownTools();
   const kept = all.filter((t) => {
-    if (own.includes(t.name)) return true;
+    // A server's name is also the start of other tools' names: `web` and pi-web-access's `web_search`.
+    if (!adapterTool(t) || noServerOf(t.name)) return true;
     const server = mcpServerOf(t.name, before);
     return server === undefined || !removed.includes(server);
   });
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
   dropMcpCache(removed);
+}
+
+const ADAPTER_LABEL = "pi-mcp-adapter";
+
+/** The tools that carry no server's name: the adapter's own and the portal's browser tools, which a server's name can start without them being its. */
+const noServerOf = (name: string): boolean => (PORTAL_BROWSER_TOOLS as readonly string[]).includes(name) || name === "mcp" || name === "mcpScript";
+
+/** Does the MCP adapter register this tool? By its package where it is recorded, by the label it is filed under where it is not. */
+function adapterTool(t: Pick<KnownTool, "source" | "package">): boolean {
+  return typeof t.package === "string" ? packageLabel(t.package) === ADAPTER_LABEL : t.source === ADAPTER_LABEL;
 }
 
 /**
@@ -2302,7 +2312,18 @@ export function rememberTools(reported: KnownTool[]): void {
   // would write its tools straight back; a package no longer listed is not
   // remembered. One switched off still is, for when it comes back.
   const listed = listedPackages();
-  const tools = reported.filter((t) => typeof t.package !== "string" || !listed || listed.has(packageKey(t.package)));
+  // Likewise a chat that is still running with an MCP server that has since been
+  // removed: its tools are the adapter's, and no server configured is theirs.
+  // The adapter's own tools and the portal's browser tools are no server's.
+  const configured = readMcpFile();
+  const noServer = (t: KnownTool) =>
+    !configured.error &&
+    adapterTool(t) &&
+    !noServerOf(t.name) &&
+    mcpServerOf(t.name, Object.keys(configured.config.mcpServers)) === undefined;
+  const tools = reported.filter(
+    (t) => (typeof t.package !== "string" || !listed || listed.has(packageKey(t.package))) && !noServer(t),
+  );
   if (!tools.length) return;
   const merged = new Map(knownTools().map((t) => [t.name, t]));
   const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));
