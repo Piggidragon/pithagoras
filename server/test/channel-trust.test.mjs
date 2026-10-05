@@ -224,7 +224,7 @@ test("an answer the primary user wrote without the question's id is no answer, a
     askQuestion({ sessionId: "gus-chat", personKey: "tg:gus", personName: "Gus", channelSlug: "tg", channelKey: "chat:gus", question });
   const lunch = ask("Is lunch at noon on Friday?");
   const first = await say("owner", "Yes, lunch is at noon.", "report");
-  assert.match(first, new RegExp(`^ok\\n\\nStill waiting for your answer: #${lunch.id} from Gus\\. Start a message with the id`));
+  assert.match(first, new RegExp(`^ok\\n\\nStill waiting for your answer:\\n\\n#${lunch.id} from Gus \\(tg:gus\\) asked:\\n\\nIs lunch at noon on Friday\\?\\n\\nReply with "#${lunch.id} <your answer>"`));
   assert.equal(getQuestion(lunch.id).answered_at, null, "it was not taken for the answer");
   assert.doesNotMatch(turns[0].message, /Gus|Friday|#\w{4}\b/, "and the agent of that chat was handed nothing of the question");
 
@@ -235,10 +235,54 @@ test("an answer the primary user wrote without the question's id is no answer, a
   const gone = ask("Was it a long walk?");
   recordAnswer(gone.id, "no");
   const next = await say("owner", "hello again", "report");
-  assert.match(next, new RegExp(`Still waiting for your answer: #${car.id} from Gus\\.`));
+  assert.match(next, new RegExp(`Still waiting for your answer:\\n\\n#${car.id} from Gus`));
   assert.doesNotMatch(next, new RegExp(lunch.id + "|" + gone.id));
   // Not told to the people who cannot answer it.
   assert.equal(await say("kim", "hi", "chat:kim"), "ok");
+});
+
+test("a question that did not reach the primary user is not left waiting, and one that waits for them to speak is named with what it asks", async () => {
+  roster();
+  createSession({ id: "gus-chat", title: "Gus", workspace: home, executor: "host", channel_slug: "tg", channel_key: "tg:chat:gus" });
+  getDb().prepare("UPDATE sessions SET last_person_key = 'tg:gus' WHERE id = 'gus-chat'").run();
+  setDefaultReportTo({ channel: "tg", target: "report" });
+  let down = true;
+  const spoken = [];
+  channelSupervisor.running.set("tg-fake", {
+    slug: "tg",
+    state: "running",
+    since: "",
+    signature: "",
+    controller: new AbortController(),
+    send: async (target, text) => {
+      if (down) throw new Error("Telegram answered 502");
+      spoken.push({ target, text });
+    },
+  });
+  useStubAsk();
+  let tool;
+  askPrimaryTool("gus-chat")({ registerTool: (t) => (tool = t) });
+  const waiting = () => getDb().prepare("SELECT id FROM questions WHERE answered_at IS NULL").all();
+  try {
+    // The asker is told it could not be passed on, and the primary user was never shown it: nothing is left to answer.
+    await assert.rejects(tool.execute("call", { question: "May I run the deploy?", actionTool: "bash", action: "./deploy.sh" }), /Could not reach them: Telegram answered 502/);
+    assert.deepEqual(waiting(), [], "a question nobody was told of waits for nobody");
+    assert.doesNotMatch(await say("owner", "hello", "report"), /Still waiting/, "and is not named, for them to answer without having seen it");
+
+    // One that waits for them to write first is named wherever they write first: with its words and what it would run.
+    down = false;
+    channelSupervisor.running.get("tg-fake").send = undefined;
+    await tool.execute("call", { question: "May I run the deploy?", actionTool: "bash", action: "./deploy.sh" });
+    const [queued] = waiting();
+    const named = await say("owner", "hello from the other chat", "chat:other");
+    assert.match(named, new RegExp(`#${queued.id} from Gus \\(tg:gus\\)`));
+    assert.match(named, /May I run the deploy\?/, "what was asked");
+    assert.match(named, /It wants to run, exactly once:\n\n {4}\.\/deploy\.sh\n/, "what approving would run, exactly");
+    assert.match(named, new RegExp(`"#${queued.id} approve"`), "and how to say yes to that");
+  } finally {
+    channelSupervisor.running.delete("tg-fake");
+    setDefaultReportTo(null);
+  }
 });
 
 test("a question is not put to the primary user for an approval that could not make the action run", async () => {

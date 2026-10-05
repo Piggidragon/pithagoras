@@ -591,8 +591,8 @@ test("a job still belongs to the chat that started it after the host has slept",
 
 test("a chat used while its jobs were being looked for is not let go", { skip: process.platform !== "linux" }, async () => {
   const { id, pi } = await idleFor(60);
-  const was = sessions.jobsRunning;
-  sessions.jobsRunning = async (asked) => {
+  const was = sessions.holdsJobs;
+  sessions.holdsJobs = async (asked) => {
     sessions.touch(asked);
     return false;
   };
@@ -600,7 +600,7 @@ test("a chat used while its jobs were being looked for is not let go", { skip: p
     assert.deepEqual(await sessions.reapIdle(), [], "somebody wrote to it meanwhile");
     assert.equal(pi.disposed, false);
   } finally {
-    sessions.jobsRunning = was;
+    sessions.holdsJobs = was;
   }
   sessions.activity.set(id, Date.now() - 60 * 60_000);
   assert.deepEqual(await sessions.reapIdle(), [id]);

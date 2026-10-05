@@ -218,14 +218,19 @@ class RoutineSupervisor {
       this.running.delete(row.slug);
       // A clean session is never used again: its pi would otherwise be held until
       // the portal stops, one more with every run. Its transcript stays. Not while
-      // a subagent it started is still working: the idle reaper takes it then.
+      // a subagent it started is still working, nor a job it started (a build, or a
+      // dev server, that pi-background-tasks runs for the agent and ends when it is
+      // told that pi is going): the idle reaper takes it then.
       if (fresh && !sessions.backgroundWork(fresh.id)) {
         // A run that ran out of time is still going. Stopped under it, its chat
         // would stay "running" for good: nothing settles it, a Stop does nothing,
         // and no agent looks around while anything is working.
         if (!sessions.closing && getSession(fresh.id)?.status === "running") await endRun(fresh.id);
-        await sessions.stop(fresh.id).catch(() => {});
-        forgetBrowserSession(fresh.id);
+        // Looked at now: the job was started by the last call, a moment ago. A portal that is stopping lets every pi go.
+        if (sessions.closing || !(await sessions.holdsJobs(fresh.id, true))) {
+          await sessions.stop(fresh.id).catch(() => {});
+          forgetBrowserSession(fresh.id);
+        }
       }
       // A one-off has nothing left to do. Disabled rather than deleted, so the
       // result stays readable and it can be re-armed by giving it a new time.

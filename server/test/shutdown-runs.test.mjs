@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
@@ -113,6 +114,71 @@ test("a clean-session run that runs out of time is stopped with its pi, and leav
     assert.equal(sessions.anyBusy(), false, "so nothing that waits for the model waits for it for good");
   } finally {
     sessions.ask = ask;
+  }
+});
+
+/** What the agent's tool call starts in the background, as bg_run of pi-background-tasks does: marked, in the folder, in a session of its own. */
+const startJob = (folder) => spawn("sleep", ["60"], { cwd: folder, detached: true, stdio: "ignore", env: { ...process.env, PITHAGORAS_AGENT: "1" } });
+const endJob = (job) => {
+  try {
+    process.kill(-job.pid, "SIGKILL");
+  } catch {
+    // Gone already.
+  }
+};
+
+test("a clean-session run that started a job is not let go while the job runs, and is once it is over", { skip: process.platform !== "linux" }, async () => {
+  const made = routine({ fresh: true });
+  const run = routineSupervisor.run(made, "manual");
+  await until(() => launched.length > 0 && launched.at(-1).idle === false, "the run to start");
+  const pi = launched.at(-1);
+  let job;
+  try {
+    // The call that starts it, and the agent's last word: "Started it in the background."
+    pi.emit("event", { type: "tool_execution_start", toolCallId: "bg-1", toolName: "bg_run" });
+    job = startJob(sessionOf(made.slug).workspace);
+    await until(() => job.pid, "the job to start");
+    pi.emit("event", { type: "tool_execution_end", toolCallId: "bg-1", toolName: "bg_run" });
+    pi.settle("Started the backup in the background.");
+    const after = await run;
+
+    assert.deepEqual([after.last_status, after.last_output], ["ok", "Started the backup in the background."]);
+    assert.equal(pi.disposed, false, "its extensions end the job when they are told, and nobody would hear of it");
+
+    endJob(job);
+    const chat = sessionOf(made.slug);
+    sessions.activity.set(chat.id, Date.now() - 60 * 60_000);
+    // The list of what runs is read at most once a second, and a job's end is seen when it is read.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.deepEqual(await sessions.reapIdle(), [chat.id], "the idle reaper takes it once the job is over");
+    assert.equal(pi.disposed, true);
+  } finally {
+    if (job) endJob(job);
+  }
+});
+
+test("a clean-session run that ran out of time with a job going is ended, and its pi is kept for the job", { skip: process.platform !== "linux" }, async () => {
+  const ask = sessions.ask;
+  sessions.ask = (id, message, opts) => ask.call(sessions, id, message, { ...opts, timeoutMs: 300 });
+  const made = routine({ fresh: true });
+  let job;
+  try {
+    const run = routineSupervisor.run(made, "manual");
+    await until(() => launched.length > 0 && launched.at(-1).idle === false, "the run to start");
+    const pi = launched.at(-1);
+    pi.emit("event", { type: "tool_execution_start", toolCallId: "bg-1", toolName: "bg_run" });
+    job = startJob(sessionOf(made.slug).workspace);
+    await until(() => job.pid, "the job to start");
+    pi.emit("event", { type: "tool_execution_end", toolCallId: "bg-1", toolName: "bg_run" });
+    const after = await run;
+
+    assert.equal(after.last_status, "error");
+    assert.equal(pi.aborted, 1, "the run it timed out on is ended all the same");
+    assert.equal(sessionOf(made.slug).status, "idle");
+    assert.equal(pi.disposed, false);
+  } finally {
+    sessions.ask = ask;
+    if (job) endJob(job);
   }
 });
 

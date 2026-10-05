@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { getDefaultReportTo, getSession } from "../db.js";
 import { unscopeKey } from "../agent.js";
-import { askQuestion } from "../questions.js";
+import { askQuestion, dropQuestion, offerOf } from "../questions.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { sessions } from "../session-manager.js";
 import { getPerson } from "../people.js";
@@ -103,14 +103,7 @@ export function askPrimaryTool(sessionId: string) {
             to.target,
             // The key beside the name: a name is whatever somebody called themselves, the key is who the platform says they are.
             `${row.person_name} (${row.person_key}) is asking (via ${session.channel_slug}):\n\n${question}\n\n` +
-              (row.action
-                ? `It wants to run, exactly once:\n\n    ${row.action.replace(/\n/g, "\n    ")}\n\n` +
-                  `Approving runs that and nothing else.\n\n`
-                : "") +
-              (row.action
-                ? `Reply "#${row.id} approve" for this once, "#${row.id} always" to permit it from ` +
-                  `now on, or "#${row.id} no".`
-                : `Reply with "#${row.id} <your answer>" and I will pass it back to them.`) +
+              offerOf(row) +
               (immediate ? "" : ` That channel cannot be messaged out of the blue, so they will see it the next time they write.`),
             // Only where there is something to approve. A question wanting an
             // opinion needs words, and two buttons would be pretending it does not.
@@ -126,6 +119,9 @@ export function askPrimaryTool(sessionId: string) {
             false
           );
         } catch (e) {
+          // Nobody was told of it, so nothing is waiting for an answer: the reminder to the primary user would
+          // name it, and they would answer, or approve, what they never saw.
+          dropQuestion(row.id);
           return fail(`Could not reach them: ${(e as Error).message}`);
         }
 

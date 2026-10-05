@@ -237,10 +237,11 @@ function describe(argv: string[]): string {
 /**
  * The jobs in a workspace, running and recently finished, newest first.
  * `callsRunning`: whether a tool call is running in the chat asking.
+ * `fresh`: read the processes now, not as they were up to a second ago.
  */
-export async function listJobs(workspace: string, callsRunning = false): Promise<BackgroundJob[]> {
+export async function listJobs(workspace: string, callsRunning = false, fresh = false): Promise<BackgroundJob[]> {
   const root = rootOf(workspace);
-  const procs = await scan(root);
+  const procs = await scan(root, fresh);
   const groups = new Map<number, Proc[]>();
   for (const p of procs) {
     const list = groups.get(p.sid);

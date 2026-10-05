@@ -40,7 +40,10 @@ a one-off is switched off and does not count as done, as after a restart.
 
 By default a routine keeps one session, so a run can see what the last one did —
 "nothing new since yesterday" needs yesterday. **Fresh session each run** gives
-each one a clean start instead, for work where history is only noise.
+each one a clean start instead, for work where history is only noise. Its agent is
+let go when the run ends, unless a build or a server it started in the background
+is still running: the agent is kept until that is over, as for an idle chat (see
+[Extensions](/guide/extensions)).
 
 A run that is still going after an hour is listed as an error. In a fresh session
 it is stopped then, as pressing Stop in its chat would; in the session a routine

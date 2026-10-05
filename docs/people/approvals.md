@@ -69,9 +69,11 @@ waiting, so a message that merely begins with a hash reaches the agent normally.
 
 An answer written without the id is just such a message: your agent does not know
 of the question, since nothing the person wrote is put into your conversation. So
-the portal adds a line to the reply to your next message, once for each question,
-saying which questions still wait and how to answer them. Only questions from the
-last day are named.
+the portal adds a note to the reply to your next message, once for each question,
+with who asked, what they asked and the command an approval would run, so that
+you never answer one you have not read. Only questions from the last day are
+named. A question that could not be sent to you at all is dropped, and the one who
+asked is told so.
 
 ::: tip Buttons are the text
 A button's payload is exactly the message it stands for. Tapping **Approve

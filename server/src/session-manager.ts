@@ -1302,7 +1302,7 @@ class SessionManager extends EventEmitter {
       // dev server in the background ends it then, with nobody told. Its jobs
       // are not use of the chat as far as pi knows, so they are looked for here.
       const seen = this.activity.get(id);
-      if (await this.jobsRunning(id)) continue;
+      if (await this.holdsJobs(id)) continue;
       // The look took a moment: the chat may have been used, or let go, since.
       if (this.live.get(id)?.client !== client || this.activity.get(id) !== seen || this.inUse(id, client)) continue;
       await this.stop(id);
@@ -1315,11 +1315,13 @@ class SessionManager extends EventEmitter {
    * Whether something this chat started is still running in its folder, whatever
    * ran it: see background.ts. Not the jobs of the other chats that work there:
    * thirty conversations in an agent's home would be held by one dev server.
+   * `fresh`: the folder is looked at now, not as it was up to a second ago, for
+   * a chat that has only just made its last call.
    */
-  private async jobsRunning(sessionId: string): Promise<boolean> {
+  async holdsJobs(sessionId: string, fresh = false): Promise<boolean> {
     const workspace = getSession(sessionId)?.workspace;
     if (!BACKGROUND_SUPPORTED || !workspace) return false;
-    const jobs = await listJobs(workspace).catch(() => []);
+    const jobs = await listJobs(workspace, false, fresh).catch(() => []);
     return jobs.some((job) => job.state !== "exited" && this.startedBy(sessionId, job));
   }
 
