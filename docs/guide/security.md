@@ -85,6 +85,10 @@ say it was refused rather than to find another route. A [routine](/guide/routine
 can have the blocking turned off for itself; what the rules would have stopped is
 then recorded instead.
 
+The rules hold for a call on a paired computer as for one on the server, and
+the computer is told that the chat is tainted, so that it can ask its owner
+where it would not otherwise ([Devices](/guide/devices#what-is-trusted)).
+
 ## What this does not do
 
 These are heuristics, and the rules are public. Somebody who already has code

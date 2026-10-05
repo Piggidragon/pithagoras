@@ -690,6 +690,13 @@ export const api = {
   devicePolicy: (id: string) => json<{ policy: DevicePolicy }>(`/api/devices/${encodeURIComponent(id)}/policy`),
   setDevicePolicy: (id: string, settings: DevicePolicy["settings"], ifVersion: string) =>
     json<{ policy: DevicePolicy | null }>(`/api/devices/${encodeURIComponent(id)}/policy`, { method: "PUT", body: JSON.stringify({ settings, ifVersion }) }),
+  /** The paired devices as one chat sees them: which it has, in which folder, and which it could have. */
+  chatDevices: (id: string) => json<{ devices: ChatDevice[] }>(`/api/sessions/${encodeURIComponent(id)}/devices`),
+  /** Grants a chat a device, in a folder there (its home, or its first folder, unless one is given). */
+  grantDevice: (id: string, deviceId: string, cwd?: string) =>
+    json<{ ok: true; cwd: string; reload: GrantReload }>(`/api/sessions/${encodeURIComponent(id)}/devices/${encodeURIComponent(deviceId)}`, { method: "PUT", body: JSON.stringify(cwd ? { cwd } : {}) }),
+  endDeviceGrant: (id: string, deviceId: string) =>
+    json<{ ok: true; reload: GrantReload }>(`/api/sessions/${encodeURIComponent(id)}/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE" }),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>
@@ -1387,6 +1394,26 @@ export interface Device {
   policy: DevicePolicy | null;
   alert: { at: number; message: string } | null;
 }
+
+/** A paired device as one chat sees it. */
+export interface ChatDevice {
+  id: string;
+  name: string;
+  os: string;
+  online: boolean;
+  granted: boolean;
+  /** Where the chat's relative paths and commands start on it, while granted. */
+  cwd: string | null;
+  home: string | null;
+  mode: DeviceInfo["mode"] | null;
+  folders: DeviceFolder[];
+  /** Whether it can be granted now; `why` says why not. */
+  offered: boolean;
+  why: string | null;
+}
+
+/** When a chat takes a grant up: at once, after its current run, or when it next starts. */
+export type GrantReload = "reloaded" | "waiting" | "not running";
 
 export interface DevicesList {
   devices: Device[];

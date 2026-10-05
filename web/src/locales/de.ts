@@ -2461,6 +2461,18 @@ const de: Locale = {
     "Device settings": "Geräteeinstellungen",
     "Only the device changes: {names}": "Nur das Gerät ändert: {names}",
     "Save on the device": "Auf dem Gerät speichern",
+    // DeviceChip.tsx and the tool card: a chat's devices
+    "On the device {name}": "Auf dem Gerät {name}",
+    "The chat takes this up once its current run is over.": "Der Chat übernimmt das, sobald sein laufender Durchgang vorbei ist.",
+    "The paired computers this chat may use": "Die gekoppelten Computer, die dieser Chat nutzen darf",
+    "Devices for this chat": "Geräte für diesen Chat",
+    "The agent acts on a device only when it names it; without one, its tools act on the server.": "Der Agent handelt auf einem Gerät nur, wenn er es nennt; sonst arbeiten seine Werkzeuge auf dem Server.",
+    "No device is paired yet.": "Noch kein Gerät gekoppelt.",
+    "Pair one": "Eins koppeln",
+    "not connected": "nicht verbunden",
+    "Let this chat use {name}": "Diesen Chat {name} nutzen lassen",
+    "Folder on {name}": "Ordner auf {name}",
+    "Move": "Verschieben",
     "Shift\u0004key": "Umschalt",
   },
 };

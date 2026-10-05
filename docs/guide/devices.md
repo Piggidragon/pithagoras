@@ -75,9 +75,61 @@ When something else tries to connect with a device's token while the device is
 connected, it is refused, and the device shows a warning. If that was not you
 (a second copy of the client, say), remove the device and pair it again.
 
+## Giving a chat a device
+
+A chat reaches no device until you give it one. In the chat's header, beside
+the browser's globe, the **laptop** button lists the paired devices, each with
+a dot that says whether it is connected:
+
+- The switch gives the chat that device, or takes it back. Only a connected
+  device can be given, and not the portal's own machine.
+- The folder under it is where the chat starts on the device: relative paths
+  and commands begin there. It starts as the device's home, or in **Folders**
+  mode as its first folder; type another, or pick one of the device's folders.
+  In Folders mode only a folder the device offers is taken.
+
+Each chat has its own devices, and a new chat has none. The button is only in
+chats of the portal itself: a chat on a channel (Telegram, say) cannot answer a
+device's questions, so it gets none. A chat that is working takes a change up
+once its current run is over.
+
+### What the agent can do there
+
+Once a chat has a device, the agent's `read`, `write`, `edit` and `bash` take a
+`device`: with it they act on that computer, without it on the server, as
+before. `grep`, `find` and `ls` act only on a device. The agent is told which
+devices the chat has and their folders; a call on a device shows the device's
+name on its card in the chat.
+
+- `~` is the device's home, and a relative path starts in the chat's folder
+  there. On Windows, `C:\Users\x` is written `/c/Users/x`; the agent may use
+  either.
+- `bash` runs the device's own shell, in the device's own environment: nothing
+  of the portal's environment goes along.
+- `edit` writes back only if the file did not change on the device since it
+  was read; otherwise the agent is told to read it again.
+- Nothing falls back to the server: a device the chat does not have, one that
+  is not connected, or one that switched a tool off is an error that names the
+  devices the chat has.
+
+Other tools, subagents, background jobs and MCP tools always act on the server.
+A call of another tool that names a device is refused, and so is any call on a
+device for somebody who is not the primary user (a colleague in a shared
+conversation): the computers are yours.
+
+When the last device is taken back, the tools stay as they are for the rest of
+the chat's session and refuse a `device`; `grep`, `find` and `ls` go away
+again. When the chat is deleted, or the device removed, the grant ends too, and
+the device forgets what it allowed the chat.
+
+If another installed extension brings a tool of one of these names, that chat
+cannot be given a device, and the button says why.
+
 ## Approvals
 
-A call that the device holds for your answer is shown under the device, with what it wants to do and why the device asks:
+A call that the device holds for your answer is asked in the chat that made it,
+as a question over the chat, and shown under the device on the **Devices**
+page, with what it wants to do and why the device asks:
 
 - **Allow once**: this call.
 - **Allow for this chat**: this call and more of its kind from the same chat,
@@ -87,7 +139,7 @@ A call that the device holds for your answer is shown under the device, with wha
   allows.
 - **Deny**.
 
-The first answer wins, from the portal or on the device itself
+The first answer wins, from the chat, the Devices page or the device itself
 (`pithagoras-sync approve 12`, `deny 12`). An approval that nobody answers is
 denied when the device's time for it runs out (two minutes unless the device
 says otherwise). Approvals are asked only in the portal and on the device: a
@@ -127,6 +179,11 @@ each device's own settings. In particular:
   folders, its denied paths and command rules, its hours, the tools it has
   switched off, and the settings only it may change. A device that must not be
   reachable from a compromised portal should not be paired.
+- **No chat reaches a device without a grant,** and only the chats you give
+  one: each call names the chat, and the device keeps what it allowed per chat.
+  The device is also told whether the portal's guard saw the chat read
+  something untrusted (see [Prompt injection](/guide/security)); it can only
+  make the device more careful.
 - **The sudo password stays on the device.** Elevation (Linux `sudo`, off by
   default) uses a password stored on the device; it is never sent to the
   portal or the agent, and a command run with it always asks.

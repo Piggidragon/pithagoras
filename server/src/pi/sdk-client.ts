@@ -29,6 +29,8 @@ import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, porta
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE, understoryOn } from "../features.js";
+import { deviceTools } from "../sync/tools.js";
+import { DEVICE_TOOLS_SOURCE } from "../sync/protocol.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -359,6 +361,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     subagentModel?: () => string | undefined;
     /** The agent whose heartbeat this is: gives it the note tool. See heartbeat.ts. */
     heartbeatAgent?: string;
+    /** A chat that may be granted paired devices: its file and shell tools take a `device` once it is. See sync/tools.ts. */
+    devices?: boolean;
   }): Promise<SdkPiClient> {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
@@ -389,6 +393,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       voiceSpeaks,
     );
     const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
+    // The session, once there is one: the device tools run pi's own server tools, as it built them, when no device is named.
+    let built: any;
     try {
       // Both are required: the constructor resolves each and throws on
       // undefined, which previously left every session with no extensions.
@@ -409,6 +415,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             [path.join(pi.getAgentDir(), "skills"), ...(builtinSkills ? [builtinSkills] : [])],
           ) },
       ];
+      // Registers nothing until the chat is granted a device: see sync/tools.ts.
+      if (opts.sessionId && opts.devices) {
+        factories.push({
+          name: DEVICE_TOOLS_SOURCE,
+          factory: deviceTools({ sessionId: opts.sessionId, cwd: opts.cwd, pi, serverTool: (name) => built?._baseToolDefinitions?.get?.(name) }),
+        });
+      }
       if (canvases) factories.push({ name: "canvases", factory: canvases.extension });
       // Beside the canvases: both are how the agent puts something on the screen.
       if (opts.sessionId) factories.push({ name: SHOW_IMAGE_SOURCE, factory: showImageTool(opts.cwd) });
@@ -516,6 +529,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
 
+    built = session;
     const client = new SdkPiClient(session, modelRuntime, () => {});
     switchedOff = () => client.switchedOff;
     client.portalSessionId = opts.sessionId;
@@ -641,7 +655,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         const id = randomUUID();
         let settled = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const abort = () => finish(fallback);
+        // Taken back by whoever asked: the dialog goes from the chat too, as when it runs out.
+        let shown = false;
+        const abort = () => {
+          if (!settled && shown) this.emit("event", { type: "extension_ui_cancel", id });
+          finish(fallback);
+        };
         const finish = (value: unknown) => {
           if (settled) return;
           settled = true;
@@ -663,6 +682,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         opts?.signal?.addEventListener?.("abort", abort, { once: true });
         if (opts?.signal?.aborted) { abort(); return; }
 
+        shown = true;
         this.emit("event", { type: "extension_ui_request", id, ...payload });
       });
 

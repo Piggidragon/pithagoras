@@ -1,8 +1,12 @@
 import { X509Certificate, createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import express, { type Router } from "express";
+import { authEnabled } from "../auth.js";
 import { tlsFiles } from "../http-security.js";
+import { getSession } from "../db.js";
 import { sessions } from "../session-manager.js";
+import { defaultCwd, devicePath, endGrant, grantDevice, grantRefused, grantsOf } from "../sync/grants.js";
+import { deviceToolConflicts } from "../sync/tools.js";
 import { CLOSE, CODE, DeviceError, readPolicy, type Choice } from "../sync/protocol.js";
 import { alertOf, clearAlert, dropAll, dropDevice, linkOf } from "../sync/hub.js";
 import {
@@ -10,7 +14,6 @@ import {
   NameTaken,
   cancelPairingCode,
   devicesEnabled,
-  devicesRefused,
   getDevice,
   listDevices,
   newPairingCode,
@@ -37,6 +40,13 @@ function spkiPin(): string | null {
     return null;
   }
 }
+
+/**
+ * Why the add-on cannot be switched on here, or undefined when it can. A portal
+ * without a password would hand every paired computer to whoever reaches it.
+ */
+const devicesRefused = (): string | undefined =>
+  authEnabled ? undefined : "The portal runs without a password (PORTAL_ALLOW_NO_PASSWORD), and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.";
 
 /** A device as the page shows it: the row, and what its live connection says. */
 function shown(device: DeviceRecord) {
@@ -81,6 +91,7 @@ export function devicesRouter(): Router {
     if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be true or false" });
     try {
       const was = devicesEnabled();
+      if (enabled && devicesRefused()) throw new Error(devicesRefused());
       setDevicesEnabled(enabled);
       if (!enabled) {
         cancelPairingCode();
@@ -197,6 +208,75 @@ export function devicesRouter(): Router {
     } catch (e) {
       failed(res, e);
     }
+  });
+
+  // --- a chat's devices ---
+
+  router.use("/sessions/:id/devices", (req, res, next) => {
+    if (!devicesEnabled()) return res.status(404).json({ error: "Devices are switched off. Switch them on in Settings → Add-ons." });
+    const session = getSession(req.params.id);
+    if (!session) return res.status(404).json({ error: "No such chat" });
+    // Only a chat in the portal: the device's approvals are answered there, which a channel cannot do.
+    if (session.kind !== "task") return res.status(409).json({ error: "Devices are granted to chats in the portal only" });
+    next();
+  });
+
+  /** The paired devices as this chat sees them: which it has, in which folder, and which it could have. */
+  router.get("/sessions/:id/devices", (req, res) => {
+    const grants = new Map(grantsOf(req.params.id).map((g) => [g.deviceId, g]));
+    const conflicts = deviceToolConflicts(req.params.id);
+    res.json({
+      devices: listDevices().map((device) => {
+        const link = linkOf(device.id);
+        const grant = grants.get(device.id);
+        const why = conflicts.length
+          ? `Another extension owns ${conflicts.join(", ")} in this chat, so they cannot take a device`
+          : link?.info
+            ? grantRefused(device, defaultCwd(link.info))
+            : `${device.name} is not connected`;
+        return {
+          id: device.id,
+          name: device.name,
+          os: link?.info?.os ?? device.os,
+          online: Boolean(link),
+          granted: Boolean(grant),
+          cwd: grant?.cwd || null,
+          home: link?.info ? devicePath(link.info.home, link.info, "/") : null,
+          mode: link?.info?.mode ?? null,
+          folders: link?.info?.folders.map((f) => ({ ...f, path: devicePath(f.path, link.info!, "/") })) ?? [],
+          offered: !why,
+          why: why ?? null,
+        };
+      }),
+    });
+  });
+
+  /** Grants the chat a device, in a folder there (its home, or its first folder, unless one is given), or moves the grant to another folder. */
+  router.put("/sessions/:id/devices/:deviceId", async (req, res) => {
+    const device = getDevice(req.params.deviceId);
+    if (!device) return res.status(404).json({ error: "No such device" });
+    const conflicts = deviceToolConflicts(req.params.id);
+    if (conflicts.length) return res.status(409).json({ error: `Another extension owns ${conflicts.join(", ")} in this chat, so they cannot take a device` });
+    const info = linkOf(device.id)?.info;
+    if (!info) return res.status(409).json({ error: `${device.name} is not connected` });
+    const given = req.body?.cwd;
+    if (given !== undefined && given !== null && (typeof given !== "string" || given.length > 4096)) return res.status(400).json({ error: "cwd must be a path" });
+    const wanted = typeof given === "string" && given.trim() ? given.trim() : undefined;
+    if (wanted && !/^(~(\/|$)|\/|[A-Za-z]:[\\/])/.test(wanted)) return res.status(400).json({ error: "The folder must be an absolute path" });
+    const cwd = wanted ? devicePath(wanted, info, "/") : defaultCwd(info);
+    const refused = cwd ? grantRefused(device, cwd) : "The folder must be an absolute path";
+    if (refused) return res.status(409).json({ error: refused });
+    const had = grantsOf(req.params.id).some((g) => g.deviceId === device.id);
+    grantDevice(req.params.id, device.id, cwd!);
+    console.log(`[devices] ${had ? "moved" : "granted"} ${device.name} for chat ${req.params.id}`);
+    res.json({ ok: true, cwd, reload: await sessions.reloadSoon(req.params.id) });
+  });
+
+  /** Takes the device back from the chat: its tools fail from the next call, and the device forgets what it allowed the chat. */
+  router.delete("/sessions/:id/devices/:deviceId", async (req, res) => {
+    const gone = endGrant(req.params.id, req.params.deviceId);
+    if (gone) console.log(`[devices] ended a grant for chat ${req.params.id}`);
+    res.json({ ok: true, reload: gone ? await sessions.reloadSoon(req.params.id) : "not running" });
   });
 
   return router;

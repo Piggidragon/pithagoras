@@ -10,6 +10,7 @@ import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
 import { UNDERSTORY } from "../features.js";
 import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
+import { DEVICE_TOOLS_SOURCE } from "../sync/protocol.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
 import { agentsRoot, listAgents } from "../agents.js";
 import { workspaceRoot } from "../workspaces.js";
@@ -789,7 +790,7 @@ export function wrapUntrusted(text: string): string {
  * the portal can mark one that read something outside a tool call (see
  * taintSession) and say whether the rules for a tainted one hold it now.
  */
-const taints = new Map<string, { mark: () => void; holds: () => boolean }>();
+const taints = new Map<string, { mark: () => void; holds: () => boolean; seen: () => boolean }>();
 
 /**
  * Marks a conversation as having read untrusted content, as a tool result that
@@ -801,6 +802,12 @@ export function taintSession(portalSessionId: string): boolean {
   taint?.mark();
   return Boolean(taint);
 }
+
+/**
+ * Whether a conversation has read something untrusted, whether or not the rules
+ * hold it: what a device is told with each call, and adds to its own taint.
+ */
+export const taintedNow = (portalSessionId: string): boolean => taints.get(portalSessionId)?.seen() ?? false;
 
 /**
  * The rule that would refuse this call in a conversation that has read something
@@ -855,7 +862,7 @@ export function guardExtension(
     // content, and this factory runs once per session.
     let tainted = false;
     if (portalSessionId) {
-      const taint = { mark: () => { tainted = true; }, holds: () => tainted && enforceTaint };
+      const taint = { mark: () => { tainted = true; }, holds: () => tainted && enforceTaint, seen: () => tainted };
       taints.set(portalSessionId, taint);
       // Only its own: a reload starts the next one before this one is gone.
       pi.on("session_shutdown", () => { if (taints.get(portalSessionId) === taint) taints.delete(portalSessionId); });
@@ -912,6 +919,27 @@ export function guardExtension(
           personKey: key,
           sessionId: portalSessionId,
         });
+
+      // A paired computer is the primary user's: nobody else's message reaches it, whatever a rule or the read-only tools would
+      // let them run on the server. And only the devices extension's own tools act on one: any other tool would drop the
+      // `device` it does not know and run on the server instead, which is not what was asked.
+      const device = event.input && typeof event.input === "object" ? (event.input as Record<string, unknown>).device : undefined;
+      if (device !== undefined && device !== null) {
+        const own = (pi.getAllTools?.() ?? []).find((tool: any) => tool?.name === event.toolName)?.sourceInfo?.path === `<inline:${DEVICE_TOOLS_SOURCE}>`;
+        const why = role !== "primary" ? `a ${role} cannot act on a paired device` : !own ? `${event.toolName} does not run on paired devices` : undefined;
+        if (why) {
+          console.warn(`[guard ${sessionId}] blocked ${event.toolName} on a device: ${why}`);
+          note("refused", `Device ${String(device).slice(0, 64)}: ${why}`);
+          return {
+            block: true,
+            reason: role !== "primary"
+              ? `Refused: ${why}. You are speaking with someone who is not your primary user, and the primary user's ` +
+                `computers are not theirs to reach. Say so rather than looking for another way to it.`
+              : `Refused: ${why}. Only read, write, edit, bash, grep, find and ls take a device; this tool always acts on ` +
+                `the server. Call it without device, or use one of those tools.`,
+          };
+        }
+      }
 
       // The browser is gated on the session, not on who is speaking: the agent
       // has its own accounts and uses them as itself, including when it is

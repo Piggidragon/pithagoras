@@ -6,7 +6,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import http from "node:http";
 import express from "express";
-import WebSocket from "ws";
 import { inProcessHome } from "./server-harness.mjs";
 
 // The portal's end of Pithagoras Sync against a device that speaks the client's protocol
@@ -19,6 +18,7 @@ const { attachSyncUpgrade, linkOf, dropDevice, hub } = await import("../dist/syn
 const store = await import("../dist/sync/store.js");
 const { getDb, listAudit } = await import("../dist/db.js");
 const { encodeFrame, decodeFrame, FRAME, CLOSE } = await import("../dist/sync/protocol.js");
+const { connect: connectTo, until } = await import("./fake-device.mjs");
 
 let server;
 let base;
@@ -48,66 +48,7 @@ async function paired(name = "laptop") {
   return r.body;
 }
 
-/**
- * A device as the client is one: the token in the Authorization header, no Origin, `hello` first, and
- * answers to what the portal asks. `answers` say what each method returns; the rest is recorded.
- */
-class Device {
-  constructor(ws, token, answers) {
-    this.ws = ws;
-    this.answers = answers;
-    this.got = [];
-    this.binary = [];
-    ws.on("message", (data, isBinary) => {
-      if (isBinary) return this.binary.push(decodeFrame(data));
-      const m = JSON.parse(String(data));
-      // The portal sends nothing but the four fields of JSON-RPC 2.0 (the device refuses any other).
-      assert.deepEqual(Object.keys(m).filter((k) => !["jsonrpc", "id", "method", "params"].includes(k)), []);
-      assert.equal(m.jsonrpc, "2.0");
-      this.got.push(m);
-      const answer = this.answers[m.method];
-      if (m.id === undefined || answer === undefined) return;
-      const out = typeof answer === "function" ? answer(m.params, m.id, this) : answer;
-      if (out === undefined) return;
-      this.send(out.error ? { jsonrpc: "2.0", id: m.id, error: out.error } : { jsonrpc: "2.0", id: m.id, result: out });
-    });
-  }
-  send(m) { this.ws.send(JSON.stringify(m)); }
-  notify(method, params) { this.send({ jsonrpc: "2.0", method, params }); }
-  asked(method) { return this.got.filter((m) => m.method === method); }
-  async waitFor(method, n = 1) {
-    for (let i = 0; i < 200 && this.asked(method).length < n; i++) await new Promise((r) => setTimeout(r, 10));
-    return this.asked(method);
-  }
-}
-
-const INFO = { name: "laptop", os: "linux", arch: "x86_64", os_release: null, hostname: "laptop", user: "alice", uid: 4242, home: "/home/alice", shell: "bash", session: "headless", mode: "ask", mode_expires_ms: null, folders: [{ path: "/home/alice/src", access: "rw", execute: true }], folders_shell: "landlock", tools: ["read", "write", "edit", "bash", "grep", "find", "ls"], mcp_tools: [], client_version: "0.1.0" };
-const BASE_ANSWERS = { "device.info": INFO, "device.probe": { found: false, sha256: null, user: "alice", uid: 4242 }, "approval.list": { approvals: [] } };
-
-/** Opens the socket as the client does; the status of a refused upgrade, or the device once it said hello. */
-function connect(token, { origin, hello = {}, answers = {}, sayHello = true } = {}) {
-  return new Promise((resolve) => {
-    const headers = { "User-Agent": "pithagoras-sync/0.1.0", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-    const ws = new WebSocket(`ws://${base}/sync/v1/connect`, { headers, ...(origin ? { origin } : {}), perMessageDeflate: false });
-    ws.on("unexpected-response", (_req, res) => resolve({ status: res.statusCode }));
-    ws.on("error", () => {});
-    ws.on("open", () => {
-      const device = new Device(ws, token, { ...BASE_ANSWERS, ...answers });
-      device.closed = new Promise((r) => ws.on("close", (code, reason) => r({ code, reason: String(reason) })));
-      const id = token.split(".")[0];
-      if (sayHello) device.notify("hello", { proto: 1, device_id: id, client_version: "0.1.0", os: "linux", user: "alice", shell: "bash", capabilities: ["fs", "grep", "find", "exec", "probe", "approvals"], ...hello });
-      resolve({ status: 101, device });
-    });
-  });
-}
-
-const until = async (check, what) => {
-  for (let i = 0; i < 300; i++) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  assert.fail(`waited in vain for ${what}`);
-};
+const connect = (token, opts) => connectTo(base, token, opts);
 
 test("a code pairs once, a wrong one counts against it, and the token is kept only as its hash", async () => {
   assert.equal((await pair({ code: "ABCDEFGH", name: "laptop", os: "linux", arch: "x86_64" })).status, 403, "no code open");

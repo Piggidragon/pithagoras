@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns|devices to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -227,6 +227,30 @@ if (phase === 'git') {
       { name: 'generate_image', source: 'image-generation', inline: true, enabled: true, defaultOn: true },
       { name: 'edit_image', source: 'image-editing', inline: true, enabled: true, defaultOn: true },
     ] };
+  });
+}
+
+// A chat with paired devices, one granted from the chip and a call made on it: `?phase=devices`. What the page sent is in window.sentDevices.
+if (phase === 'devices') {
+  events.push(
+    ev('tool_execution_start', { toolCallId: 'd1', toolName: 'bash', args: { command: 'cargo test', device: 'laptop' } }, 10),
+    ev('tool_execution_end', { toolCallId: 'd1', toolName: 'bash', result: { content: [{ type: 'text', text: 'test result: ok' }] } }, 9),
+  );
+  const sent: unknown[] = ((window as any).sentDevices = []);
+  let devices = [
+    { id: 'd1', name: 'laptop', os: 'linux', online: true, granted: false, cwd: null as string | null, home: '/home/alice', mode: 'ask', folders: [{ path: '/home/alice/src', access: 'rw', execute: true }], offered: true, why: null },
+    { id: 'd2', name: 'desk', os: 'windows', online: false, granted: false, cwd: null, home: null, mode: null, folders: [], offered: false, why: 'desk is not connected' },
+  ];
+  mockFetch((u, init) => {
+    if (!u.includes('/api/sessions/preview/devices')) return undefined;
+    const method = init?.method ?? 'GET';
+    if (method === 'GET') return { devices };
+    const id = decodeURIComponent(u.split('/').pop()!);
+    const body = init?.body ? JSON.parse(init.body as string) : null;
+    sent.push({ method, id, body });
+    devices = devices.map((d) => (d.id !== id ? d : method === 'DELETE' ? { ...d, granted: false, cwd: null } : { ...d, granted: true, cwd: body?.cwd ?? d.home }));
+    // A folder moved while the chat works is taken up after its run.
+    return { ok: true, cwd: body?.cwd ?? '/home/alice', reload: body?.cwd ? 'waiting' : 'reloaded' };
   });
 }
 

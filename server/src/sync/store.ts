@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { getDb, getSetting, putSetting } from "../db.js";
-import { authEnabled } from "../auth.js";
 import { isDeviceName } from "./protocol.js";
 
 /**
@@ -31,15 +30,8 @@ const SWITCH = "devices_enabled";
 /** Whether the Devices add-on is on. Off in a fresh install. */
 export const devicesEnabled = (): boolean => getSetting(SWITCH) === "1";
 
-/**
- * Why the add-on cannot be switched on here, or undefined when it can. A portal
- * without a password would hand every paired computer to whoever reaches it.
- */
-export const devicesRefused = (): string | undefined =>
-  authEnabled ? undefined : "The portal runs without a password (PORTAL_ALLOW_NO_PASSWORD), and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.";
-
+/** Switches the add-on. Whether it may be switched on is the route's to say (api/devices.ts): this module stays clear of the login, which the agent's tools import it beside. */
 export function setDevicesEnabled(on: boolean): void {
-  if (on && devicesRefused()) throw new Error(devicesRefused());
   putSetting(SWITCH, on ? "1" : "");
 }
 

@@ -90,6 +90,9 @@ export class DeviceError extends Error {
 export const PI_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls"] as const;
 export type PiTool = (typeof PI_TOOLS)[number];
 
+/** The inline extension whose tools take a `device`: their source is `<inline:devices>`, which the guard checks. */
+export const DEVICE_TOOLS_SOURCE = "devices";
+
 /** What a call is for: which chat, the guard's taint flag, and the tool. Nothing else is accepted by the device. */
 export interface Ctx {
   chat: string;

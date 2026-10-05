@@ -830,7 +830,24 @@ export function updateSession(
 
 // One transaction: the chat of a delete that failed stays, and it takes messages again, so it must still have its transcript and canvases.
 // Inside the bulk routes' own transaction this is a savepoint, so they still remove all of their chats or none.
-export const deleteSession = (id: string): void => getDb().transaction(() => removeSession(id))();
+export function deleteSession(id: string): void {
+  const devices = (getDb().prepare("SELECT device_id FROM session_devices WHERE session_id = ?").all(id) as { device_id: string }[]).map((r) => r.device_id);
+  getDb().transaction(() => removeSession(id))();
+  // Told once the bulk route's own transaction is over, and only when the chat is really gone: a rollback would have kept its grants.
+  if (devices.length && deletedHooks.length) {
+    setImmediate(() => {
+      if (getSession(id)) return;
+      for (const hook of deletedHooks) hook(id, devices);
+    });
+  }
+}
+
+const deletedHooks: ((sessionId: string, devices: string[]) => void)[] = [];
+
+/** Hears of each deleted chat that had devices granted, with those devices: see sync/grants.ts. */
+export function onSessionDeleted(hook: (sessionId: string, devices: string[]) => void): void {
+  deletedHooks.push(hook);
+}
 
 function removeSession(id: string): void {
   const d = getDb();

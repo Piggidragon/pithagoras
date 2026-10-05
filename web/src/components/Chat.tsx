@@ -29,6 +29,7 @@ import { activity, buildTranscript, keepItems, type Item, type SentImage } from 
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
+import { DeviceChip } from "./DeviceChip";
 import { useChatPictures } from "./ChatPictures";
 import { confirmDialog } from "./ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
@@ -1725,6 +1726,8 @@ export function Chat({
               <LuBot />
             </PanelToggle>
           )}
+          {/* The portal's own chats only: a device's approvals are answered here, which a channel cannot. */}
+          {(session.kind ?? "task") === "task" && <DeviceChip sessionId={session.id} />}
           {browserUp && (
             <PanelToggle
               open={watching}
