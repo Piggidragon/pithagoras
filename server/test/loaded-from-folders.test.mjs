@@ -15,7 +15,7 @@ const { guardExtension } = await import("../dist/pi/guard.js");
 const { LOADED_IN_FOLDERS, loadedAt, loadedPlaces } = await import("../dist/pi/loaded-from-folders.js");
 const { addToolRule, deleteToolRule } = await import("../dist/db.js");
 const { agentsRoot, createAgent, deleteAgent } = await import("../dist/agents.js");
-const { IN_PLACE } = await import("../dist/pi/loaded-links.js");
+const { IN_PLACE, IN_PROJECTS } = await import("../dist/pi/loaded-links.js");
 
 mock.method(console, "warn", () => {});
 
@@ -222,6 +222,27 @@ test("a big package in one place does not hide a link beside it, in that place o
     rmSync(path.join(agentDir, "extensions", "my-ext"), { force: true });
     rmSync(path.join(root, "starve-a"), { recursive: true, force: true });
     rmSync(path.join(root, "starve-b"), { recursive: true, force: true });
+  }
+});
+
+test("a write by the name of a link at a loaded name is refused where the walk gave up before it reached the link", () => {
+  // A project with a big folder of runtime files (a venv, a target) in front of the package that has the link: the walk over the projects is spent there.
+  const app = path.join(root, "spent");
+  try {
+    manyFolders(path.join(app, ".venv"), IN_PROJECTS + 100);
+    mkdirSync(path.join(app, "packages", "api", "web"), { recursive: true });
+    writeFileSync(path.join(app, "notes.md"), "notes");
+    symlinkSync("../../../notes.md", path.join(app, "packages", "api", "web", "AGENTS.md"));
+    for (const role of ["colleague", "guest"]) {
+      const as = guardAs(role, conversation);
+      // The premise: the link was not found, so what it leads to is a note as far as the walk can tell.
+      assert.equal(allowed(as, "write", path.join(app, "notes.md")), true, `${role}: the walk reached the link, so this does not test the name`);
+      // The name is held all the same: what is written there is loaded as the instructions of every conversation in that folder.
+      assert.equal(refused(as, "write", path.join(app, "packages", "api", "web", "AGENTS.md")), true, `${role}: written by the link's name`);
+      assert.equal(refused(as, "edit", path.join(app, "packages", "api", "web", "AGENTS.md")), true, `${role}: edited by the link's name`);
+    }
+  } finally {
+    rmSync(app, { recursive: true, force: true });
   }
 });
 

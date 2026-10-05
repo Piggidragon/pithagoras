@@ -55,14 +55,20 @@ async function portal(page: Page, down: string[], { replies = {}, fresh = false 
 const settingsDialog = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
 const FAILED = 'Could not load this: The portal is starting up';
 
-/** Opens a Settings page and checks that it says what failed, then that "Try again" brings the page once the portal is up. */
-async function failsThenRecovers(page: Page, tab: string, down: string[], { shown, gone = shown }: { shown: string; gone?: string }) {
-  const { up } = await portal(page, down);
+/**
+ * Opens a Settings page and checks that it says what failed, then that "Try again" brings the page once the portal is up.
+ * `prefetched`: the page reads what the shell reads ahead of time, a moment after it has drawn (see prefetchSettings).
+ */
+async function failsThenRecovers(page: Page, tab: string, down: string[], { shown, gone = shown, prefetched = false }: { shown: string; gone?: string; prefetched?: boolean }) {
+  const { up, asked } = await portal(page, down);
   await page.goto(`/settings/${tab}`);
   const alert = settingsDialog(page).getByRole('alert');
   await expect(alert).toContainText(FAILED);
   // What the page said before: an empty list, or a placeholder, as if it were so.
   await expect(settingsDialog(page).getByText(gone)).toHaveCount(0);
+  // The shell's own read of it, which fails as well while the portal is down, is waited for: once the portal is up it would
+  // bring the list by itself, and "Try again" would be a click on a button that is gone. This way it is the only thing that can.
+  if (prefetched) await expect.poll(() => asked.filter((p) => p === down[0]).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
   up(...down);
   await alert.getByRole('button', { name: 'Try again' }).click();
   await expect(settingsDialog(page).getByText(shown).first()).toBeVisible();
@@ -70,15 +76,15 @@ async function failsThenRecovers(page: Page, tab: string, down: string[], { show
 }
 
 test('Settings → General says it could not be read, instead of a placeholder for ever', async ({ page }) => {
-  await failsThenRecovers(page, 'general', ['/api/settings'], { shown: 'For new chats' });
+  await failsThenRecovers(page, 'general', ['/api/settings'], { shown: 'For new chats', prefetched: true });
 });
 
 test('Settings → About says it could not be read, and shows the portal once it can', async ({ page }) => {
-  await failsThenRecovers(page, 'about', ['/api/settings'], { shown: 'Where the agent runs' });
+  await failsThenRecovers(page, 'about', ['/api/settings'], { shown: 'Where the agent runs', prefetched: true });
 });
 
 test('Settings → Extensions does not say nothing is installed when the list could not be read', async ({ page }) => {
-  await failsThenRecovers(page, 'extensions', ['/api/extensions'], { shown: 'Nothing installed yet.' });
+  await failsThenRecovers(page, 'extensions', ['/api/extensions'], { shown: 'Nothing installed yet.', prefetched: true });
 });
 
 test('Settings → Advanced offers to read the file again', async ({ page }) => {
@@ -91,7 +97,7 @@ test('Settings → Advanced offers to read the file again', async ({ page }) => 
 });
 
 test('Settings → Models offers to read the providers again', async ({ page }) => {
-  await failsThenRecovers(page, 'models', ['/api/providers'], { shown: 'Add a provider' });
+  await failsThenRecovers(page, 'models', ['/api/providers'], { shown: 'Add a provider', prefetched: true });
 });
 
 test('Settings → MCP does not spin for ever', async ({ page }) => {

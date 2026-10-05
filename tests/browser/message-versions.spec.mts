@@ -183,6 +183,76 @@ test('earlier messages asked for in a chat that was then left are not put above 
   await expect(page.getByText('B question', { exact: true })).toBeVisible();
 });
 
+test('earlier messages of a chat that was left, answered while the open chat\'s own are on their way, neither free it to ask again nor are put above it twice', async ({ page }) => {
+  await portal(page, { second: true });
+  let releaseA!: () => void;
+  const heldA = new Promise<void>((r) => (releaseA = r));
+  let releaseB!: () => void;
+  const heldB = new Promise<void>((r) => (releaseB = r));
+  let askedA = 0;
+  let askedB = 0;
+  await page.route('**/api/sessions/a/events/before**', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('limit') === '1') return route.fulfill({ json: { events: [ev(1, 'portal_prompt', { message: 'x' })], more: true } });
+    askedA++;
+    await heldA;
+    await route.fulfill({ json: { events: turn(50, 'A old question', 'A old answer'), more: false } });
+  });
+  await page.route('**/api/sessions/b/events/before**', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('limit') === '1') return route.fulfill({ json: { events: [ev(1, 'portal_prompt', { message: 'x' })], more: true } });
+    askedB++;
+    await heldB;
+    await route.fulfill({ json: { events: turn(150, 'B old question', 'B old answer'), more: false } });
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(100, 'A question', 'A answer'));
+  await page.getByRole('button', { name: 'Load earlier messages' }).click({ timeout: 1500 }).catch(() => {});
+  await expect.poll(() => askedA).toBeGreaterThan(0);
+  await page.getByText('Chat B').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/b/events?since=0']);
+  await replay(page, turn(200, 'B question', 'B answer'));
+  await page.getByRole('button', { name: 'Load earlier messages' }).click({ timeout: 1500 }).catch(() => {});
+  await expect.poll(() => askedB).toBeGreaterThan(0);
+  // The page of the chat that was left comes first, while the open chat's own is still on its way.
+  releaseA();
+  await page.waitForTimeout(500);
+  releaseB();
+  await expect(page.getByText('B old question')).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(askedB).toBe(1);
+  await expect(page.getByText('B old question')).toHaveCount(1);
+  await expect(page.getByText('A old question')).toHaveCount(0);
+});
+
+test('a chat loaded again while a page of earlier messages was on its way can still load its own', async ({ page }) => {
+  await portal(page);
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let asked = 0;
+  await page.route('**/api/sessions/a/events/before**', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('limit') === '1') return route.fulfill({ json: { events: [ev(1, 'portal_prompt', { message: 'x' })], more: true } });
+    // The first page, of the list that was there, is slow and comes after the reload; the next is the new list's own.
+    if (asked++ === 0) {
+      await held;
+      return route.fulfill({ json: { events: turn(1, 'Ancient question', 'Ancient answer'), more: false } });
+    }
+    await route.fulfill({ json: { events: turn(1, 'Earlier than the new list', 'Its answer'), more: false } });
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(5, 'What is tau?', 'About 6.28.'));
+  await page.getByRole('button', { name: 'Load earlier messages' }).click({ timeout: 1500 }).catch(() => {});
+  await expect.poll(() => asked).toBe(1);
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('message', { seq: -1, type: 'portal_reload', at: Date.now(), payload: { reloads: 1 } }));
+  await replay(page, turn(2, 'What is pi?', 'About 3.14.'), 1);
+  await expect(page.getByText('What is pi?')).toBeVisible();
+  release();
+  await page.waitForTimeout(500);
+  // Asked for on its own when the top is in view, else by the button: either way the new list's page comes, and not the old one's.
+  await page.getByRole('button', { name: 'Load earlier messages' }).click({ timeout: 1500 }).catch(() => {});
+  await expect(page.getByText('Earlier than the new list')).toBeVisible();
+  await expect(page.getByText('Ancient question')).toHaveCount(0);
+});
+
 /**
  * A rewrite of the message in chat A is sent, and answered only when chat B is open with a message of its own half rewritten.
  * Gives B's editor.
