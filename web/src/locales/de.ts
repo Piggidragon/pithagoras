@@ -315,7 +315,7 @@ const de: Locale = {
     "Tool activity": "Tool-Aktivität",
     "The name of each tool as it runs — ⚙ bash · npm test": "Der Name jedes Tools, während es läuft — ⚙ bash · npm test",
     "Instructions": "Anweisungen",
-    "Appended to the agent's system prompt for every message that arrives through this channel. Use it for standing guidance that only applies here — the shape of the reply, who is on the other end, what to leave out.": "Wird für jede Nachricht, die über diesen Kanal kommt, an den Systemprompt des Agenten angehängt. Für feste Vorgaben, die nur hier gelten — die Form der Antwort, wer am anderen Ende ist, was wegbleiben soll.",
+    "Added to every message that arrives through this channel. Use it for standing guidance that only applies here — the shape of the reply, who is on the other end, what to leave out.": "Wird jeder Nachricht angehängt, die über diesen Kanal kommt. Für feste Vorgaben, die nur hier gelten — die Form der Antwort, wer am anderen Ende ist, was wegbleiben soll.",
     "You are answering over {channel}. Keep replies short — they are read on a phone. Never paste secrets or full file contents.": "Du antwortest über {channel}. Halte die Antworten kurz — sie werden auf einem Handy gelesen. Füge nie Geheimnisse oder ganze Dateiinhalte ein.",
     "this channel": "diesen Kanal",
     "Leave empty for none. The agent's own memory is shared across channels; this is not.": "Leer lassen für keine. Das Gedächtnis des Agenten teilen alle Kanäle; diese Anweisungen nicht.",

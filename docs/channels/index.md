@@ -109,8 +109,8 @@ alongside its **instructions**.
 
 ## Per-channel instructions
 
-Each channel can carry standing instructions, appended to the agent's system
-prompt for every message that arrives through that door and no other. The agent
+Each channel can carry standing instructions, appended to every message that
+arrives through that door and no other, in a `<channel-instructions>` block. The agent
 is one conversation with one memory, but who is on the other end differs by
 channel, and so should the way it answers.
 
@@ -199,7 +199,7 @@ Models:
 1. model-a
 2. model-b
 
-Reply with a number, or "cancel".
+Reply with a number. Anything else cancels.
 ```
 
 Numbers work, so does typing the option. `confirm` takes yes or no; `input` and

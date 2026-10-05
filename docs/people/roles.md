@@ -64,12 +64,15 @@ Context files split at the same boundary:
 | File | Loaded for |
 | --- | --- |
 | `SOUL.md` | Everyone — it is who the agent is |
-| `TEAM.md` | Everyone — the shared half |
+| `TEAM.md` | Everyone but you — the shared half. Your own conversations carry `PrimaryUser.md` and `MEMORY.md` instead |
 | `PrimaryUser.md` | You only |
 | `MEMORY.md` | You only — and nobody while [Understory](/guide/features#memory-understory) is the agent's memory |
 
 So a teammate messaging your bot gets an agent that knows its own name and your
-team's shared notes, and not your private context.
+team's shared notes, and not your private context. `TEAM.md` is the one file a
+colleague or a guest may write, so it is never loaded into your own
+conversations: what somebody else wrote there would reach the agent as its own
+words.
 
 ## What the agent is told
 

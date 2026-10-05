@@ -1142,7 +1142,7 @@ export interface Channel {
   config: Record<string, string>;
   /** Which secret fields have a value stored. */
   secretsSet: string[];
-  /** Appended to the agent's system prompt for messages arriving here. */
+  /** Appended to each message arriving here, in a <channel-instructions> block. */
   instructions: string;
   /** Relay what the agent says between tool calls, not just the final answer. */
   relayProgress: boolean;

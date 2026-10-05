@@ -594,7 +594,7 @@ function ChannelDetail({
           {t("Instructions")}
         </h3>
         <p className="mt-0.5 text-xs text-fg-subtle">
-          {t("Appended to the agent's system prompt for every message that arrives through this channel. Use it for standing guidance that only applies here — the shape of the reply, who is on the other end, what to leave out.")}
+          {t("Added to every message that arrives through this channel. Use it for standing guidance that only applies here — the shape of the reply, who is on the other end, what to leave out.")}
         </p>
         <textarea
           value={instructions}
