@@ -24,16 +24,16 @@ function device(over: Record<string, unknown> = {}) {
   };
 }
 
-async function portal(page: Page, { enabled = true, refused = null as string | null, devices = [device()] as any[] } = {}) {
+async function portal(page: Page, { enabled = true, devices = [device()] as any[] } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const state = { enabled, devices, pairing: null as null | { expires: string } };
   await mockPortal(page, ({ path, method, json }) => {
     if (method !== 'GET') sent.push({ method, path, body: method === 'DELETE' ? null : json() });
     if (path === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: false }, devices: { enabled: state.enabled } };
-    if (path === '/api/features/devices' && method === 'GET') return { enabled: state.enabled, refused };
+    if (path === '/api/features/devices' && method === 'GET') return { enabled: state.enabled };
     if (path === '/api/features/devices' && method === 'PUT') {
       state.enabled = json().enabled;
-      return { enabled: state.enabled, refused, reloaded: 0, waiting: 0 };
+      return { enabled: state.enabled, reloaded: 0, waiting: 0 };
     }
     if (path === '/api/devices' && method === 'GET') return { devices: state.devices, pairing: state.pairing, spki: 'pin-of-the-portal' };
     if (path === '/api/devices/pair' && method === 'POST') {
@@ -81,14 +81,6 @@ test('the add-on is off at first; switched on, the Devices page is in the sideba
   await expect(settings(page).getByRole('link', { name: 'Pair and manage devices' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('navigation', { name: 'Destinations' }).last().getByRole('button', { name: 'Devices' })).toBeVisible();
-});
-
-test('a portal without a password cannot switch devices on, and says why', async ({ page }) => {
-  await portal(page, { enabled: false, refused: 'no password', devices: [] });
-  await page.goto('/settings/add-ons');
-  await settings(page).getByRole('tab', { name: 'Devices' }).click();
-  await expect(settings(page).getByRole('switch', { name: 'Devices' })).toBeDisabled();
-  await expect(settings(page).getByText(/Set PORTAL_PASSWORD first/)).toBeVisible();
 });
 
 test('pairing shows the code once, with the command that carries the portal address; no pin over plain HTTP', async ({ page }) => {

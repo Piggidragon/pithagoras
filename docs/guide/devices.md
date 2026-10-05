@@ -13,10 +13,14 @@ until it is on again.
 
 ## Switching it on
 
-**Settings → Add-ons → Devices.** The switch needs a portal password: a portal
-that runs without one (`PORTAL_ALLOW_NO_PASSWORD`) cannot switch it on, as a
-paired computer would be open to anyone who reaches the portal. Once it is on,
-**Devices** is in the sidebar.
+**Settings → Add-ons → Devices.** Once it is on, **Devices** is in the sidebar.
+
+Whoever can open the portal can give a chat a paired computer, so the portal
+needs a login. That is the portal password, or a reverse proxy that
+authenticates in front of it (`PORTAL_ALLOW_NO_PASSWORD`, see
+[Deploying](deploying.md#running-without-a-password)). Behind such a proxy,
+the computer itself must still reach the portal's pairing and `/api/sync`
+address without that login: it authenticates with its own token.
 
 Switching it off closes every device's connection and cancels an open pairing
 code. The devices stay paired, and connect again by themselves once it is on.

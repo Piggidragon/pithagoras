@@ -1,7 +1,6 @@
 import { X509Certificate, createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import express, { type Router } from "express";
-import { authEnabled } from "../auth.js";
 import { tlsFiles } from "../http-security.js";
 import { getSession } from "../db.js";
 import { sessions } from "../session-manager.js";
@@ -41,13 +40,6 @@ function spkiPin(): string | null {
   }
 }
 
-/**
- * Why the add-on cannot be switched on here, or undefined when it can. A portal
- * without a password would hand every paired computer to whoever reaches it.
- */
-const devicesRefused = (): string | undefined =>
-  authEnabled ? undefined : "The portal runs without a password (PORTAL_ALLOW_NO_PASSWORD), and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.";
-
 /** A device as the page shows it: the row, and what its live connection says. */
 function shown(device: DeviceRecord) {
   const link = linkOf(device.id);
@@ -83,7 +75,7 @@ export function devicesRouter(): Router {
   const router = express.Router();
 
   router.get("/features/devices", (_req, res) => {
-    res.json({ enabled: devicesEnabled(), refused: devicesRefused() ?? null });
+    res.json({ enabled: devicesEnabled() });
   });
 
   router.put("/features/devices", async (req, res) => {
@@ -91,7 +83,6 @@ export function devicesRouter(): Router {
     if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be true or false" });
     try {
       const was = devicesEnabled();
-      if (enabled && devicesRefused()) throw new Error(devicesRefused());
       setDevicesEnabled(enabled);
       if (!enabled) {
         cancelPairingCode();
@@ -100,7 +91,7 @@ export function devicesRouter(): Router {
       }
       // Whether a chat has the device tools is settled when it loads.
       const { reloaded, waiting } = was !== enabled ? await sessions.reloadIdle() : { reloaded: 0, waiting: 0 };
-      res.json({ enabled: devicesEnabled(), refused: devicesRefused() ?? null, reloaded, waiting });
+      res.json({ enabled: devicesEnabled(), reloaded, waiting });
     } catch (e) {
       res.status(409).json({ error: (e as Error).message });
     }

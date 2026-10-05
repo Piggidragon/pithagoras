@@ -64,12 +64,12 @@ const until = async (check, what) => {
   assert.fail(`waited in vain for ${what}`);
 };
 
-test("a portal without a password cannot switch devices on", async () => {
-  const flags = await api("/api/features/devices", { at: open, as: null });
-  assert.equal(flags.body.enabled, false);
-  assert.match(flags.body.refused, /PORTAL_PASSWORD/);
-  assert.equal((await api("/api/features/devices", { at: open, as: null, method: "PUT", body: { enabled: true } })).status, 409);
-  assert.equal((await api("/api/features/flags", { at: open, as: null })).body.devices.enabled, false);
+test("a portal without a password (a reverse proxy in front) can switch devices on", async () => {
+  assert.equal((await api("/api/features/devices", { at: open, as: null })).body.enabled, false);
+  const on = await api("/api/features/devices", { at: open, as: null, method: "PUT", body: { enabled: true } });
+  assert.equal(on.status, 200);
+  assert.equal(on.body.enabled, true);
+  assert.equal((await api("/api/features/flags", { at: open, as: null })).body.devices.enabled, true);
 });
 
 test("the add-on is off at first, and its routes and the sync routes answer nothing until it is on", async () => {
