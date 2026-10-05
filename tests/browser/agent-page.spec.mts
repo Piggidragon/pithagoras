@@ -96,6 +96,30 @@ test('the note is said once for a page that was not dismissed either: leaving it
   await expect(note).toHaveCount(0);
 });
 
+test('the note is not said again for an agent that was left by the browser\'s Back', async ({ page }) => {
+  await portal(page, { kept: ['SOUL.md'] });
+  const main = await makeAda(page);
+  const note = main.getByRole('status').filter({ hasText: 'folder already had' });
+  await expect(note).toBeVisible();
+  await page.goBack();
+  await expect(main.getByRole('button', { name: 'New agent' })).toBeVisible();
+  await main.getByRole('button', { name: /^Ada/ }).click();
+  await expect(main.getByRole('heading', { name: 'Ada' })).toBeVisible();
+  await expect(note).toHaveCount(0);
+});
+
+test('the note is not said again for an agent that was left by the sidebar\'s Agents', async ({ page }) => {
+  await portal(page, { kept: ['SOUL.md'] });
+  const main = await makeAda(page);
+  const note = main.getByRole('status').filter({ hasText: 'folder already had' });
+  await expect(note).toBeVisible();
+  await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Agents' }).click();
+  await expect(main.getByRole('button', { name: 'New agent' })).toBeVisible();
+  await main.getByRole('button', { name: /^Ada/ }).click();
+  await expect(main.getByRole('heading', { name: 'Ada' })).toBeVisible();
+  await expect(note).toHaveCount(0);
+});
+
 test("an agent that lost one of its files and is set up again is not said to have taken up a folder from before", async ({ page }) => {
   await portal(page, { wizard: { initialised: true, kept: ['SOUL.md', 'PrimaryUser.md'] } });
   await page.goto('/agents?agent=ada');

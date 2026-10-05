@@ -42,7 +42,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const [params, setParams] = useSearchParams();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [creating, setCreating] = useState(false);
-  // The files an agent's folder already had, and so its answers did not replace: said on its page until it is told to go or the page is left, not again.
+  // The files an agent's folder already had, and so its answers did not replace: said on its page until it is told to go or the agent is left, not again.
   const [madeKept, setMadeKept] = useState<{ id: string; files: string[] } | null>(null);
   const [error, setError] = useState("");
 
@@ -63,6 +63,11 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
 
   const asked = params.get("agent");
   const agent = asked ? agents?.find((a) => a.id === asked) : undefined;
+  // However the agent is left — the link back, the browser's Back, the sidebar — the note goes with it. Only when the
+  // link changes: a new agent's note is set a moment before the link comes to name it.
+  useEffect(() => {
+    setMadeKept((made) => (made && made.id !== asked ? null : made));
+  }, [asked]);
 
   if (creating) {
     return (
@@ -101,10 +106,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
       onKept={(files) => setMadeKept({ id: agent.id, files })}
       back={
         <button
-          onClick={() => {
-            setMadeKept(null);
-            setParams({});
-          }}
+          onClick={() => setParams({})}
           className="mb-4 inline-flex items-center gap-1.5 text-xs text-fg-subtle transition hover:text-fg-muted"
         >
           <LuChevronLeft className="h-3.5 w-3.5" /> {t("Agents")}
@@ -113,7 +115,6 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
       onChanged={loadAgents}
       onDeleted={async () => {
         await loadAgents();
-        setMadeKept(null);
         setParams({});
       }}
       onSelect={onSelect}
