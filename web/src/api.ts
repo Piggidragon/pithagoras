@@ -489,7 +489,7 @@ export const api = {
     }),
   /** `discard` says that unsaved work in the folder (see ProjectContents) may go with it; without it the server refuses. */
   deleteProject: (name: string, discard = false) =>
-    json<{ ok: true; sessionsDeleted: number }>(`/api/projects/${encodeURIComponent(name)}${discard ? "?discard=1" : ""}`, {
+    json<{ ok: true; sessionsDeleted: number; jobsStopped: number }>(`/api/projects/${encodeURIComponent(name)}${discard ? "?discard=1" : ""}`, {
       method: "DELETE",
     }),
   renameSession: (id: string, title: string) =>
@@ -839,7 +839,7 @@ export const api = {
     json<Agent>(`/api/agents/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   /** The agent and its chats; its folder too when `folder` is "delete". */
   deleteAgent: (id: string, folder: "keep" | "delete") =>
-    json<{ ok: true; sessionsDeleted: number; routinesSwitchedOff: string[]; routinesDeleted: string[] }>(
+    json<{ ok: true; sessionsDeleted: number; routinesSwitchedOff: string[]; routinesDeleted: string[]; jobsStopped: number }>(
       `/api/agents/${encodeURIComponent(id)}?folder=${folder}`,
       { method: "DELETE" }
     ),

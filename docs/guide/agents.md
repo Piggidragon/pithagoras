@@ -110,9 +110,10 @@ A routine can run in any agent's home: choose the agent under **Runs in**.
 ## Deleting one
 
 The bin next to an agent's name deletes it. Its chats are stopped and deleted
-with it, and so are the [background jobs](/guide/extensions#subagents-and-background-jobs) they started in its
-folder (a dev server, a watcher), which nothing could show or stop afterwards.
-It asks what to do with its folder, and with it, its routines:
+with it, and so are the [background jobs](/guide/extensions#subagents-and-background-jobs) running in its
+folder (a dev server, a watcher), whichever way its folder goes: nothing could show
+or stop them afterwards. The dialog says so. It asks what to do with its folder,
+and with it, its routines:
 
 - **Keep its folder**: its files and memory stay, and so do the pictures its chats
   made, in the [Images page](/guide/images), and its routines, switched off. Make an

@@ -57,8 +57,20 @@ test.describe('the panels beside the conversation', () => {
     const panels = page.getByRole('complementary', { name: 'Panels' });
     await expect(panels.getByText('notes.txt')).toBeVisible();
     await expect.poll(async () => (await drawn(page)).GitPanel ?? 0).toBeGreaterThan(0);
-    // Let what it asked for arrive, so that what is counted next is only what typing does.
-    await page.waitForTimeout(300);
+    // Let what it asks for arrive, so that what is counted next is only what typing does. It reads its state when it
+    // opens, and once more 600 ms later for the file activity the chat already has: a fixed wait is short of that on a
+    // slow machine, and the second read then lands in the middle of the typing.
+    await expect.poll(() => page.evaluate(() => (window as any).gitAsked)).toBeGreaterThanOrEqual(2);
+    // And drawn, which is a moment after it is read: nothing is left to come when two looks agree.
+    let last = -1;
+    await expect
+      .poll(async () => {
+        const now = (await drawn(page)).GitPanel;
+        const same = now === last;
+        last = now;
+        return same;
+      }, { intervals: [150] })
+      .toBe(true);
     const before = (await drawn(page)).GitPanel;
     // The message box, which comes before the panels in the page: Git has boxes of its own.
     await page.getByRole('textbox').first().pressSequentially('hello there', { delay: 5 });

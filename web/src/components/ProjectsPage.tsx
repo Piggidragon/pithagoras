@@ -137,7 +137,8 @@ export function ProjectsPage({
       title: lost
         ? t("Delete the project \"{name}\" and its unsaved work?", { name: p.name })
         : t("Delete the project \"{name}\"?", { name: p.name }),
-      message: [...git, going, t("This cannot be undone.")].join(" ") + stranded,
+      // The jobs go whether or not there are any: how many is not asked, and what is running is not the chats' alone.
+      message: [...git, going, t("The background jobs running in its folder, a dev server for example, are stopped too."), t("This cannot be undone.")].join(" ") + stranded,
       confirmLabel: risky ? t("Delete anyway") : t("Delete project"),
       danger: true,
       // Asked whatever Settings says: the server refuses without it, and what is lost has no copy.

@@ -43,6 +43,8 @@ test('a clean repository is deleted with the plain question', async ({ page }) =
   await page.getByRole('button', { name: 'Delete demo' }).click();
   await expect(dialog(page)).toContainText('Delete the project "demo"?');
   await expect(dialog(page)).toContainText('Files git ignores, such as .env, are not looked at.');
+  // What runs in the folder goes with it, and the question is where it is said.
+  await expect(dialog(page)).toContainText('The background jobs running in its folder, a dev server for example, are stopped too.');
   await dialog(page).getByRole('button', { name: 'Delete project' }).click();
   await expect.poll(() => deletes).toEqual(['']);
 });

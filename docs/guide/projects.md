@@ -41,7 +41,8 @@ has and when one last moved.
   [Tools](#tools). A project that does this carries a *tools* mark on its row.
 - **Delete** removes the project: its chats and its folder, after a confirmation
   that says how many chats and files go with it. It is refused while a chat in
-  the project is running; the background jobs the chats started are stopped with it. When the folder holds git repositories — it is one,
+  the project is running; the background jobs running in its folder are stopped with it, and the
+  confirmation says so. When the folder holds git repositories — it is one,
   has submodules, or has repositories cloned into its subfolders — the
   confirmation also lists what only the folder holds: uncommitted changes (a
   new folder counts once), commits no remote has, and stashes. It then asks

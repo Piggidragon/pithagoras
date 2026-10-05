@@ -202,10 +202,15 @@ if (phase === 'switch') {
 // The Git panel, Files and the tools list of a chat that has not started: `?phase=git`. What the page sent is in window.sentTools.
 if (phase === 'git') {
   (window as any).sentTools = [];
+  // How often the Git panel read its state: it does once when it opens, and again when it is done with the file activity it was opened with.
+  (window as any).gitAsked = 0;
   let off: string[] = [];
   mockFetch((u, init) => {
     if (u.endsWith('/git/gh')) return { installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install gh' };
-    if (/\/git(\?|$)/.test(u)) return { repo: true, root: '/workspaces/pithagoras', prefix: '', branch: 'main', head: 'a'.repeat(40), upstream: 'origin/main', ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'README.md', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }, { path: 'notes.txt', x: '?', y: '?', kind: 'untracked' }] };
+    if (/\/git(\?|$)/.test(u)) {
+      (window as any).gitAsked++;
+      return { repo: true, root: '/workspaces/pithagoras', prefix: '', branch: 'main', head: 'a'.repeat(40), upstream: 'origin/main', ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'README.md', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }, { path: 'notes.txt', x: '?', y: '?', kind: 'untracked' }] };
+    }
     if (u.includes('/files?')) return { path: '', entries: [{ name: 'README.md', type: 'file', size: 12, mtime: 1 }], truncated: false };
     if (u.includes('/file?')) return { content: '# Pithagoras\n', binary: false, size: 13, mtime: 1 };
     if (u.endsWith('/tools') && init?.method === 'PUT') {
