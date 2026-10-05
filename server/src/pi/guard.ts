@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,12 +10,11 @@ import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
 import { UNDERSTORY } from "../features.js";
 import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
-import { piAgentDir } from "../pi-settings.js";
-import { isWithinText, realPath, realPathAhead } from "../within.js";
-import { listAgents } from "../agents.js";
-import { bundledPath } from "../bundled.js";
+import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
+import { agentsRoot, listAgents } from "../agents.js";
 import { workspaceRoot } from "../workspaces.js";
-import { CONTEXT_FILES, PRIVATE_FILES, WATCH_FILE } from "./context-files.js";
+import { PRIVATE_FILES } from "./context-files.js";
+import { LOADED_IN_FOLDERS, loadedAt, loadedPlaces, type LoadedAs } from "./loaded-from-folders.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 
@@ -536,73 +535,90 @@ function unreadable(toolName: string, input: Record<string, unknown>, workspace:
   return undefined;
 }
 
-/** What pi reads as a project's instructions, from the folder and every one above it, and the folders it loads its own from. */
-const PI_FILES = ["AGENTS.md", "CLAUDE.md"];
-const PI_FOLDERS = [".pi", ".agents"];
+/** The place as written and as it really is, which is not the same when a link is in the way. */
+const forms = (place: string): string[] => [...new Set([path.resolve(place), realPath(place) ?? path.resolve(place)])];
 
 /**
- * Whether pi loads `where` into the conversations that work in its folder: an
- * AGENTS.md or CLAUDE.md, which it reads from the folder and from every folder
- * above it, and the `.pi` and `.agents` folders, which hold its system prompt, its
- * extensions, skills and settings, as does its own agent folder. So do the folders
- * that ship with the portal and that it hands pi: the skills every conversation
- * has, the extensions it installs. What is written there reaches the primary
- * user's conversations as the agent's own words, and an extension runs in the
- * portal. Names and folders are told apart from their case, as a file system may not.
- */
-function loadedByPi(where: string): boolean {
-  const parts = where.toLowerCase().split(/[\\/]+/);
-  if (PI_FILES.some((name) => name.toLowerCase() === parts.at(-1))) return true;
-  if (PI_FOLDERS.some((name) => parts.includes(name))) return true;
-  const folders = [piAgentDir(), bundledPath("skills"), bundledPath("extensions")];
-  return folders.some((dir) => dir !== undefined && isWithinText(realPath(dir) ?? path.resolve(dir), where));
-}
-
-/**
- * Whether the portal reads the agent's own files out of `dir`: an agent's home,
- * and any folder of a project, for a chat of the primary user may run in each of
- * them. `notes/memory.md` in an agent's home is a note, and is not loaded.
+ * Whether the portal and pi read the agent's own files out of `dir`, as they do
+ * from the folder of a conversation: an agent's home, one that was kept from an
+ * agent that is gone, and one that is not made yet, for the next agent of that
+ * name takes whatever it finds there up as its own; and any folder of a project,
+ * for a chat of the primary user may run in each of them. `notes/memory.md` in
+ * an agent's home is a note, and is not read.
  */
 function readsOwnFilesFrom(dir: string, homes: string[]): boolean {
   if (homes.includes(dir)) return true;
-  const root = workspaceRoot();
-  return [root, realPath(root) ?? root].some((projects) => isWithinText(projects, dir));
+  if (forms(workspaceRoot()).some((projects) => isWithinText(projects, dir))) return true;
+  return forms(agentsRoot()).some((agents) => {
+    const below = pathBelow(agents, dir);
+    return below !== undefined && below !== "" && !below.includes("/");
+  });
 }
 
-const REACH = "it writes to the files the agent's own context is made of";
-const WATCHING = "it writes to the file that tells the agent what to watch on its own";
-const LOADED = "it writes to a place that pi loads the agent's instructions and extensions from";
+/** What a write to each of them becomes, in the words of the refusal. */
+const REFUSAL: Record<LoadedAs, string> = {
+  context: "it writes to the files the agent's own context is made of",
+  watch: "it writes to the file that tells the agent what to watch on its own",
+  "agent-name": "it writes to the file that says whose a kept folder is, and so which agent takes up what is in it",
+  instructions: "it writes to a place that pi loads the agent's instructions and extensions from",
+  tools: "it writes to a file that says which tool servers the agent starts, which run as processes of the portal",
+  code: "it writes to a place that the portal loads code from",
+};
+
+/** The folders a link at the name of a loaded file can be found in: those the primary user's conversations run in, and the top of each project. */
+function foldersToLookIn(homes: string[]): string[] {
+  const folders = new Set(homes);
+  for (const root of [...forms(agentsRoot()), ...forms(workspaceRoot())]) {
+    folders.add(root);
+    try {
+      for (const entry of readdirSync(root, { withFileTypes: true })) if (entry.isDirectory() || entry.isSymbolicLink()) folders.add(path.join(root, entry.name));
+    } catch {
+      // A folder that is not there has nothing in it.
+    }
+  }
+  return [...folders];
+}
 
 /**
- * Why a write to any of these places would put words into what the agent takes as
- * its own instructions, or undefined. The same place written two ways — as
- * asked, and where its links lead — for pi loads a file under the name it has
- * in the folder, and a file written under a link goes where the link leads.
+ * Why a write to any of these places would put words, config or a process into
+ * what the portal, pi, the MCP adapter or the heartbeat load on their own, or
+ * undefined. What those are is said once, in loaded-from-folders.ts. The same
+ * place is judged written two ways — as asked, and where its links lead — for pi
+ * loads a file under the name it has in the folder, and a file written under a
+ * link goes where the link leads.
  *
- * The agent's own files (CONTEXT_FILES) are read out of the folder a conversation
- * runs in, whichever it is, so they are held wherever such a folder is — another
- * agent's home included, and a link at their name in any of `homes` — and
- * WATCH.md, which tells its heartbeat what to do, is held with them.
+ * The agent's own files and the rest of what is read by name out of a folder a
+ * conversation runs in are held wherever such a folder is — any agent's home, one
+ * kept or not made yet, any folder of a project — and a link at one of the names
+ * in any of those, or at the top of a project, is followed to what it leads to,
+ * for a file that is not there yet as for one that is.
  * `homes` is not given where there is no folder to hold it to, and then the names
  * are held in every folder.
  */
 function writesInstructions(places: string[], homes?: string[]): string | undefined {
-  const files = [...CONTEXT_FILES, WATCH_FILE];
+  const reads = homes && ((dir: string) => readsOwnFilesFrom(dir, homes));
+  const elsewhere = loadedPlaces().map((place) => ({ as: place.as, at: [...forms(place.path), realPathAhead(place.path)] }));
   for (const where of places) {
-    const name = path.basename(where).toLowerCase();
-    const own = files.find((file) => file.toLowerCase() === name);
-    if (own && (homes === undefined || readsOwnFilesFrom(path.dirname(where), homes))) return own === WATCH_FILE ? WATCHING : REACH;
-    if (loadedByPi(where)) return LOADED;
+    const entry = loadedAt(where, reads);
+    if (entry) return REFUSAL[entry.as];
+    const held = elsewhere.find((place) => place.at.some((one) => isWithinText(one, where)));
+    if (held) return REFUSAL[held.as];
   }
   // Where a link at the name of one of them leads is what is loaded.
-  for (const dir of homes ?? []) {
-    const at = (name: string) => realPath(path.join(dir, name));
-    const hit = (real: string | null) => real !== null && places.some((where) => where.toLowerCase() === real.toLowerCase());
-    for (const file of files) if (hit(at(file))) return file === WATCH_FILE ? WATCHING : REACH;
-    for (const file of PI_FILES) if (hit(at(file))) return LOADED;
-    for (const folder of PI_FOLDERS) {
-      const real = at(folder);
-      if (real !== null && places.some((where) => isWithinText(real, where))) return LOADED;
+  for (const dir of homes ? foldersToLookIn(homes) : []) {
+    let names: Set<string>;
+    try {
+      names = new Set(readdirSync(dir).map((name) => name.toLowerCase()));
+    } catch {
+      continue;
+    }
+    for (const entry of LOADED_IN_FOLDERS) {
+      const parts = entry.name.split("/");
+      if (!names.has(parts[0].toLowerCase())) continue;
+      const at = path.join(dir, ...parts);
+      const leads = realPathAhead(at);
+      if (leads === path.join(realPath(dir) ?? dir, ...parts)) continue;
+      if (places.some((where) => (entry.folder ? isWithinText(leads, where) : where.toLowerCase() === leads.toLowerCase()))) return REFUSAL[entry.as];
     }
   }
   return undefined;

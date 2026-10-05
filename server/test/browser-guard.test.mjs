@@ -9,7 +9,7 @@ const { approvalCannotHelp, guardExtension, ruleAllows, ruleApplies, taintSessio
 const { BROWSER_UNTRUSTED_GUIDELINE, browserTools, cleanRef } = await import("../dist/browser/tools.js");
 const { addToolRule, deleteToolRule, listAudit, listToolRules, useGrant } = await import("../dist/db.js");
 const { recordApproval } = await import("../dist/approvals.js");
-const { createAgent } = await import("../dist/agents.js");
+const { agentsRoot, createAgent, deleteAgent } = await import("../dist/agents.js");
 const { bundledPath } = await import("../dist/bundled.js");
 
 const guard = () => {
@@ -559,6 +559,41 @@ test("a rule for writing opens nothing that is loaded as instructions into someb
     }
     // Without a folder to hold it to, by name in every folder.
     for (const where of ["docs/WATCH.md", "/anywhere/soul.md"]) assert.equal(refused(call(guardAs({ role: "colleague", key: "priya" }), "write", { path: where, content: "x" })), true, where);
+  } finally {
+    for (const id of ids) deleteToolRule(id);
+  }
+});
+
+test("the rule a person is given for a folder reaches no config the agent loads from there, and none in a folder an agent will have, or in a project through a link", () => {
+  const ids = [["write", `${workspace}/*`], ["write", `${agentsRoot()}/*`], ["write", `${process.env.WORKSPACE_ROOT}/*`]].map(([tool, pattern], i) => {
+    const id = `rule-shapes-${i}`;
+    addToolRule({ id, role: "all", tool, pattern, note: "", person_key: null });
+    return id;
+  });
+  const gone = createAgent({ name: "Gone" });
+  deleteAgent(gone.id, { deleteFolder: false });
+  const site = path.join(process.env.WORKSPACE_ROOT, "cloned");
+  mkdirSync(site, { recursive: true });
+  symlinkSync(".cursorrules", path.join(site, "AGENTS.md"));
+  symlinkSync("../pi-shared", path.join(site, ".pi"));
+  try {
+    for (const role of ["colleague", "guest"]) {
+      const as = guardAs({ role, key: "priya", workspace });
+      for (const where of [
+        // The MCP adapter starts what these name, as processes of the portal, in the next chat that opens here.
+        path.join(workspace, ".mcp.json"), path.join(workspace, ".vscode", "mcp.json"), path.join(workspace, "opencode.json"),
+        // The next agent of a name takes up what a folder under agents/ holds, kept or not made yet.
+        path.join(gone.home, "MEMORY.md"), path.join(gone.home, "SOUL.md"), path.join(agentsRoot(), "finance", "SOUL.md"), path.join(agentsRoot(), "finance", "PrimaryUser.md"),
+        // A link in a project at what pi loads, to a file that is there and to a folder that is not.
+        path.join(site, ".cursorrules"), path.join(process.env.WORKSPACE_ROOT, "pi-shared", "extensions", "x.ts"),
+      ]) {
+        const result = call(as, "write", { path: where, content: "x" });
+        assert.equal(refused(result), true, `${role}: ${where}`);
+        assert.match(result.reason, /^Refused: it writes to /);
+      }
+      // The folder's own notes, and what a project holds that nothing loads, are what the rule is for.
+      for (const where of [path.join(workspace, "notes", "a.md"), path.join(agentsRoot(), "finance", "notes", "a.md"), path.join(site, "README.md")]) assert.equal(call(as, "write", { path: where, content: "x" }), undefined, `${role}: ${where}`);
+    }
   } finally {
     for (const id of ids) deleteToolRule(id);
   }

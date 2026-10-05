@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { bundledPath } from "../bundled.js";
-import { dataFolder } from "../data-dir.js";
+import { channelsPath } from "../data-dir.js";
 import { oneAtATime } from "../one-at-a-time.js";
 import { isUnderText, isWithinText } from "../within.js";
 
@@ -73,7 +73,7 @@ export interface BrokenChannel {
 
 /** Where third-party packages are installed. Builtins ship inside the image. */
 export const channelsDir = (): string => {
-  const dir = dataFolder("CHANNELS_DIR", "channels");
+  const dir = channelsPath();
   mkdirSync(dir, { recursive: true });
   return dir;
 };

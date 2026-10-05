@@ -28,24 +28,45 @@ refused. Secrets are told by the name of the file, so a `tokenizer.ts` or a page
 about credentials is read like any other. The same goes for a rule you allowed:
 it opens the tool, not the files the guard keeps from them, so an allowed
 command that names a secret or one of those two files is refused. So is a
-`write` or `edit` rule that reaches what is loaded into your own conversations,
-or what your agent's heartbeat is told, as the agent's own words, where a
-colleague's text would be an instruction to it:
+`write` or `edit` rule that reaches anything the portal, pi, its MCP adapter or
+your agent's heartbeat load on their own: it would reach your own conversations
+as the agent's own words, or its tools, where a colleague's text would be an
+instruction to it, or a process of the portal.
 
-- `SOUL.md`, `PrimaryUser.md` and `MEMORY.md` in an agent's home or any folder of
-  a project, **any agent's** and not only the one they are talking to, and
-  `WATCH.md`, which tells the heartbeat what to look at on every look. A file
-  with one of those names in a folder no conversation runs in, such as
-  `notes/memory.md` in an agent's home, is only a note.
-- What pi itself loads: an `AGENTS.md` or `CLAUDE.md` in any folder (pi reads the
-  ones above the conversation's too), anything in a `.pi` or `.agents` folder (its
-  system prompt, its extensions, which run in the portal, its skills and
-  settings), pi's own agent folder, and the folders that come with the portal: the
-  skills every conversation has and the extensions it installs.
+| Name | Loaded by | It becomes |
+| --- | --- | --- |
+| `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` | the portal | the agent's own context |
+| `WATCH.md` | the heartbeat | what it is asked on every look |
+| `.agent-name` | the portal | which agent a kept folder belongs to, and so who takes up what is in it |
+| `AGENTS.md`, `CLAUDE.md` | pi, from the folder and from every folder above it | the project's instructions |
+| `.pi`, `.agents` | pi, with everything in them | its system prompt, settings, skills, prompts, themes and extensions, which run in the portal |
+| `.mcp.json`, `.vscode/mcp.json`, `opencode.json` | pi's MCP adapter | tool servers it starts, each a process of the portal |
 
-A link does not lead round this: a file is judged by where it really ends up, and
-by the name it has in the folder that is read from, for a file that is not there
-yet as for one that is.
+These are held in an agent's home, **any agent's** and not only the one they are
+talking to, one that was kept when its agent was deleted and one that nobody has
+made yet (the next agent of that name takes up what it finds there), and in any
+folder of a project. A name in a folder no conversation runs in, such as
+`notes/memory.md` in an agent's home, is only a note. A folder named `.pi` or
+`.agents` is held wherever it is, and so are `AGENTS.md`, `CLAUDE.md` and
+`opencode.json`, which are read from above the folder as well.
+
+Some places are held whole, whatever is in them: pi's own agent folder, the
+folders that come with the portal (the skills every conversation has, the
+extensions it installs, the built-in channels), the folder channel packages are
+installed in, which run in the portal, and the files the MCP adapter reads in the
+home of the user the portal runs as, such as `~/.config/mcp/mcp.json`.
+
+A link does not lead round this. A file is judged by where it really ends up, and
+a link at one of these names, in an agent's home, in the folder of the
+conversation, or at the top of a project, is followed to what it leads to, for a
+file that is not there yet as for one that is.
+
+What is **not** held, because nothing loads it when a conversation opens: the
+portal's own data (its database), what a project contains and somebody runs (a
+script, a Makefile, `.git/hooks`), a folder that is on `PATH`, and a shell
+profile. A rule that reaches those is what the person who wrote it chose, so give
+a rule the folder it is for. The heartbeat keeps the rules written for *all
+roles*, as it reads what its `WATCH.md` names wherever that is.
 
 A `bash` rule is the exception to the folder: a command runs as the agent, and
 what a shell makes of `cat *` or of a path built while it runs cannot be
@@ -88,8 +109,8 @@ So a teammate messaging your bot gets an agent that knows its own name and your
 team's shared notes, and not your private context. `TEAM.md` is the only one of
 these files a colleague or a guest may write, so it is never loaded into your own
 conversations: what somebody else wrote there would reach the agent as its own
-words. Files that pi loads on its own (`AGENTS.md`, `.pi`, see above) are closed
-to a `write` rule for the same reason.
+words. What is loaded on its own (`AGENTS.md`, `.pi`, `.mcp.json`, see above) is
+closed to a `write` rule for the same reason.
 
 ## What the agent is told
 

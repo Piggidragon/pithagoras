@@ -5,6 +5,7 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { getDb } from "./db.js";
 import { removeFolderLater } from "./folder-removal.js";
 import { agentHomePath } from "./agent-home.js";
+import { AGENT_NAME_FILE as NAME_FILE } from "./pi/context-files.js";
 import { isWithinText } from "./within.js";
 import { normalizeOrb, type OrbStyle } from "./orb-style.js";
 import { readVoice } from "./voice-presets.js";
@@ -96,9 +97,6 @@ export function slugOf(name: string): string {
 
 /** Names are the same when they differ in case and in the space around them only. */
 const sameName = (name: string): string => name.normalize("NFC").trim().toLowerCase();
-
-/** In an agent's folder: the name it was made for, so that only that name takes a kept folder up. */
-const NAME_FILE = ".agent-name";
 
 /**
  * Whether an agent called `name` may have `home`: it is not there, or empty, or

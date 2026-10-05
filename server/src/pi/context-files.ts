@@ -23,3 +23,6 @@ export const PRIVATE_FILES = CONTEXT_FILES.filter((name) => !SHARED_FILES.includ
  * an instruction to the agent, so it is held like the files above.
  */
 export const WATCH_FILE = "WATCH.md";
+
+/** In an agent's folder: the name it was made for, so that only that name takes a kept folder up again (see agents.ts). */
+export const AGENT_NAME_FILE = ".agent-name";
