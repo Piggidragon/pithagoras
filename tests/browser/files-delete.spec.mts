@@ -177,3 +177,25 @@ test('cancelling a delete gives focus back to the row\'s Delete button, whether 
   await expect(dialog(page)).toHaveCount(0);
   await expect(folder).toBeFocused();
 });
+
+test('two questions that came one after the other keep focus in the second, and the last answer gives it back to the row that was asked first', async ({ page }) => {
+  let release!: () => void;
+  const hold = new Promise<void>((r) => (release = r));
+  await files(page, { unsaved: { changed: 0, unpushed: 0, stashes: 0 }, hold });
+  // The folder's check is still out when a file is deleted: its question comes up while the file's is open.
+  await page.getByRole('button', { name: 'Delete api' }).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Delete notes.md' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog(page)).toContainText('Delete "notes.md"?');
+  release();
+  // Until the folder's question is waiting behind the file's.
+  await page.waitForTimeout(250);
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toContainText('Delete "api"?');
+  // Not sent back behind the backdrop to the row the first question came from.
+  await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete notes.md' })).toBeFocused();
+});

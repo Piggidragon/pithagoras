@@ -56,12 +56,16 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
       .then(({ id: termId }) => {
         if (closed) return void api.closeTerminal(termId).catch(() => {});
         id = termId;
-        source = new EventSource(`/api/terminal/${termId}/stream`);
-        source.onmessage = (m) => term.write(JSON.parse(m.data));
         // Keystrokes that go nowhere — the shell has exited, or the portal has
         // restarted — used to vanish, and the panel looked merely unresponsive.
-        // Said once, not on every key.
+        // Said once, not on every key — and again after the stream has come back:
+        // what it replays starts with a reset, which clears the screen of the notice.
         let told = false;
+        source = new EventSource(`/api/terminal/${termId}/stream`);
+        source.onmessage = (m) => term.write(JSON.parse(m.data));
+        source.onopen = () => {
+          told = false;
+        };
         term.onData(
           orderedInput(
             (data) => api.terminalInput(termId, data),

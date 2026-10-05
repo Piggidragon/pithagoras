@@ -45,7 +45,9 @@ folder and does not come back to the old one: that is ended after five minutes
 with nobody watching, with what it started.
 
 If the connection to the shell is lost — it exited, or the portal restarted — the
-panel says so once; close it and open it again for a new one.
+panel says so once; close it and open it again for a new one. If the connection
+comes back and the replay clears the screen, the notice goes with it, and it is
+said again the next time keys go nowhere.
 
 ::: warning It is a shell in the portal's container
 Anyone who can log in to the portal can open one, with the portal's own

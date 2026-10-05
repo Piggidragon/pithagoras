@@ -32,6 +32,8 @@ interface ConfirmOptions {
 type Pending = ConfirmOptions & { id: number; resolve: (ok: boolean) => void; from: HTMLElement | null };
 
 let present: ((p: Pending) => void) | null = null;
+/** The question that is drawn now. */
+let shown: Pending | undefined;
 let counter = 0;
 
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
@@ -42,7 +44,11 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
     const text = typeof options.message === "string" ? `\n\n${options.message}` : "";
     return Promise.resolve(window.confirm(options.title + text));
   }
-  return new Promise((resolve) => present!({ ...options, id: ++counter, resolve, from: document.activeElement as HTMLElement | null }));
+  const active = document.activeElement as HTMLElement | null;
+  // Asked while another question is open (a check that took a while came back): focus is in that dialog, which goes
+  // before this one is drawn. Focus goes back to where that one would have put it.
+  const from = shown && active?.closest('[role="alertdialog"]') ? shown.from : active;
+  return new Promise((resolve) => present!({ ...options, id: ++counter, resolve, from }));
 }
 
 /** Mounted once, at the root. Draws whatever confirmDialog() asked for, in order. */
@@ -51,6 +57,15 @@ export function ConfirmHost() {
   const cancel = useRef<HTMLButtonElement>(null);
   const confirm = useRef<HTMLButtonElement>(null);
   const current = queue[0];
+  // What is waiting, as the last drawing had it: for the cleanup of the question answered, which runs after the next one is drawn.
+  const waiting = useRef(queue);
+  waiting.current = queue;
+  useEffect(() => {
+    shown = current;
+    return () => {
+      shown = undefined;
+    };
+  }, [current]);
   // Answered, the dialog sinks away as a picture of itself (see motion.ts).
   const leaving = useLeaveRef<HTMLDivElement>("dialog");
 
@@ -92,6 +107,8 @@ export function ConfirmHost() {
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
+      // The next question is drawn already, and has taken focus: it is the one to give it back, from the same place.
+      if (waiting.current[0] && waiting.current[0].id !== current.id) return;
       // A control that is only drawn while its row has focus (the sidebar's Delete) is not there to take it back: its row is.
       const back = before && before.getClientRects().length === 0 ? before.parentElement?.closest<HTMLElement>('[tabindex]:not([tabindex="-1"]), a[href], button') : before;
       // Unless focus went somewhere on purpose meanwhile: what the answer led to.
