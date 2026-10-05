@@ -223,6 +223,13 @@ test("an answer the primary user wrote without the question's id is no answer, a
   const ask = (question) =>
     askQuestion({ sessionId: "gus-chat", personKey: "tg:gus", personName: "Gus", channelSlug: "tg", channelKey: "chat:gus", question });
   const lunch = ask("Is lunch at noon on Friday?");
+  // One from days ago, which nobody is waiting for any more.
+  const stale = ask("Was the old plan fine?");
+  getDb().prepare("UPDATE questions SET asked_at = datetime('now', '-2 days') WHERE id = ?").run(stale.id);
+  // Not told to the people who cannot answer it: a colleague writes while there is something to tell, so that a reminder
+  // for everybody who writes would show.
+  assert.equal(await say("kim", "hi", "chat:kim"), "ok");
+  assert.equal(await say("gus", "hi", "chat:gus"), "ok");
   const first = await say("owner", "Yes, lunch is at noon.", "report");
   assert.match(first, new RegExp(`^ok\\n\\nStill waiting for your answer:\\n\\n#${lunch.id} from Gus \\(tg:gus\\) asked:\\n\\nIs lunch at noon on Friday\\?\\n\\nReply with "#${lunch.id} <your answer>"`));
   assert.equal(getQuestion(lunch.id).answered_at, null, "it was not taken for the answer");
@@ -236,9 +243,8 @@ test("an answer the primary user wrote without the question's id is no answer, a
   recordAnswer(gone.id, "no");
   const next = await say("owner", "hello again", "report");
   assert.match(next, new RegExp(`Still waiting for your answer:\\n\\n#${car.id} from Gus`));
-  assert.doesNotMatch(next, new RegExp(lunch.id + "|" + gone.id));
-  // Not told to the people who cannot answer it.
-  assert.equal(await say("kim", "hi", "chat:kim"), "ok");
+  assert.doesNotMatch(next, new RegExp(lunch.id + "|" + gone.id + "|" + stale.id));
+  assert.doesNotMatch(first, new RegExp(stale.id), "only the last day's questions are named");
 });
 
 test("a question that did not reach the primary user is not left waiting, and one that waits for them to speak is named with what it asks", async () => {

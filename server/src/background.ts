@@ -388,7 +388,8 @@ export async function stopJobsIn(workspace: string): Promise<number> {
   if (!BACKGROUND_SUPPORTED) return 0;
   let stopped = 0;
   try {
-    for (const job of await listJobs(workspace)) {
+    // Read now: a job started in the second after somebody's last look (a jobs panel asks every few seconds) would be left running.
+    for (const job of await listJobs(workspace, false, true)) {
       if (job.state !== "exited" && (await stopJob(workspace, job.key))) stopped++;
     }
   } catch {

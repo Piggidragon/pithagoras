@@ -142,6 +142,32 @@ test("deleting a project stops the jobs its chats started", async () => {
   });
 });
 
+test("deleting an agent or a project stops a job that started after the last look at its folder", async () => {
+  // The jobs panel of an open chat looks every few seconds, and what a look finds is kept for a second.
+  const looked = async (folder, chat) => {
+    assert.equal((await call("GET", `/api/sessions/${chat}/background`)).status, 200);
+    assert.ok(existsSync(folder));
+  };
+  const made = (await call("POST", "/api/agents", { name: "Panel" })).body;
+  const agentChat = (await call("POST", "/api/sessions", { agent: made.id })).body;
+  await looked(made.home, agentChat.id);
+  await withJob(made.home, async () => {
+    const gone = await call("DELETE", `/api/agents/${made.id}?folder=delete`);
+    assert.equal(gone.status, 200, JSON.stringify(gone.body));
+    assert.equal(gone.body.jobsStopped, 1, "a job the last look did not see");
+  });
+
+  const project = await call("POST", "/api/projects", { name: "Panel" });
+  assert.equal(project.status, 200, JSON.stringify(project.body));
+  const projectChat = (await call("POST", "/api/sessions", { workspace: project.body.path })).body;
+  await looked(project.body.path, projectChat.id);
+  await withJob(project.body.path, async () => {
+    const gone = await call("DELETE", `/api/projects/${project.body.name}?discard=1`);
+    assert.equal(gone.status, 200, JSON.stringify(gone.body));
+    assert.equal(gone.body.jobsStopped, 1);
+  });
+});
+
 test("the first agent is not deleted", async () => {
   assert.equal((await call("DELETE", "/api/agents/home")).status, 409);
   const { status } = await call("DELETE", "/api/agents/nobody");
