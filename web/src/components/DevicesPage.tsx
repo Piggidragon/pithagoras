@@ -100,6 +100,8 @@ export function DevicesPage() {
           </div>
         </PageHeader>
 
+        <ClientDownloads />
+
         {code ? (
           <PairingPanel code={code} spki={list.spki} onCancel={() => void cancelCode()} onAgain={() => void newCode()} />
         ) : list.pairing ? (
@@ -121,6 +123,31 @@ export function DevicesPage() {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The client's releases: the newest one, and each program under a name that stays the same from release to release. */
+const CLIENT_RELEASES = "https://github.com/Piggidragon/Pithagoras-Sync/releases/latest";
+const CLIENT_DOWNLOADS = [
+  { label: msg("Linux (x86-64)"), file: "pithagoras-sync-x86_64-linux" },
+  { label: msg("Linux (ARM64)"), file: "pithagoras-sync-aarch64-linux" },
+  { label: msg("Windows (x86-64)"), file: "pithagoras-sync-x86_64-windows.exe" },
+];
+
+/** Where to get the client, whether or not a device is paired yet: the newest release, one link per program. */
+function ClientDownloads() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-line bg-raised/40 px-3 py-2 text-sm text-fg-muted" data-testid="client-downloads">
+      <span>{t("Download the client:")}</span>
+      {CLIENT_DOWNLOADS.map((d) => (
+        <a key={d.file} href={`${CLIENT_RELEASES}/download/${d.file}`} className="text-accent hover:underline" rel="noreferrer noopener">
+          {d.label}
+        </a>
+      ))}
+      <a href={CLIENT_RELEASES} target="_blank" className="text-accent hover:underline" rel="noreferrer noopener">
+        {t("All downloads and the install guide")}
+      </a>
     </div>
   );
 }

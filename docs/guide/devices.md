@@ -28,8 +28,10 @@ code. The devices stay paired, and connect again by themselves once it is on.
 
 ## Pairing a computer
 
-1. Install the client on the computer (see the client's README). Run it as the
-   user whose files the chats should reach, or better as a user of its own.
+1. Install the client on the computer: the **Devices** page links to the
+   newest release for Linux and Windows (the client's README has the rest).
+   Run it as the user whose files the chats should reach, or better as a user
+   of its own.
 2. On the **Devices** page, press **Pair a device**. The portal shows an
    eight-character code, good once, for ten minutes. Ten wrong codes, from
    anywhere, cancel it.

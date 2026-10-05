@@ -91,6 +91,17 @@ test('a portal without a password cannot switch devices on, and says why', async
   await expect(settings(page).getByText(/Set PORTAL_PASSWORD first/)).toBeVisible();
 });
 
+test('the page links to the newest client release, one program per system', async ({ page }) => {
+  await portal(page, { devices: [] });
+  await page.goto('/devices');
+  const box = page.getByTestId('client-downloads');
+  const base = 'https://github.com/Piggidragon/Pithagoras-Sync/releases/latest';
+  await expect(box.getByRole('link', { name: 'Linux (x86-64)' })).toHaveAttribute('href', `${base}/download/pithagoras-sync-x86_64-linux`);
+  await expect(box.getByRole('link', { name: 'Linux (ARM64)' })).toHaveAttribute('href', `${base}/download/pithagoras-sync-aarch64-linux`);
+  await expect(box.getByRole('link', { name: 'Windows (x86-64)' })).toHaveAttribute('href', `${base}/download/pithagoras-sync-x86_64-windows.exe`);
+  await expect(box.getByRole('link', { name: 'All downloads and the install guide' })).toHaveAttribute('href', base);
+});
+
 test('pairing shows the code once, with the command that carries the portal address; no pin over plain HTTP', async ({ page }) => {
   const { sent } = await portal(page, { devices: [] });
   await page.goto('/devices');
