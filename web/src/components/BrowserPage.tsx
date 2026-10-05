@@ -10,7 +10,7 @@ import {
 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { BrowserInstall } from "./BrowserInstall";
-import { ErrorBanner, LoadFailed, inputCls } from "./SettingsUi";
+import { ErrorBanner, LoadFailed, SwitchRow, inputCls } from "./SettingsUi";
 import { api, type BrowserStatus } from "../api";
 import { pollWhileVisible } from "../poll";
 import { labelOf, msg, t, tx } from "../i18n";
@@ -237,15 +237,12 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
         )}
 
         <section className="mb-6">
-          <label className="flex items-start gap-2.5 text-sm text-fg">
-            <input type="checkbox" className="mt-0.5" checked={status.cursor} onChange={(e) => act(() => api.setBrowserCursor(e.target.checked))} />
-            <span>
-              {t("Show the agent's cursor")}
-              <span className="mt-0.5 block text-xs text-fg-muted">
-                {t("Before each click, typed text or choice, an arrow glides to the element and says what it is about to do, so you can follow along. Off, the actions do not wait for it.")}
-              </span>
-            </span>
-          </label>
+          <SwitchRow
+            title={t("Show the agent's cursor")}
+            detail={t("Before each click, typed text or choice, an arrow glides to the element and says what it is about to do, so you can follow along. Off, the actions do not wait for it.")}
+            on={status.cursor}
+            onChange={(on) => act(() => api.setBrowserCursor(on))}
+          />
         </section>
 
         {status.pages.length > 0 && (

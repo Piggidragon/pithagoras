@@ -1849,7 +1849,7 @@ export function setPortalBrowser(on: boolean): void {
  * Browser page ("0"). Off, nothing moves and the actions do not wait for it.
  */
 export function browserCursorOn(): boolean {
-  return (getStoredSettings() as Record<string, string>).browser_cursor !== "0";
+  return getSetting("browser_cursor") !== "0";
 }
 
 export function setBrowserCursor(on: boolean): void {

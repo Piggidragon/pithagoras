@@ -158,7 +158,7 @@ the field keeps it.
   glow in light mode.
 
 Each move takes about a third of a second, which the action waits for. To turn
-it off, clear **Browser → Show the agent's cursor**; the actions then do not wait.
+it off, use the **Browser → Show the agent's cursor** switch; the actions then do not wait.
 
 ### Upgrading from the Playwright MCP
 

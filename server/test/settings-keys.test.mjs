@@ -50,6 +50,16 @@ test("a setting that is emptied leaves no row, whichever way it is written", () 
   assert.equal(db.getDefaultContextLimit(), undefined);
 });
 
+test("the browser cursor's switch is its own key, which the three model defaults do not carry", () => {
+  assert.equal(db.browserCursorOn(), true, "on where nobody said otherwise");
+  db.setBrowserCursor(false);
+  assert.equal(row("browser_cursor")?.value, "0");
+  assert.equal(db.browserCursorOn(), false);
+  assert.equal("browser_cursor" in db.getStoredSettings(), false, "and not in the model defaults");
+  db.setBrowserCursor(true);
+  assert.equal(db.browserCursorOn(), true);
+});
+
 test("the browser's address settings are read one by one, with the environment behind them", async () => {
   const service = await import("../dist/extensions/browser-service.js");
   delete process.env.BROWSER_USER;

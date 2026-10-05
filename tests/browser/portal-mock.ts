@@ -56,7 +56,7 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
   if (path === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: false } };
   if (path === '/api/browser') return {
     running: false, unprotected: false, connectedAs: null, install: { available: false, image: false, container: 'absent', pulling: { active: false, line: '' } },
-    config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '', allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
+    config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '', cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
   };
   if (path === '/api/voice') return { enabled: false };
   if (/^\/api\/sessions\/[^/]+\/background$/.test(path)) return { supported: true, jobs: [], statuses: [], widgets: [] };
