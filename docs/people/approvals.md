@@ -30,6 +30,8 @@ order of the call (a single picture is just its path), and the agent is told
 exactly which when the call is refused. The prompt is not part of what is
 approved. **Always allow** then writes one rule for each picture, since a rule is
 matched against each picture of a call and one for all of them would match none.
+A tool that names no path (a search, an MCP tool) is approved on its arguments, as
+JSON, exactly; the agent is told that as well.
 
 Nothing is put to you that an approval could not make run. The guard keeps
 some things from everybody who is not you, whatever is allowed: a write to the
@@ -40,9 +42,11 @@ conversation that has read something untrusted refuses a push, an upload, a
 subagent or a schedule after an approval as before it (see
 [the injection guard](/guide/security#limiting-what-happens-next)), so it is not
 asked for one there, and an approval you gave earlier is not used up on a call
-that is refused. If the agent asks for any of these, the question is refused
-before it reaches you, and it tells the person it is not something it can do for
-them.
+that is refused. A subagent, and the tools that make, change or run a routine,
+are never put to you for somebody else: they would run with your rights, not
+theirs (see [roles](/people/roles#what-a-colleague-may-do)). If the agent asks for
+any of these, the question is refused before it reaches you, and it tells the
+person it is not something it can do for them.
 
 The agent chooses neither the recipient nor the route. A session working for
 somebody else must not be able to pick who hears from it.

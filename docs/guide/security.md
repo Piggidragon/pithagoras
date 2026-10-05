@@ -126,5 +126,7 @@ The guard also enforces what a teammate may do, checked per tool call so it
 follows whoever is speaking. That is documented under [People](/people/). What
 a colleague or a guest may write stops short of everything that the portal, pi,
 its MCP adapter or an agent's heartbeat load on their own, which would put their
-words, their tools or a process into your next conversation: the list is under
+words, their tools or a process into your next conversation, and nothing opens
+the tools that would run what they write with your rights (a subagent, a
+routine): the list is under
 [what a colleague may do](/people/roles#what-a-colleague-may-do).

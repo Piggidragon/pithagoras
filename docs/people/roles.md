@@ -53,20 +53,39 @@ folder of a project. A name in a folder no conversation runs in, such as
 Some places are held whole, whatever is in them: pi's own agent folder, the
 folders that come with the portal (the skills every conversation has, the
 extensions it installs, the built-in channels), the folder channel packages are
-installed in, which run in the portal, and the files the MCP adapter reads in the
-home of the user the portal runs as, such as `~/.config/mcp/mcp.json`.
+installed in, which run in the portal, the files the MCP adapter reads in the
+home of the user the portal runs as, such as `~/.config/mcp/mcp.json`, and the
+`.mcp.json` of the folder the portal itself runs in, which it reads for every
+conversation.
 
-A link does not lead round this. A file is judged by where it really ends up, and
-a link at one of these names, in an agent's home, in the folder of the
-conversation, or at the top of a project, is followed to what it leads to, for a
-file that is not there yet as for one that is.
+A link does not lead round this. What a write really lands on is compared with
+these places as they really are, in whatever case the folder spells them, so a
+file is judged by where it ends up, for a file that is not there yet as for one
+that is. A link at one of these names is followed to what it leads to, in an
+agent's home, in the folder of the conversation, and in the folders of the
+projects, the first few thousand of them, nearest the top. So is a link *inside*
+a place that is held whole, and inside what such a link leads to: where a
+project shares its skills between tools with `.agents/skills` as a link to
+`.claude/skills`, `.claude/skills` is held as well, and so is the folder of a skill
+under development that is linked into pi's agent folder. What a link leads to
+that nothing here loads is not held, and nothing in `node_modules` or `.git` is
+looked into.
 
 What is **not** held, because nothing loads it when a conversation opens: the
 portal's own data (its database), what a project contains and somebody runs (a
-script, a Makefile, `.git/hooks`), a folder that is on `PATH`, and a shell
-profile. A rule that reaches those is what the person who wrote it chose, so give
-a rule the folder it is for. The heartbeat keeps the rules written for *all
-roles*, as it reads what its `WATCH.md` names wherever that is.
+script, a Makefile, `.git/hooks`), a folder that is on `PATH`, a folder a package
+was installed from by its path in pi's settings, and a shell profile. A rule that
+reaches those is what the person who wrote it chose, so give a rule the folder it
+is for. The heartbeat keeps the rules written for *all roles*, as it reads what its
+`WATCH.md` names wherever that is.
+
+Four tools are not opened by a rule at all, nor by an approval: `subagent`,
+`routine_create`, `routine_update` and `routine_run`. A subagent is a pi of its own
+and has no guard, and a routine runs as you, with your private notes and your
+rights; what a colleague or a guest wrote into either would be done as you, and
+what it read would be handed back to them. The agent is told so and does not ask
+you for them, a rule for one cannot be saved, and the conversations that are your
+own have them as before.
 
 A `bash` rule is the exception to the folder: a command runs as the agent, and
 what a shell makes of `cat *` or of a path built while it runs cannot be

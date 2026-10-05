@@ -14,7 +14,8 @@ import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
 import { agentsRoot, listAgents } from "../agents.js";
 import { workspaceRoot } from "../workspaces.js";
 import { PRIVATE_FILES } from "./context-files.js";
-import { LOADED_IN_FOLDERS, loadedAt, loadedPlaces, type LoadedAs } from "./loaded-from-folders.js";
+import { loadedAt, loadedPlaces, type LoadedAs, type LoadedPlace } from "./loaded-from-folders.js";
+import { loadedByLinks } from "./loaded-links.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 
@@ -565,10 +566,15 @@ const REFUSAL: Record<LoadedAs, string> = {
   code: "it writes to a place that the portal loads code from",
 };
 
-/** The folders a link at the name of a loaded file can be found in: those the primary user's conversations run in, and the top of each project. */
+/**
+ * The folders a link at the name of a loaded file is looked for in, besides every
+ * folder of the projects (see loadedByLinks): those the primary user's own
+ * conversations and looks run in, which are an agent's home, any agent's, kept
+ * or not made yet, and the folder of this conversation.
+ */
 function foldersToLookIn(homes: string[]): string[] {
   const folders = new Set(homes);
-  for (const root of [...forms(agentsRoot()), ...forms(workspaceRoot())]) {
+  for (const root of forms(agentsRoot())) {
     folders.add(root);
     try {
       for (const entry of readdirSync(root, { withFileTypes: true })) if (entry.isDirectory() || entry.isSymbolicLink()) folders.add(path.join(root, entry.name));
@@ -579,50 +585,55 @@ function foldersToLookIn(homes: string[]): string[] {
   return [...folders];
 }
 
+/** Written the way a place can differ from itself: the case a file system does not tell apart. */
+const lower = (text: string) => text.toLowerCase();
+
 /**
  * Why a write to any of these places would put words, config or a process into
  * what the portal, pi, the MCP adapter or the heartbeat load on their own, or
- * undefined. What those are is said once, in loaded-from-folders.ts. The same
- * place is judged written two ways — as asked, and where its links lead — for pi
+ * undefined. What those are is said once, in loaded-from-folders.ts. A write is
+ * judged where it lands as it was asked for and where its links lead, for pi
  * loads a file under the name it has in the folder, and a file written under a
- * link goes where the link leads.
+ * link goes where the link leads. It is compared with the places that are loaded,
+ * also as they really are: a place reached through a link, and every place a link
+ * in one of them leads to (see loadedByLinks).
  *
  * The agent's own files and the rest of what is read by name out of a folder a
  * conversation runs in are held wherever such a folder is — any agent's home, one
- * kept or not made yet, any folder of a project — and a link at one of the names
- * in any of those, or at the top of a project, is followed to what it leads to,
- * for a file that is not there yet as for one that is.
+ * kept or not made yet, any folder of a project.
  * `homes` is not given where there is no folder to hold it to, and then the names
  * are held in every folder.
  */
 function writesInstructions(places: string[], homes?: string[]): string | undefined {
   const reads = homes && ((dir: string) => readsOwnFilesFrom(dir, homes));
-  const elsewhere = loadedPlaces().map((place) => ({ as: place.as, at: [...forms(place.path), realPathAhead(place.path)] }));
+  const refusal = (held: LoadedPlace | undefined) => held && REFUSAL[held.as];
+  const holds = (list: LoadedPlace[]) => list.find((held) => places.some((where) => isWithinText(lower(held.path), lower(where))));
   for (const where of places) {
     const entry = loadedAt(where, reads);
     if (entry) return REFUSAL[entry.as];
-    const held = elsewhere.find((place) => place.at.some((one) => isWithinText(one, where)));
-    if (held) return REFUSAL[held.as];
   }
-  // Where a link at the name of one of them leads is what is loaded.
-  for (const dir of homes ? foldersToLookIn(homes) : []) {
-    let names: Set<string>;
-    try {
-      names = new Set(readdirSync(dir).map((name) => name.toLowerCase()));
-    } catch {
-      continue;
-    }
-    for (const entry of LOADED_IN_FOLDERS) {
-      const parts = entry.name.split("/");
-      if (!names.has(parts[0].toLowerCase())) continue;
-      const at = path.join(dir, ...parts);
-      const leads = realPathAhead(at);
-      if (leads === path.join(realPath(dir) ?? dir, ...parts)) continue;
-      if (places.some((where) => (entry.folder ? isWithinText(leads, where) : where.toLowerCase() === leads.toLowerCase()))) return REFUSAL[entry.as];
-    }
-  }
-  return undefined;
+  // As written, and then as it really is, which the second look reads off the disk: they differ where a link is in the way.
+  const asWritten = loadedPlaces().map((place): LoadedPlace => ({ ...place, path: path.resolve(place.path) }));
+  return refusal(holds(asWritten)) ?? refusal(holds(loadedByLinks({ folders: homes ? foldersToLookIn(homes) : [], trees: homes ? [realPath(workspaceRoot()) ?? workspaceRoot()] : [] })));
 }
+
+/**
+ * The tools that run what a person writes as the primary user, or in a pi without
+ * this guard, and the reason for each. Nothing opens them for anybody else — not
+ * a rule, not an approval — for the guard cannot follow what they go on to do:
+ * a routine is run with no role at all, which is the primary user's, and a
+ * subagent is a pi of its own. Said once here: unrunnable holds them, which is
+ * what a rule, an approval and the question to the primary user all ask.
+ */
+const RUNS_AS_PRIMARY: Record<string, string> = {
+  subagent: "a subagent works without this guard, so it would do what they ask of it with the agent's own rights",
+  routine_create: "a routine runs as the primary user, so one made, changed or run for them would act with the agent's own rights, and its report goes back to them",
+  routine_update: "a routine runs as the primary user, so one made, changed or run for them would act with the agent's own rights, and its report goes back to them",
+  routine_run: "a routine runs as the primary user, so one made, changed or run for them would act with the agent's own rights, and its report goes back to them",
+};
+
+/** Why a rule for this tool would hand somebody who is not the primary user the primary user's rights, or undefined: see RUNS_AS_PRIMARY. */
+export const runsAsPrimary = (toolName: string): string | undefined => RUNS_AS_PRIMARY[toolName];
 
 /**
  * Why a call that is not a read may not run for somebody who is not the primary
@@ -634,6 +645,8 @@ function writesInstructions(places: string[], homes?: string[]): string | undefi
  * instruction to it: see writesInstructions.
  */
 export function unrunnable(toolName: string, input: Record<string, unknown>, workspace: string | undefined): string | undefined {
+  const asPrimary = runsAsPrimary(toolName);
+  if (asPrimary) return asPrimary;
   if (readsCredentials(toolName, input)) return "it reads a place where secrets are kept";
   if (toolName !== "bash") {
     const asked = target(input);
@@ -650,6 +663,17 @@ export function unrunnable(toolName: string, input: Record<string, unknown>, wor
 }
 
 /**
+ * The call an `action` stands for, as the guard reads a call: a command for bash,
+ * and for the other tools what the agent is told to write (see callSubject): the
+ * path, or for a tool that has none the JSON of its arguments. A text that is
+ * not that JSON is a path, so that nothing but a path is read as one.
+ */
+function callOf(toolName: string, action: string): Record<string, unknown> {
+  if (toolName === "bash") return { command: action };
+  return parseArgs(action) ?? { path: action };
+}
+
+/**
  * Why approving this action would not make it run for somebody who is not the
  * primary user, or undefined when it would. What the guard refuses a rule or an
  * approval cannot open (see unrunnable), so asking the primary user for it would
@@ -659,7 +683,7 @@ export function approvalCannotHelp(toolName: string, action: string, workspace: 
   if (toolName === EDIT_IMAGE_TOOL) return undefined;
   // A read is never asked for: where it is allowed it needs no approval, and an approval does not open the rest.
   if (PATH_READERS.has(toolName)) return "it is a read, which needs no approval where it is allowed and is held to the folder of this conversation where it is not";
-  const input = toolName === "bash" ? { command: action } : { path: action };
+  const input = callOf(toolName, action);
   const never = unrunnable(toolName, input, workspace);
   if (never) return never;
   // A conversation that has read something untrusted refuses a push, an upload, a subagent or a schedule after
@@ -911,8 +935,9 @@ export function guardExtension(
                 `private notes, anything outside it, or anything that holds a secret. Say so rather than ` +
                 `looking for another way to it.`
               : `Refused: ${why}. You are speaking with someone who is not your primary user, and what ` +
-                `was allowed for them does not reach secrets or the primary user's private notes. Say ` +
-                `so rather than looking for another way to them.`,
+                `was allowed for them does not reach what the guard keeps from them: secrets, the ` +
+                `primary user's private notes, what is loaded as your own instructions or tools, and ` +
+                `what would run with your rights. Say so rather than looking for another way to it.`,
           };
         }
       }
@@ -938,11 +963,13 @@ export function guardExtension(
             `needs the primary user, and pass the request along — with the exact command as the ` +
             `action, so they can approve that and only that. If you have already asked about ` +
             `this, do not ask again: say you are waiting.` +
-            // The pictures of a list have no one path to write: say what the action is, so that it matches.
-            (event.toolName === EDIT_IMAGE_TOOL
-              ? ` For this call the actionTool is edit_image and the action is the path of each ` +
-                `picture, one to a line, in this order, exactly:\n${subject}`
-              : ""),
+            // What an approval is matched on is not always what the agent would write: the pictures of a list
+            // have no one path, and a call that names no path is matched on its arguments. Said, so that it matches.
+            (event.toolName === "bash"
+              ? ""
+              : ` For this call the actionTool is ${event.toolName} and the action is ` +
+                (event.toolName === EDIT_IMAGE_TOOL ? "the path of each picture, one to a line, in this order, exactly" : "exactly") +
+                `:\n${subject}`),
         };
       }
 

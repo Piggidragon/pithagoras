@@ -75,8 +75,9 @@ export interface LoadedPlace {
  * What is read from a place of its own: pi's agent folder, the folders that ship
  * with the portal and are handed to pi or loaded by it, the folder channel
  * packages are installed in, and the MCP adapter's configs in the home of the
- * user the portal runs as. Asked each time, as they can be moved by the
- * environment.
+ * user the portal runs as and in the folder the portal itself runs in (it reads
+ * that one for every conversation, as it starts). Asked each time, as they can be
+ * moved by the environment.
  */
 export function loadedPlaces(): LoadedPlace[] {
   const home = os.homedir();
@@ -98,6 +99,8 @@ export function loadedPlaces(): LoadedPlace[] {
       path.join(".config", "opencode", "opencode.json"),
       path.join(".windsurf", "mcp.json"),
     ].map((file): LoadedPlace => ({ path: path.join(home, file), by: "mcp", as: "tools" })),
+    // Its project config, from the folder the portal runs in: the same names it reads from a conversation's folder.
+    ...LOADED_IN_FOLDERS.filter((entry) => entry.by === "mcp").map((entry): LoadedPlace => ({ path: path.join(process.cwd(), ...entry.name.split("/")), by: entry.by, as: entry.as })),
   ];
   return places.filter((place): place is LoadedPlace => place !== undefined);
 }

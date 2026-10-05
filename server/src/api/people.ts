@@ -2,6 +2,7 @@ import express, { type Router } from "express";
 import { forgetPerson, getPerson, isOnlyPrimary, listPeople, rename, setRole, type Role } from "../people.js";
 import { AUDIT_KEEP, addToolRule, clearAudit, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
 import { nanoid } from "nanoid";
+import { runsAsPrimary } from "../pi/guard.js";
 
 /**
  * The roster.
@@ -97,6 +98,13 @@ export function peopleRouter(): Router {
     }
     if (typeof tool !== "string" || !/^[a-z_][a-z0-9_]*$/i.test(tool)) {
       return res.status(400).json({ error: "Tool must be a tool name, e.g. bash" });
+    }
+    // A rule for these would look like it worked and never apply: the guard keeps them from everybody who is not
+    // the primary user, whatever is allowed, as they would run with the primary user's rights. A heartbeat's
+    // rules are its own.
+    const asPrimary = role === "heartbeat" ? undefined : runsAsPrimary(tool);
+    if (asPrimary) {
+      return res.status(400).json({ error: `A rule cannot allow ${tool}: ${asPrimary}` });
     }
     if (typeof pattern !== "string" || !pattern.trim()) {
       return res.status(400).json({ error: "A pattern is required" });

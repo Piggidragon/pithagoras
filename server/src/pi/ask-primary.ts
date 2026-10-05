@@ -41,7 +41,8 @@ export function askPrimaryTool(sessionId: string) {
             description:
               "When you are asking permission to do one specific thing, the exact thing — the " +
               "shell command verbatim, or the path you would write; for edit_image the path of " +
-              "each picture, one to a line, in the order of the call. Approving authorises this " +
+              "each picture, one to a line, in the order of the call; for any other tool the " +
+              "refusal says what to write. Approving authorises this " +
               "and nothing else, so it must be exactly what you intend to run, once. Leave it " +
               "out when you are asking for a decision rather than permission.",
           })

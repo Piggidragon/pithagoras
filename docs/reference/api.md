@@ -431,7 +431,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | `GET /api/audit?limit=2000` | Read up to all 2,000 retained decisions (default 200), newest first. |
 | `DELETE /api/audit?through=<id>` | Clear the log: every decision up to and including `through` (the newest one the caller saw, so a decision recorded since survives), or every decision without it. Earlier `cleared` entries stay. A `through` that is not an entry id is refused with 400. Answers `{ removed }`, and a clear that removed something leaves one `cleared` entry saying how many. |
 | `GET /api/tool-rules` | List standing tool permissions. |
-| `POST /api/tool-rules` | Add a role/tool/pattern rule. The role is `colleague`, `guest`, `heartbeat` (an agent looking around on its own) or `all`. |
+| `POST /api/tool-rules` | Add a role/tool/pattern rule. The role is `colleague`, `guest`, `heartbeat` (an agent looking around on its own) or `all`. A rule for `subagent`, `routine_create`, `routine_update` or `routine_run` is refused (400) for every role but `heartbeat`: they would run what the person writes with the primary user's rights. |
 | `DELETE /api/tool-rules/:id` | Remove a rule. |
 
 ## MCP servers

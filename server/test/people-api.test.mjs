@@ -66,6 +66,22 @@ test("a name set by hand stays through the person's next message, with or withou
   assert.equal(again.body.person.name, "Sam (accountant)", "a blank name is not a rename");
 });
 
+test("a rule cannot be written for a tool that would run what they write as the primary user", async () => {
+  person("tg:priya", "colleague", "Priya");
+  const before = (await call("GET", "/tool-rules")).body.rules.length;
+  for (const tool of ["subagent", "routine_create", "routine_update", "routine_run"]) {
+    for (const role of ["colleague", "guest", "all"]) {
+      const refused = await call("POST", "/tool-rules", { role, tool, pattern: "{*", personKey: "tg:priya" });
+      assert.equal(refused.status, 400, `${role}: ${tool}`);
+      assert.match(refused.body.error, new RegExp(`^A rule cannot allow ${tool}: `));
+    }
+  }
+  assert.equal((await call("GET", "/tool-rules")).body.rules.length, before, "none was written");
+  const other = await call("POST", "/tool-rules", { role: "colleague", tool: "web_search", pattern: "{*" });
+  assert.equal(other.status, 200, "a tool that runs nothing as them is not held");
+  await call("DELETE", `/tool-rules/${other.body.rules.find((r) => r.tool === "web_search").id}`);
+});
+
 test("a rule for one person is allowed for anybody whatever their role, applies to them after a role change, and comes back in one shape", async () => {
   person("tg:priya", "guest", "Priya");
   // One written while she was a guest, as the page used to write them, and one as it does now.

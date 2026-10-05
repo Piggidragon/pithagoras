@@ -1,6 +1,7 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inProcessHome, scratch } from "./server-harness.mjs";
@@ -45,6 +46,7 @@ test.after(() => rules.forEach(deleteToolRule));
 
 // Every kind of folder a conversation of the primary user, or the next one of an agent, may read from.
 mkdirSync(path.join(root, "site", "sub"), { recursive: true });
+mkdirSync(path.join(root, "mono", "packages", "api"), { recursive: true });
 const nova = createAgent({ name: "Nova" }).home;
 const gone = createAgent({ name: "Gone" });
 deleteAgent(gone.id, { deleteFolder: false });
@@ -59,6 +61,7 @@ const folders = {
   "the folder of an agent that is not made yet": notMade,
   "the top of a project": path.join(root, "site"),
   "a folder in a project": path.join(root, "site", "sub"),
+  "a folder deep in a project": path.join(root, "mono", "packages", "api"),
 };
 
 test("every name on the list is held, in every folder a conversation or a look runs in, whoever else is speaking there", () => {
@@ -99,7 +102,7 @@ test("what the rule is for goes through: notes, the shared file, and names that 
   }
 });
 
-test("a link at a name on the list is followed to what it leads to, for a file that is not there yet, in a conversation's folder, an agent's, and the top of a project", () => {
+test("a link at a name on the list is followed to what it leads to, in whatever case, for a file that is not there yet, in a conversation's folder, an agent's, and any folder of a project", () => {
   let n = 0;
   const places = {
     "the folder of the conversation": () => path.join(folder, `link-${n++}`),
@@ -107,19 +110,22 @@ test("a link at a name on the list is followed to what it leads to, for a file t
     "the folder kept from an agent that is gone": () => kept,
     "the folder of an agent that is not made yet": () => path.join(agentsRoot(), `later-${n++}`),
     "the top of a project": () => path.join(root, `project-${n++}`),
+    "a folder deep in a project": () => path.join(root, `deep-${n++}`, "packages", "api"),
     "the workspace root": () => root,
   };
   // The name is a link to something that is not there yet; what is written there is loaded under the name.
   const linked = [];
-  for (const [label, pick] of Object.entries(places)) {
-    for (const entry of LOADED_IN_FOLDERS) {
-      const dir = pick();
-      const target = path.join(folder, "behind", `${n++}`, entry.folder ? "dir" : "file");
-      const at = path.join(dir, ...entry.name.split("/"));
-      mkdirSync(path.dirname(at), { recursive: true });
-      rmSync(at, { force: true }); // a file an agent's folder has already, such as the name it was made for
-      symlinkSync(target, at);
-      linked.push({ label, entry, runsIn: label === "the folder of the conversation" ? dir : conversation, written: entry.folder ? path.join(target, "extensions", "x.ts") : target, beside: path.join(path.dirname(target), "other.md") });
+  for (const [spelling, spell] of [["as it is", (name) => name], ["in capitals", (name) => name.toUpperCase()]]) {
+    for (const [label, pick] of Object.entries(places)) {
+      for (const entry of LOADED_IN_FOLDERS) {
+        const dir = pick();
+        const target = path.join(folder, "behind", `${n++}`, entry.folder ? "dir" : "file");
+        const at = path.join(dir, ...spell(entry.name).split("/"));
+        mkdirSync(path.dirname(at), { recursive: true });
+        rmSync(at, { force: true }); // a file an agent's folder has already, such as the name it was made for
+        symlinkSync(target, at);
+        linked.push({ label: `${label}, ${spelling}`, entry, runsIn: label === "the folder of the conversation" ? dir : conversation, written: entry.folder ? path.join(target, "extensions", "x.ts") : target, beside: path.join(path.dirname(target), "other.md") });
+      }
     }
   }
   for (const role of ["colleague", "guest"]) {
@@ -130,6 +136,64 @@ test("a link at a name on the list is followed to what it leads to, for a file t
       // And a file beside it, which no link leads to, is a note.
       assert.equal(allowed(as, "write", beside), true, `${role}: beside it in ${label}`);
     }
+  }
+});
+
+test("a link inside a folder that is loaded whole leads to a place that is loaded as well, link in link, wherever that folder is", () => {
+  let n = 0;
+  const made = [];
+  for (const [label, dir] of Object.entries(folders)) {
+    for (const entry of LOADED_IN_FOLDERS.filter((e) => e.folder)) {
+      // A project that shares its skills between tools: `.agents/skills` is a link to a folder beside it.
+      const behind = path.join(folder, "shared", `${n++}`, "skills");
+      const lib = path.join(folder, "lib", `${n++}`, "deploy");
+      mkdirSync(path.join(behind, "release"), { recursive: true });
+      mkdirSync(lib, { recursive: true });
+      const inside = path.join(dir, entry.name);
+      rmSync(inside, { force: true, recursive: true }); // a link there from the test before, which leads nowhere yet
+      mkdirSync(inside, { recursive: true });
+      symlinkSync(path.relative(inside, behind), path.join(inside, "skills"));
+      symlinkSync(lib, path.join(behind, "deploy"));
+      made.push({ label: `${entry.name} in ${label}`, written: path.join(behind, "release", "SKILL.md"), nested: path.join(lib, "SKILL.md"), beside: path.join(path.dirname(behind), "notes.md") });
+    }
+  }
+  for (const role of ["colleague", "guest"]) {
+    for (const { label, written, nested, beside } of made) {
+      const as = guardAs(role, conversation);
+      assert.equal(refused(as, "write", written), true, `${role}: ${label}: ${written}`);
+      assert.equal(refused(as, "write", nested), true, `${role}: ${label}: a link in what the link leads to, ${nested}`);
+      assert.equal(allowed(as, "write", beside), true, `${role}: ${label}: beside it`);
+    }
+  }
+  // The same for the places held whole: a skill under development, installed in pi's agent folder as a link.
+  for (const place of [process.env.PI_CODING_AGENT_DIR, process.env.CHANNELS_DIR]) {
+    const project = path.join(folder, "lib", `${n++}`);
+    mkdirSync(path.join(project, "foo"), { recursive: true });
+    mkdirSync(path.join(place, "skills"), { recursive: true });
+    symlinkSync(path.join(project, "foo"), path.join(place, "skills", "foo"));
+    for (const role of ["colleague", "guest"]) {
+      assert.equal(refused(guardAs(role, conversation), "write", path.join(project, "foo", "SKILL.md")), true, `${role}: a link inside ${place}`);
+      assert.equal(allowed(guardAs(role, conversation), "write", path.join(project, "notes.md")), true, `${role}: beside it`);
+    }
+  }
+});
+
+test("the portal's own folder is read by the MCP adapter, and a link there is followed", () => {
+  const names = [".mcp.json", ".vscode/mcp.json"];
+  for (const name of names) assert.ok(loadedPlaces().some((place) => place.path === path.join(process.cwd(), ...name.split("/")) && place.by === "mcp"), `${name} in the folder the portal runs in is a place`);
+  const was = process.cwd();
+  const where = scratch("loaded-cwd-");
+  process.chdir(where);
+  try {
+    const behind = path.join(folder, "behind-cwd", "tools.json");
+    symlinkSync(behind, path.join(where, ".mcp.json"));
+    for (const role of ["colleague", "guest"]) {
+      assert.equal(refused(guardAs(role, conversation), "write", path.join(os.tmpdir(), path.basename(where), ".mcp.json")), true, `${role}: the file`);
+      assert.equal(refused(guardAs(role, conversation), "write", behind), true, `${role}: what a link there leads to`);
+      assert.equal(allowed(guardAs(role, conversation), "write", path.join(path.dirname(behind), "other.md")), true, `${role}: beside it`);
+    }
+  } finally {
+    process.chdir(was);
   }
 });
 
@@ -148,6 +212,27 @@ test("the folders and files the portal hands pi or loads itself are held where t
   // The channel packages are code the portal runs: a write into the folder they are installed in.
   const installed = path.join(process.env.CHANNELS_DIR, "node_modules", "pithagoras-channel-x", "index.js");
   assert.equal(refused(guardAs("colleague", conversation), "write", installed), true);
+});
+
+test("a place the environment points at through a link is held by the path it really has, as it is by the path it was given", () => {
+  for (const variable of ["PI_CODING_AGENT_DIR", "CHANNELS_DIR"]) {
+    const real = path.join(folder, `real-${variable}`);
+    const via = path.join(folder, `via-${variable}`);
+    mkdirSync(real, { recursive: true });
+    symlinkSync(real, via);
+    const was = process.env[variable];
+    process.env[variable] = via;
+    try {
+      for (const role of ["colleague", "guest"]) {
+        for (const where of [path.join(real, "extensions", "evil.ts"), path.join(via, "extensions", "evil.ts"), real]) {
+          assert.equal(refused(guardAs(role, conversation), "write", where), true, `${role}: ${variable}, ${where}`);
+        }
+        assert.equal(allowed(guardAs(role, conversation), "write", path.join(folder, `real-${variable}-notes.md`)), true, `${role}: a file beside it`);
+      }
+    } finally {
+      process.env[variable] = was;
+    }
+  }
 });
 
 test("loadedAt answers by the name and for the folder it would be read from", () => {
@@ -194,6 +279,21 @@ test("what pi's resource loader reads by name is on the list, and what is on the
     assert.ok(loadedAt(path.join("/w/site", CONFIG_DIR_NAME, name, "x")), `pi reads ${CONFIG_DIR_NAME}/${name}`);
   }
   assert.match(piSource("core/package-manager.js"), /join\(dir, "\.agents", "skills"\)/, "pi still reads skills from .agents, which is on the list as a folder");
+});
+
+test("the adapter's names on the list are the ones of the version the portal installs", async () => {
+  // The adapter is not a dependency of the portal, so its source is not here to read: what ties the list to it is
+  // the version it was compared with, which the portal pins. When the pin moves, whoever moves it compares the adapter's
+  // config.ts with the list first, and then says so here.
+  const { ADAPTER_SPEC } = await import("../dist/api/mcp.js");
+  const COMPARED = "npm:pi-mcp-adapter@2.18.0";
+  assert.equal(ADAPTER_SPEC, COMPARED, "the adapter the portal installs changed: compare its IMPORT_PATHS and PROJECT_CONFIG_NAME (config.ts) with LOADED_IN_FOLDERS and loadedPlaces in loaded-from-folders.ts, add what is new, then set the version compared here");
+  // What 2.18.0 reads, as its config.ts has it: the names in a folder, and the files in the home folder.
+  for (const name of [".mcp.json", ".vscode/mcp.json", "opencode.json", ".pi/mcp.json", ".agents/mcp.json"]) assert.ok(loadedAt(path.join("/w/site", name)), `${name} is on the list`);
+  const home = os.homedir();
+  for (const file of [".config/mcp/mcp.json", ".cursor/mcp.json", ".claude/mcp.json", ".claude.json", ".claude/claude_desktop_config.json", "Library/Application Support/Claude/claude_desktop_config.json", ".codex/config.toml", ".codex/config.json", ".config/opencode/opencode.json", ".windsurf/mcp.json", ".agents/mcp.json"]) {
+    assert.ok(loadedPlaces().some((place) => place.path === path.join(home, file)) || loadedAt(path.join(home, file)), `~/${file} is held`);
+  }
 });
 
 test("the page on roles names everything on the list", () => {

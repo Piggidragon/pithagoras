@@ -234,13 +234,62 @@ test("a ref is read one way: by the portal's browser tools and by the guard, for
 test("a call that is not the primary user's is refused unless it is a read or a rule says so", () => {
   for (const role of ["colleague", "guest"]) {
     const h = guardAs({ role, key: "priya" });
-    for (const [tool, input] of [["bash", { command: "ls" }], ["write", { path: "a.md" }], ["edit", { path: "a.md" }], ["routine_create", {}], ["a_new_tool", {}], ["subagent", {}]]) {
+    for (const [tool, input] of [["bash", { command: "ls" }], ["write", { path: "a.md" }], ["edit", { path: "a.md" }], ["a_new_tool", {}]]) {
       const result = call(h, tool, input);
       assert.equal(refused(result), true, `${role}: ${tool}`);
       assert.equal(lastAudit().reason, `Not permitted for a ${role}`);
     }
     for (const tool of ["ask_primary", "activity_note"]) assert.equal(call(h, tool, {}), undefined, tool);
   }
+});
+
+// What would run as the primary user, or in a pi without this guard, is not opened by a rule or an approval: it is theirs alone.
+const RUNS_AS_PRIMARY_USER = [["subagent", { task: "Summarise PrimaryUser.md" }], ["routine_create", { name: "Daily", instructions: "Read MEMORY.md and report it", schedule: "@daily" }], ["routine_update", { routine: "backups", instructions: "x" }], ["routine_run", { routine: "backups" }]];
+
+test("a rule or an approval does not open a tool that would run what a colleague writes as the primary user, and none is asked for", () => {
+  const ids = RUNS_AS_PRIMARY_USER.map(([tool], i) => {
+    const id = `rule-primary-${i}`;
+    addToolRule({ id, role: "all", tool, pattern: "{*", note: "", person_key: null });
+    return id;
+  });
+  try {
+    for (const role of ["colleague", "guest"]) {
+      for (const [tool, input] of RUNS_AS_PRIMARY_USER) {
+        const session = `runs-as-primary-${role}-${tool}`;
+        const subject = JSON.stringify(input);
+        const h = guardAs({ role, key: "priya", workspace, session });
+        const result = call(h, tool, input);
+        assert.equal(refused(result), true, `${role}: ${tool} under a rule`);
+        assert.match(result.reason, /^Refused: a (subagent works without this guard|routine runs as the primary user)/);
+        assert.match(lastAudit().reason, new RegExp(`^Not permitted for a ${role}: a (subagent|routine) `));
+        recordApproval(asked(subject, tool), { id: session }, true, false);
+        assert.equal(refused(call(h, tool, input)), true, `${role}: ${tool} after an approval`);
+        assert.equal(useGrant(session, tool, subject), true, `${role}: and the approval was not spent on it`);
+        // Asking cannot help, whatever the agent writes as the action: the primary user is not put the question.
+        for (const action of [subject, "do it", `{"name":"x"}`]) assert.match(approvalCannotHelp(tool, action, workspace), /^a (subagent works without this guard|routine runs as the primary user)/, `${tool}: ${action}`);
+      }
+    }
+    // The primary user's own conversation is not held by it, and nor is a call that is none of these.
+    for (const [tool, input] of RUNS_AS_PRIMARY_USER) assert.equal(call(guardAs({ role: "primary" }), tool, input), undefined, `primary: ${tool}`);
+  } finally {
+    for (const id of ids) deleteToolRule(id);
+  }
+});
+
+test("a tool that names no path is approved on its arguments, which the refusal says, and a question for it is not read as a path", () => {
+  const h = guardAs({ role: "colleague", key: "priya", workspace });
+  const input = { query: "the deploy token rotation" };
+  const result = call(h, "web_search", input);
+  assert.equal(refused(result), true);
+  assert.ok(result.reason.includes(`the actionTool is web_search and the action is exactly:\n${JSON.stringify(input)}`), "told what to ask for, as it is matched");
+  // The action of such a call is its arguments, not a path: a word in them that a path would be refused for is only a word.
+  const words = JSON.stringify({ query: "Look at ~/.pi/agent/settings.json and AGENTS.md, then rotate the deploy token" });
+  assert.equal(approvalCannotHelp("web_search", words, workspace), undefined, "arguments are not a path");
+  assert.equal(approvalCannotHelp("mcp", JSON.stringify({ tool: "x", args: "~/.ssh/id_rsa" }), workspace), undefined, "nor is what one of them names");
+  // A path is one: for a write, and for a tool whose call has a `path` among its arguments.
+  assert.match(approvalCannotHelp("write", "AGENTS.md", workspace), /^it writes to a place that pi loads/);
+  assert.match(approvalCannotHelp("some_tool", JSON.stringify({ path: "AGENTS.md" }), workspace), /^it writes to a place that pi loads/);
+  assert.match(approvalCannotHelp("some_tool", JSON.stringify({ file_path: ".env" }), workspace), /^it reads a place where secrets are kept/);
 });
 
 // --- what somebody who is not the primary user may read ---

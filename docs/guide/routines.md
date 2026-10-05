@@ -122,7 +122,9 @@ off by default, and every page a run opens is recorded in
 
 Sessions reached through a channel get `routines_list`, `routine_create`,
 `routine_update` and `routine_run`, so "remind me every morning to check the
-backups" writes the routine instead of telling you where the button is.
+backups" writes the routine instead of telling you where the button is. They are
+for you: a routine runs as you, so a colleague or a guest cannot make, change or
+run one through the agent, whatever is [allowed](/people/rules) for them.
 
 Task sessions do not get them — a session working inside your repository has no
 business rescheduling anything. Neither does a routine run: a routine that can

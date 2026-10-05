@@ -26,12 +26,16 @@ bash: himalaya envelope list*
 
 A tool and a pattern. `*` stands for the parts that vary; everything else is
 literal. For `bash` the pattern is matched against the command, for file tools
-against the path. A call that names several pictures (`edit_image` with
+against the path, and for a tool that names no path against the JSON of its
+arguments. A call that names several pictures (`edit_image` with
 [several pictures](/guide/features#several-pictures) switched on) is matched on
 each picture's path, and is allowed only if every one is.
 
 A bare `*` is rejected. That is not a rule, it is switching the thing off by
-accident.
+accident. So is a rule for `subagent`, `routine_create`, `routine_update` or
+`routine_run`: those would run what the person writes with your rights, so
+nothing opens them for anybody else (see
+[roles](/people/roles#what-a-colleague-may-do)).
 
 What **Always allow** writes is the command or path exactly as it was asked, so a
 `*` in it is a star and not a wildcard. To allow a family of commands, write the
