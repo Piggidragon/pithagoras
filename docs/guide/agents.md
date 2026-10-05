@@ -19,7 +19,9 @@ accents are dropped, so *Jürgen* is `agents/jurgen`, and a name in another
 alphabet is `agents/agent-` and a short code), and its files are written there.
 The name is kept in the folder, in `.agent-name`. A folder that was kept when an
 agent of the same name was deleted is taken up as it is: the files in it stay as
-they were, and only the ones that are missing are written. A folder kept by an
+they were, and only the ones that are missing are written. When that means the
+answers you gave were not written to `SOUL.md` or `PrimaryUser.md`, the agent's page
+says so when it opens. A folder kept by an
 agent of another name is left alone: the new one gets the next free name,
 `agents/<name>-2`.
 

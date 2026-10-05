@@ -16,6 +16,7 @@ import {
   LuRadio,
   LuRefreshCw,
   LuTrash2,
+  LuX,
 } from "react-icons/lu";
 import { PageHeader, Stat } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
@@ -41,6 +42,8 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const [params, setParams] = useSearchParams();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [creating, setCreating] = useState(false);
+  // The files a new agent's folder already had, and so its answers did not replace: shown on its page once it opens.
+  const [madeKept, setMadeKept] = useState<{ id: string; files: string[] } | null>(null);
   const [error, setError] = useState("");
 
   const loadAgents = useCallback(
@@ -69,6 +72,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
           onSubmit={async (input) => {
             const made = await api.createAgent(input);
             await loadAgents();
+            setMadeKept({ id: made.id, files: answersLeft(made.kept) });
             setCreating(false);
             setParams({ agent: made.id });
           }}
@@ -93,6 +97,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
       // Its own state for each agent: a draft of one's SOUL.md is not another's.
       key={agent.id}
       agent={agent}
+      startKept={madeKept?.id === agent.id ? madeKept.files : []}
       back={
         <button
           onClick={() => setParams({})}
@@ -110,6 +115,9 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
     />
   );
 }
+
+/** What the wizard's answers are written to: of the files an agent's folder already had, the ones it left as they were. */
+const answersLeft = (kept?: string[]) => (kept ?? []).filter((file) => file === "SOUL.md" || file === "PrimaryUser.md");
 
 /** A card for each agent, with its avatar and name, and one that makes a new agent. */
 function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: string) => void; onNew: () => void }) {
@@ -177,12 +185,15 @@ const BROWSER = "browser";
  */
 function AgentView({
   agent,
+  startKept,
   back,
   onChanged,
   onDeleted,
   onSelect,
 }: {
   agent: Agent;
+  /** The files its folder already had when it was made, whose files the answers did not replace (see `answersLeft`). */
+  startKept: string[];
   back: ReactNode;
   onChanged: () => Promise<void>;
   onDeleted: () => Promise<void>;
@@ -203,6 +214,7 @@ function AgentView({
   // The conversation whose name is open for editing, if any; the agent's own as "agent".
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [kept, setKept] = useState(startKept);
   // The tab shown, kept in the link beside the agent: Conversations without one.
   const [params, setParams] = useSearchParams();
   const tab: AgentTab = AGENT_TABS.find(([id]) => id === params.get("tab"))?.[0] ?? "conversations";
@@ -319,7 +331,9 @@ function AgentView({
         <AgentSetup
           home={setup.home}
           onSubmit={async (input) => {
-            setSetup(await api.runAgentWizard(agent.id, input));
+            const done = await api.runAgentWizard(agent.id, input);
+            setSetup(done);
+            setKept(answersLeft(done.kept));
             await onChanged();
           }}
         />
@@ -401,6 +415,22 @@ function AgentView({
               </div>
             </div>
           </PageHeader>
+
+          {kept.length > 0 && (
+            <div role="status" className="mt-4 flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
+              <span className="min-w-0 flex-1">
+                {tp(
+                  kept.length,
+                  "This agent took up a folder that was kept from before. {files} is as it was, so what you answered was not written to it. Edit it under Files.",
+                  "This agent took up a folder that was kept from before. {files} are as they were, so what you answered was not written to them. Edit them under Files.",
+                  { files: kept.join(", ") },
+                )}
+              </span>
+              <button type="button" onClick={() => setKept([])} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-warn/10">
+                <LuX aria-hidden className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           <AgentTabs tab={tab} onTab={setTab} unread={agent.unread} />
 

@@ -41,3 +41,33 @@ test('the delete dialog of an agent says that what runs in its folder is stopped
   await dialog(page).getByRole('button', { name: 'Delete agent' }).click();
   await expect.poll(() => deleted).toEqual(['?folder=keep']);
 });
+
+/** Makes "Ada" with the wizard: the answers are a character and a name. */
+async function makeAda(page: Page) {
+  await page.goto('/agents');
+  const main = page.getByRole('main');
+  await main.getByRole('button', { name: 'New agent' }).click();
+  await main.getByLabel('Name').fill('Ada');
+  await main.getByLabel('Character').fill('Brisk, answers in two lines.');
+  await main.getByRole('button', { name: 'Next' }).click();
+  await main.getByLabel('Your name').fill('Sam');
+  await main.getByRole('button', { name: 'Create' }).click();
+  return main;
+}
+
+test('an agent that took up a folder kept from before says that its answers were not written, once, and can be told to go', async ({ page }) => {
+  await portal(page, { kept: ['SOUL.md', 'PrimaryUser.md', 'MEMORY.md'] });
+  const main = await makeAda(page);
+  const note = main.getByRole('status').filter({ hasText: 'took up a folder that was kept from before' });
+  await expect(note).toContainText('SOUL.md, PrimaryUser.md are as they were, so what you answered was not written to them. Edit them under Files.');
+  await expect(note).not.toContainText('MEMORY.md');
+  await note.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(note).toHaveCount(0);
+});
+
+test('an agent made in a folder of its own says nothing of the kind, and one that kept only its memory does not either', async ({ page }) => {
+  await portal(page, { kept: ['MEMORY.md'] });
+  const main = await makeAda(page);
+  await expect(main.getByRole('heading', { name: 'Ada' })).toBeVisible();
+  await expect(main.getByText('took up a folder that was kept from before')).toHaveCount(0);
+});

@@ -89,6 +89,10 @@ const de: Locale = {
     "{channels} talks as this agent. Give it another agent under Settings → Channels first.": "{channels} spricht als dieser Agent. Weise zuerst unter Einstellungen → Kanäle einen anderen Agenten zu.",
     "Its {n} chats are stopped and deleted with it.": { one: "Sein einziger Chat wird angehalten und mit ihm gelöscht.", other: "Seine {n} Chats werden angehalten und mit ihm gelöscht." },
     "The background jobs running in its folder, a dev server for example, are stopped too, whichever you choose below.": "Die Hintergrundjobs, die in seinem Ordner laufen, zum Beispiel ein Dev-Server, werden ebenfalls angehalten, was du unten auch wählst.",
+    "This agent took up a folder that was kept from before. {files} are as they were, so what you answered was not written to them. Edit them under Files.": {
+      one: "Dieser Agent hat einen früher behaltenen Ordner übernommen. {files} ist, wie es war, deine Antworten wurden also nicht hineingeschrieben. Bearbeite die Datei unter Dateien.",
+      other: "Dieser Agent hat einen früher behaltenen Ordner übernommen. {files} sind, wie sie waren, deine Antworten wurden also nicht hineingeschrieben. Bearbeite sie unter Dateien.",
+    },
     "Keep its folder": "Ordner behalten",
     "Its files and memory stay in {home}. An agent made under the same name picks them up again.": "Seine Dateien und sein Gedächtnis bleiben in {home}. Ein Agent mit demselben Namen übernimmt sie wieder.",
     "Delete its folder too": "Auch den Ordner löschen",
@@ -145,7 +149,7 @@ const de: Locale = {
     "Becomes PrimaryUser.md.": "Wird zu PrimaryUser.md.",
     "Create": "Erstellen",
     "Back": "Zurück",
-    "Writes SOUL.md, PrimaryUser.md and MEMORY.md into the agent's home directory. All three are handed to pi as context whenever a conversation starts, and stay editable here. An existing MEMORY.md is never overwritten.": "Schreibt SOUL.md, PrimaryUser.md und MEMORY.md in das Home-Verzeichnis des Agenten. Alle drei bekommt pi als Kontext, sobald ein Gespräch beginnt, und sie bleiben hier bearbeitbar. Eine vorhandene MEMORY.md wird nie überschrieben.",
+    "Writes SOUL.md, PrimaryUser.md and MEMORY.md into the agent's home directory. All three are handed to pi as context whenever a conversation starts, and stay editable here. A file that is already there is never overwritten.": "Schreibt SOUL.md, PrimaryUser.md und MEMORY.md in das Home-Verzeichnis des Agenten. Alle drei bekommt pi als Kontext, sobald ein Gespräch beginnt, und sie bleiben hier bearbeitbar. Eine Datei, die schon da ist, wird nie überschrieben.",
     // components/AuditPanel.tsx
     "Nothing matches this filter.": "Nichts passt zu diesem Filter.",
     "Which decisions to show": "Welche Entscheidungen angezeigt werden",

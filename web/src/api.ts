@@ -834,7 +834,7 @@ export const api = {
   agents: () => json<{ agents: Agent[] }>("/api/agents"),
   /** A new agent, set up with the wizard's answers. */
   createAgent: (setup: AgentWizard) =>
-    json<Agent>("/api/agents", { method: "POST", body: JSON.stringify({ name: setup.agentName, setup }) }),
+    json<Agent & { kept: string[] }>("/api/agents", { method: "POST", body: JSON.stringify({ name: setup.agentName, setup }) }),
   renameAgent: (id: string, name: string) =>
     json<Agent>(`/api/agents/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   /** The agent and its chats; its folder too when `folder` is "delete". */
@@ -852,7 +852,7 @@ export const api = {
   setAgentOrb: (agent: string, style: OrbStyle) =>
     json<OrbStyle>(`/api/agents/${encodeURIComponent(agent)}/orb`, { method: "PUT", body: JSON.stringify(style) }),
   runAgentWizard: (agent: string, input: AgentWizard) =>
-    json<AgentSetup>(`/api/agents/${encodeURIComponent(agent)}/setup`, { method: "POST", body: JSON.stringify(input) }),
+    json<AgentSetup & { kept: string[] }>(`/api/agents/${encodeURIComponent(agent)}/setup`, { method: "POST", body: JSON.stringify(input) }),
   /** `mtime` is the file's as it was read; a file the agent has written since is refused (409). Without it the save replaces what is there. */
   saveAgentFile: (agent: string, name: string, content: string, mtime?: number) =>
     json<AgentSetup>(`/api/agents/${encodeURIComponent(agent)}/files/${encodeURIComponent(name)}`, {
