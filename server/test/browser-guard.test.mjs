@@ -311,7 +311,7 @@ test("a rule or an approval does not open a tool that would run what a colleague
         assert.match(lastAudit().reason, new RegExp(`^Not permitted for a ${role}: a (subagent|routine) `));
         recordApproval(asked(subject, tool), { id: session }, true, false);
         assert.equal(refused(call(h, tool, input)), true, `${role}: ${tool} after an approval`);
-        assert.equal(useGrant(session, tool, subject), true, `${role}: and the approval was not spent on it`);
+        assert.equal(useGrant(session, tool, subject), false, `${role}: an approval for it writes nothing that could be spent`);
         // Asking cannot help, whatever the agent writes as the action: the primary user is not put the question.
         for (const action of [subject, "do it", `{"name":"x"}`]) assert.match(approvalCannotHelp(tool, action, workspace), /^a (subagent works without this guard|routine runs as the primary user)/, `${tool}: ${action}`);
       }
@@ -752,6 +752,18 @@ test("an \"always\" permits what was shown to the letter: a star in the command 
   assert.equal(allows("bash", { command: "printf a\\XXb\\n" }), false);
 });
 
+test("an approval for a tool that runs as the primary user writes nothing: no grant, and no rule that would be listed and never apply", () => {
+  const before = rulesNow().length;
+  for (const tool of ["subagent", "routine_create", "routine_update", "routine_run"]) {
+    // A question from before these were refused, answered now.
+    recordApproval(asked('{"name":"nightly"}', tool), { id: "chat" }, true, true);
+    assert.equal(rulesNow().length, before, `${tool}: no rule`);
+    assert.equal(useGrant("chat", tool, '{"name":"nightly"}'), false, `${tool}: no grant`);
+  }
+  recordApproval(asked("ls docs"), { id: "chat" }, true, false);
+  assert.equal(useGrant("chat", "bash", "ls docs"), true, "any other tool is still approved");
+});
+
 test("a rule written by hand keeps its stars as wildcards, and \\* is a star there too", () => {
   const rule = (tool, pattern) => ({ id: `${tool}-${pattern}`, role: "colleague", tool, pattern, note: "", created_at: "", person_key: null });
   assert.equal(ruleAllows([rule("bash", "git log*")], "colleague", "bash", { command: "git log --oneline -5" }), true);
@@ -773,6 +785,69 @@ test("a rule for a folder does not reach out of it through ..", () => {
   assert.equal(write([rule("*")], "../outside"), false, "even a rule for everything stops at a path that leaves");
   assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: ["shared/../../x.png"] }), false);
   assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: ["shared/a.png"] }), true);
+});
+
+test("a rule for a folder is matched where a path leads: a link in the folder that leads out does not carry the rule with it", () => {
+  const base = scratch("guard-rule-links-");
+  const site = path.join(base, "ws", "site");
+  const outside = path.join(base, "elsewhere");
+  mkdirSync(path.join(site, "real"), { recursive: true });
+  mkdirSync(path.join(base, "ws", "common"), { recursive: true });
+  mkdirSync(outside);
+  symlinkSync(outside, path.join(site, "out"));
+  symlinkSync("real", path.join(site, "inner"));
+  symlinkSync("../common", path.join(site, "shared"));
+  symlinkSync(path.join(outside, "not-there-yet"), path.join(site, "dangling"));
+  const rule = (pattern, tool = "write") => ({ id: pattern, role: "colleague", tool, pattern, note: "", created_at: "", person_key: null });
+  const write = (rules, p, workspace) => ruleAllows(rules, "colleague", "write", { path: p, content: "x" }, undefined, workspace);
+  const own = [rule(`${site}/*`)];
+  assert.equal(write(own, `${site}/notes.md`, site), true);
+  assert.equal(write(own, `${site}/inner/a.txt`, site), true, "a link that leads to another place in the folder");
+  assert.equal(write(own, `${site}/out/pwn.txt`, site), false, "a link out of the folder");
+  assert.equal(write(own, `${site}/out`, site), false, "the link itself, which is written to where it leads");
+  assert.equal(write(own, `${site}/dangling`, site), false, "one that leads nowhere yet");
+  assert.equal(write(own, `${site}/shared/x.md`, site), false, "a link to a sibling folder");
+  assert.equal(write(own, `${site}/out/pwn.txt`), false, "without a folder to take it from, an absolute path is placed all the same");
+  // Where it leads is named by a rule, and allowed then: one for the sibling, or for everything in the workspace.
+  assert.equal(write([...own, rule(`${path.join(base, "ws", "common")}/*`)], `${site}/shared/x.md`, site), true);
+  assert.equal(write([rule(`${path.join(base, "ws")}/*`)], `${site}/shared/x.md`, site), true);
+  assert.equal(write([...own, rule(`${outside}/*`)], `${site}/out/pwn.txt`, site), true);
+  // A rule written relative to the folder names what is written there: a path with a link in it is named by where it leads.
+  assert.equal(write([rule("notes/*")], "notes/a.md", site), true);
+  assert.equal(write([rule("out/*")], "out/pwn.txt", site), false);
+  assert.equal(write([rule("inner/*")], "inner/a.txt", site), false, "it does not name real/");
+  assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: [`shared/a.png`] }), true, "no link, or no folder to look in");
+  assert.equal(ruleAllows([{ ...rule(`${site}/*`), tool: "edit_image" }], "colleague", "edit_image", { paths: [`${site}/inner/a.png`, `${site}/out/b.png`] }, undefined, site), false, "one picture of the list leads out");
+
+  // The folders the portal gives out may be reached through a link themselves (a disk linked in): that is not a link in a project.
+  const linkedRoot = path.join(base, "via");
+  symlinkSync(path.join(base, "ws"), linkedRoot);
+  const via = path.join(linkedRoot, "site");
+  assert.equal(write([rule(`${via}/*`)], `${via}/notes.md`, via), true, "a folder reached by a link, written as it is reached");
+  assert.equal(write([rule(`${via}/*`)], `${via}/inner/a.txt`, via), true);
+  assert.equal(write([rule(`${via}/*`)], `${via}/out/pwn.txt`, via), false);
+  assert.equal(write([rule(`${via}/*`)], `${via}/shared/x.md`, via), false);
+
+  // As the guard asks it, with the folder of the conversation: the rule is the owner's, a link is a repository's.
+  const ids = ["write", "edit"].map((tool) => {
+    const id = `rule-leads-${tool}`;
+    addToolRule({ id, role: "all", tool, pattern: `${site}/*`, note: "", person_key: null });
+    return id;
+  });
+  addToolRule({ id: "rule-leads-relative", role: "all", tool: "write", pattern: "out/*", note: "", person_key: null });
+  try {
+    for (const role of ["colleague", "guest"]) {
+      const as = guardAs({ role, key: "priya", workspace: site });
+      for (const tool of ["write", "edit"]) {
+        assert.equal(call(as, tool, { path: `${site}/notes.md`, content: "x", edits: [] }), undefined, `${role}: ${tool} a file in the folder`);
+        assert.equal(call(as, tool, { path: `${site}/inner/a.txt`, content: "x", edits: [] }), undefined, `${role}: ${tool} through a link inside it`);
+        assert.equal(refused(call(as, tool, { path: `${site}/out/pwn.txt`, content: "x", edits: [] })), true, `${role}: ${tool} through a link out of it`);
+      }
+      assert.equal(refused(call(as, "write", { path: "out/pwn.txt", content: "x" })), true, `${role}: a path written relative to the folder`);
+    }
+  } finally {
+    for (const id of [...ids, "rule-leads-relative"]) deleteToolRule(id);
+  }
 });
 
 test("the portal can mark a conversation as having read something outside a tool call, which is how a routine's report limits it", () => {

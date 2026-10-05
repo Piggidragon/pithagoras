@@ -93,6 +93,11 @@ const de: Locale = {
       one: "Im Ordner dieses Agenten gab es {files} schon, deine Antworten wurden also nicht hineingeschrieben. Bearbeite die Datei unter Dateien.",
       other: "Im Ordner dieses Agenten gab es {files} schon, deine Antworten wurden also nicht hineingeschrieben. Bearbeite sie unter Dateien.",
     },
+    "This agent's folder already had {files} as links, so what you answered was not written to them. They are left as they are.": {
+      one: "Im Ordner dieses Agenten gab es {files} schon als Link, deine Antworten wurden also nicht hineingeschrieben. Der Link bleibt, wie er ist.",
+      other: "Im Ordner dieses Agenten gab es {files} schon als Links, deine Antworten wurden also nicht hineingeschrieben. Die Links bleiben, wie sie sind.",
+    },
+    "This file is a link, so it is left alone: it is not shown or written here.": "Diese Datei ist ein Link und bleibt deshalb unberührt: Sie wird hier weder angezeigt noch geschrieben.",
     "Keep its folder": "Ordner behalten",
     "Its files and memory stay in {home}. An agent made under the same name picks them up again.": "Seine Dateien und sein Gedächtnis bleiben in {home}. Ein Agent mit demselben Namen übernimmt sie wieder.",
     "Delete its folder too": "Auch den Ordner löschen",

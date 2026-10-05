@@ -9,6 +9,7 @@ import { mkdirSync, realpathSync } from "node:fs";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
+import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
@@ -653,6 +654,10 @@ function migrate(d: Database.Database): void {
   if (ruleCols.length && !ruleCols.includes("person_key")) {
     d.exec("ALTER TABLE tool_rules ADD COLUMN person_key TEXT");
   }
+  // A rule for a tool that runs as the primary user never applies now, and the API refuses to make one. Those an older
+  // version made would stay listed as working: dropped, but for a heartbeat's own.
+  const asPrimary = Object.keys(RUNS_AS_PRIMARY);
+  d.prepare(`DELETE FROM tool_rules WHERE role != 'heartbeat' AND tool IN (${asPrimary.map(() => "?").join(", ")})`).run(...asPrimary);
   const questionCols = (d.prepare("PRAGMA table_info(questions)").all() as { name: string }[]).map(
     (c) => c.name
   );

@@ -40,10 +40,15 @@ nothing opens them for anybody else (see
 What **Always allow** writes is the command or path exactly as it was asked, so a
 `*` in it is a star and not a wildcard. To allow a family of commands, write the
 pattern yourself. A path is tidied before it is matched, so a `..` in it cannot
-reach out of the folder a rule names. A `write` or `edit` rule reaches what its
-pattern names and nothing more, apart from what the guard keeps from everybody
-who is not you (see [roles](/people/roles#what-a-colleague-may-do)): give it the
-folder it is for, not `*`.
+reach out of the folder a rule names, and it is matched twice: as it was written
+and where it leads. A link inside the folder that leads out of it (a repository
+with `shared -> ../common`) does not carry the rule along: writing through it
+needs a rule that names where it leads. A folder the portal gives out that is
+itself reached through a link, such as a data disk linked in, is not that. A
+`write` or `edit` rule reaches what its pattern names and nothing more, apart
+from what the guard keeps from everybody who is not you (see
+[roles](/people/roles#what-a-colleague-may-do)): give it the folder it is for, not
+`*`.
 
 ## One command, never a pipeline
 

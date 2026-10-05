@@ -18,6 +18,7 @@ import { loadedAt, loadedPlaces, type LoadedAs, type LoadedPlace } from "./loade
 import { loadedByLinks } from "./loaded-links.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
+import { runsAsPrimary } from "./runs-as-primary.js";
 
 /**
  * A blast-radius limiter for prompt injection.
@@ -462,29 +463,58 @@ export function rulePatterns(toolName: string, action: string): string[] {
  */
 const STDERR_IDIOM = /\s+2>(&1|\/dev\/null)$/;
 
+/**
+ * Where a path leads when that is not where it was written, as the rules name places, or undefined
+ * for one with no link in it, or one that cannot be placed (a relative path, with no folder to take
+ * it from). The folders the portal gives out may themselves be reached through a link, a data disk
+ * linked in: that is how it was set up, not a link somebody put in a project, so what leads inside
+ * them is named by the folder as it is spelled for the conversation.
+ */
+function ledTo(subject: string, workspace: string | undefined): string | undefined {
+  const typed = workspace === undefined ? (path.isAbsolute(subject) ? path.resolve(subject) : undefined) : askedPath(subject, workspace);
+  if (typed === undefined) return undefined;
+  const real = realPathAhead(typed);
+  if (real === typed) return undefined;
+  for (const base of [workspace, workspaceRoot()]) {
+    if (base === undefined) continue;
+    const inside = pathBelow(realPathAhead(base), real);
+    if (inside !== undefined) return path.join(path.resolve(base), inside);
+  }
+  return real;
+}
+
 export function ruleAllows(
   rules: ToolRule[],
   role: string,
   toolName: string,
   input: Record<string, unknown>,
-  personKey?: string
+  personKey?: string,
+  workspace?: string
 ): boolean {
   let subjects = subjectsOf(toolName, input).map((s) => s.trim());
   if (!subjects.length || subjects.some((s) => !s)) return false;
+  let leads = (_subject: string): string | undefined => undefined;
   if (toolName === "bash") {
     subjects[0] = subjects[0].replace(STDERR_IDIOM, "").trim();
     if (CHAINING.test(subjects[0])) return false;
   } else if (toolName === EDIT_IMAGE_TOOL || target(input)) {
     // A path is what it leads to, not how it was written: `*` in a rule for
     // /srv/site/* must not reach /srv/site/../../root. A `..` that is left
-    // after tidying leads out of wherever the rule's place is.
+    // after tidying leads out of wherever the rule's place is, and so does a
+    // link in it: see below.
     subjects = subjects.map((s) => path.posix.normalize(s));
     if (subjects.some((s) => s.split("/").includes(".."))) return false;
+    leads = (subject) => ledTo(subject, workspace);
   }
-  // Each subject by some rule of its own, as the same calls one by one would be.
-  return subjects.every((subject) =>
-    rules.some((r) => ruleApplies(r, role, personKey) && r.tool === toolName && globToRegExp(r.pattern).test(subject))
-  );
+  const named = (subject: string) =>
+    rules.some((r) => ruleApplies(r, role, personKey) && r.tool === toolName && globToRegExp(r.pattern).test(subject));
+  // Each subject by some rule of its own, as the same calls one by one would be. A path written under a
+  // rule's folder that leads out of it through a link is not under the rule: where it leads is named as well.
+  return subjects.every((subject) => {
+    if (!named(subject)) return false;
+    const real = leads(subject);
+    return real === undefined || named(real);
+  });
 }
 
 /**
@@ -504,10 +534,11 @@ function allowedByRule(
   toolName: string,
   input: Record<string, unknown>,
   key: string | undefined,
+  workspace: string | undefined,
   note: (kind: string, reason: string) => void
 ): boolean {
   const rules = listToolRules();
-  if (!ruleAllows(rules, role, toolName, input, key)) return false;
+  if (!ruleAllows(rules, role, toolName, input, key, workspace)) return false;
   note("allowed-by-rule", "A standing rule permits this");
   return true;
 }
@@ -658,24 +689,6 @@ function writesInstructions(places: string[], homes?: string[]): string | undefi
   const asWritten = loadedPlaces().map((place): LoadedPlace => ({ ...place, path: path.resolve(place.path) }));
   return refusal(holds(asWritten)) ?? refusal(holds(loadedByLinks({ folders: homes ? foldersToLookIn(homes) : [], trees: homes ? [realPath(workspaceRoot()) ?? workspaceRoot()] : [] })));
 }
-
-/**
- * The tools that run what a person writes as the primary user, or in a pi without
- * this guard, and the reason for each. Nothing opens them for anybody else — not
- * a rule, not an approval — for the guard cannot follow what they go on to do:
- * a routine is run with no role at all, which is the primary user's, and a
- * subagent is a pi of its own. Said once here: unrunnable holds them, which is
- * what a rule, an approval and the question to the primary user all ask.
- */
-const RUNS_AS_PRIMARY: Record<string, string> = {
-  subagent: "a subagent works without this guard, so it would do what they ask of it with the agent's own rights",
-  routine_create: "a routine runs as the primary user, so one made, changed or run for them would act with the agent's own rights, and its report goes back to them",
-  routine_update: "a routine runs as the primary user, so one made, changed or run for them would act with the agent's own rights, and its report goes back to them",
-  routine_run: "a routine runs as the primary user, so one made, changed or run for them would act with the agent's own rights, and its report goes back to them",
-};
-
-/** Why a rule for this tool would hand somebody who is not the primary user the primary user's rights, or undefined: see RUNS_AS_PRIMARY. */
-export const runsAsPrimary = (toolName: string): string | undefined => RUNS_AS_PRIMARY[toolName];
 
 /**
  * Why a call that is not a read may not run for somebody who is not the primary
@@ -987,7 +1000,7 @@ export function guardExtension(
       if (
         role !== "primary" &&
         !READ_ONLY.has(event.toolName) &&
-        !allowedByRule(role, event.toolName, event.input ?? {}, key, note) &&
+        !allowedByRule(role, event.toolName, event.input ?? {}, key, workspace, note) &&
         // Not an approval that the taint refuses after all: it is refused below, with its own reason, and keeps its use.
         !heldByTaint &&
         !granted()

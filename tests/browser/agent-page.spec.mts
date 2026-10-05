@@ -7,7 +7,7 @@ const agent = (id: string, name: string, extra: Record<string, unknown> = {}) =>
 });
 
 /** A portal with the first agent and one more, "ada", whose folder the answers of a new agent made under that name meet. */
-async function portal(page: Page, opts: { kept?: string[]; deleted?: string[]; wizard?: { initialised: boolean; kept: string[] } } = {}) {
+async function portal(page: Page, opts: { kept?: string[]; links?: string[]; deleted?: string[]; wizard?: { initialised: boolean; kept: string[] } } = {}) {
   let made = false;
   let ran = false;
   await mockPortal(page, async ({ path: p, method, url }) => {
@@ -24,7 +24,9 @@ async function portal(page: Page, opts: { kept?: string[]; deleted?: string[]; w
     if (/^\/api\/agents\/[^/]+\/setup$/.test(p)) {
       // With `wizard`, the folder lacks one of the files until the wizard has been run, and the wizard answers as it is told to.
       if (method === 'POST') ran = true;
-      if (!opts.wizard) return { initialised: true, home: '/a/ada', files: [] };
+      // `links`: files of the folder that are links, which the Files tab does not show.
+      const files = (opts.links ?? []).map((name) => ({ name, exists: false, content: '', mtime: 0, link: true }));
+      if (!opts.wizard) return { initialised: true, home: '/a/ada', files };
       return { initialised: ran && opts.wizard.initialised, home: '/a/ada', files: [], ...(method === 'POST' ? { kept: opts.wizard.kept } : {}) };
     }
   }, { settings: true });
@@ -103,6 +105,27 @@ test("an agent that lost one of its files and is set up again is not said to hav
   const note = main.getByRole('status');
   await expect(note).toContainText("This agent's folder already had SOUL.md, PrimaryUser.md, so what you answered was not written to them.");
   await expect(main.getByText('kept from before')).toHaveCount(0);
+});
+
+test('a kept file that is a link is not said to be editable under Files, which shows no editor for it', async ({ page }) => {
+  await portal(page, { kept: ['SOUL.md', 'PrimaryUser.md'], links: ['SOUL.md'] });
+  const main = await makeAda(page);
+  const note = main.getByRole('status').filter({ hasText: 'folder already had' });
+  await expect(note).toContainText("This agent's folder already had PrimaryUser.md, so what you answered was not written to it. Edit it under Files.");
+  await expect(note).toContainText("This agent's folder already had SOUL.md as a link, so what you answered was not written to it. It is left as it is.");
+  await expect(note).not.toContainText('Edit them');
+  await main.getByRole('tab', { name: 'Files' }).click();
+  await main.getByRole('button', { name: 'SOUL.md' }).click();
+  await expect(main.getByText('This file is a link, so it is left alone')).toBeVisible();
+  await expect(main.getByRole('textbox', { name: 'SOUL.md' })).toHaveCount(0);
+});
+
+test('a kept file that is a link alone is said so, with no pointer to Files', async ({ page }) => {
+  await portal(page, { kept: ['SOUL.md', 'PrimaryUser.md'], links: ['SOUL.md', 'PrimaryUser.md'] });
+  const main = await makeAda(page);
+  const note = main.getByRole('status').filter({ hasText: 'folder already had' });
+  await expect(note).toContainText("This agent's folder already had SOUL.md, PrimaryUser.md as links, so what you answered was not written to them. They are left as they are.");
+  await expect(note).not.toContainText('under Files');
 });
 
 test('a wizard that is answered and still not done is usable again, and not left spinning', async ({ page }) => {

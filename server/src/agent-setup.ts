@@ -76,7 +76,9 @@ export function agentFileStatus(home = agentHome()) {
     files: EDITABLE_FILES.map((name) => {
       const read = readPlain(name, home);
       // `mtime` is what a save sends back as `expected`: the agent writes these files too.
-      return { name, exists: existsSync(filePath(name, home)), content: read?.content ?? "", mtime: read?.mtime ?? 0 };
+      // `link`: a link is shown as nothing and not written through, so the page says so, not offers an empty editor.
+      const link = Boolean(lstatSync(filePath(name, home), { throwIfNoEntry: false })?.isSymbolicLink());
+      return { name, exists: existsSync(filePath(name, home)), content: read?.content ?? "", mtime: read?.mtime ?? 0, link };
     }),
   };
 }

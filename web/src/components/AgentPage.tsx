@@ -248,6 +248,10 @@ function AgentView({
       .catch((e) => setLoadError((e as Error).message))
       .finally(() => setLoading(false));
 
+  // A file that is a link is left alone and has no editor under Files, so the note does not send anybody there.
+  const links = kept.filter((name) => setup?.files.find((f) => f.name === name)?.link);
+  const edits = kept.filter((name) => !links.includes(name));
+
   const readSetup = () =>
     api.agentSetup(agent.id).then(
       (r) => {
@@ -422,15 +426,24 @@ function AgentView({
             </div>
           </PageHeader>
 
-          {kept.length > 0 && (
+          {kept.length > 0 && (setup || setupFailed) && (
             <div role="status" className="mt-4 flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">
               <span className="min-w-0 flex-1">
-                {tp(
-                  kept.length,
-                  "This agent's folder already had {files}, so what you answered was not written to it. Edit it under Files.",
-                  "This agent's folder already had {files}, so what you answered was not written to them. Edit them under Files.",
-                  { files: kept.join(", ") },
-                )}
+                {edits.length > 0 &&
+                  tp(
+                    edits.length,
+                    "This agent's folder already had {files}, so what you answered was not written to it. Edit it under Files.",
+                    "This agent's folder already had {files}, so what you answered was not written to them. Edit them under Files.",
+                    { files: edits.join(", ") },
+                  )}
+                {edits.length > 0 && links.length > 0 && " "}
+                {links.length > 0 &&
+                  tp(
+                    links.length,
+                    "This agent's folder already had {files} as a link, so what you answered was not written to it. It is left as it is.",
+                    "This agent's folder already had {files} as links, so what you answered was not written to them. They are left as they are.",
+                    { files: links.join(", ") },
+                  )}
               </span>
               <button type="button" onClick={() => onKept([])} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-warn/10">
                 <LuX aria-hidden className="h-4 w-4" />
@@ -797,6 +810,12 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
               {t("Not read while Understory is the agent's memory (Settings → Add-ons → Memory). It is kept, and read again once Understory is switched off.")}
             </p>
           )}
+          {file.link ? (
+            <p role="note" className="rounded-lg bg-fg/5 px-3 py-2 text-xs text-fg-muted">
+              {t("This file is a link, so it is left alone: it is not shown or written here.")}
+            </p>
+          ) : (
+          <>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -834,6 +853,8 @@ function AgentFiles({ agent, setup, onSaved }: { agent: string; setup: Setup; on
             ) : null}
             {saved ? t("Saved") : t("Save")}
           </button>
+          </>
+          )}
         </div>
       )}
     </section>

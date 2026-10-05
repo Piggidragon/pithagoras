@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { addGrant, addToolRule } from "./db.js";
 import { literalPattern, rulePatterns } from "./pi/guard.js";
+import { runsAsPrimary } from "./pi/runs-as-primary.js";
 import type { QuestionRow } from "./questions.js";
 
 /**
@@ -13,6 +14,9 @@ import type { QuestionRow } from "./questions.js";
  */
 export function recordApproval(question: QuestionRow, asking: { id: string } | undefined, approves: boolean, always: boolean): void {
   const tool = question.action_tool || "bash";
+  // Nothing opens these for anybody but the primary user, so there is nothing to write down: a rule would be listed as
+  // working and never apply (ask_primary does not offer them, a question from before that was added may still be open).
+  if (runsAsPrimary(tool)) return;
   // An approval is a permission, not a sentence. Bound to the exact action
   // that was shown, the conversation that asked, one use, fifteen minutes
   // — so "yes" cannot be stretched into a standing role change.

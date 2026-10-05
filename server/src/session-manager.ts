@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { LiveEvents } from "./live-events.js";
 import type { Timings } from "./llama-progress.js";
 import { forgetChat, noteToolCall, subagentGone } from "./memory-llm.js";
-import { ModelErrors } from "./model-errors.js";
+import { ModelErrors, plainFailure } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import { hasPrimary, type PersonRow, type Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -1413,12 +1413,12 @@ class SessionManager extends EventEmitter {
       // it, or a command sent beside it: that run is not what failed, and
       // will settle the session itself. Marked failed, the page would take
       // every call still open in it for one that was cut off.
+      const failure = plainFailure((e as Error).message);
       if (!((logged.queued || logged.command) && busy)) {
-        const failure = (e as Error).message;
         updateSession(sessionId, { status: "error", last_error: failure });
         this.record(sessionId, "portal_status", { status: "error", error: failure });
       }
-      throw e;
+      throw failure === (e as Error).message ? e : new Error(failure);
     } finally {
       // Pictures no event names are never shown again, so they are not kept:
       // a message that never got there, or a command that went to pi without a

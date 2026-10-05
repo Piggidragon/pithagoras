@@ -155,6 +155,9 @@ test("a link that leads nowhere is something there: the wizard keeps it, and so 
   for (const name of ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]) symlinkSync("/home/agent/notes/missing.md", path.join(dir, name));
   assert.equal(isInitialised(dir), true, "the wizard cannot write through the links, so it cannot be asked for");
   assert.equal(agentFileStatus(dir).initialised, true);
+  // Said of each, so that the page shows a link as one and not as an empty editor that cannot be saved.
+  const status = agentFileStatus(dir).files;
+  assert.deepEqual(status.map((f) => [f.name, f.link]), [["SOUL.md", true], ["PrimaryUser.md", true], ["MEMORY.md", true], ["WATCH.md", false]]);
   assert.deepEqual(runWizard({ agentName: "Ada", userName: "Sam" }, dir).kept, ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]);
   assert.equal(isInitialised(dir), true);
   // One file of three gone is still a wizard.

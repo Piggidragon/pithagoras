@@ -2,7 +2,7 @@ import express, { type Router } from "express";
 import { forgetPerson, getPerson, isOnlyPrimary, listPeople, rename, setRole, type Role } from "../people.js";
 import { AUDIT_KEEP, addToolRule, clearAudit, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
 import { nanoid } from "nanoid";
-import { runsAsPrimary } from "../pi/guard.js";
+import { runsAsPrimary } from "../pi/runs-as-primary.js";
 
 /**
  * The roster.
