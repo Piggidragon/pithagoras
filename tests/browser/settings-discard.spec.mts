@@ -88,9 +88,15 @@ test("Escape over a person's notes that were typed in asks first", async ({ page
 test("a person that a channel renamed while their page was open is shown as they are now, unless something was typed in it", async ({ page }) => {
   const kim = { key: 'tg:kim', name: 'Kim', role: 'colleague', notes: '', first_seen: '', last_seen: null, announced_at: null, renamed: 0 };
   let live = kim;
-  await portal(page, { '/api/tool-rules': { rules: [] } }, (ask) => {
+  // The rules come back with the people, so a rule that is listed says the reload has landed.
+  const rules: Record<string, unknown>[] = [];
+  await portal(page, {}, (ask) => {
     if (ask.path === '/api/people') return { people: [live] };
-    if (ask.path === '/api/tool-rules' && ask.method === 'POST') return { rules: [] };
+    if (ask.path === '/api/tool-rules' && ask.method === 'POST') {
+      const { tool, pattern, personKey } = ask.json() as Record<string, string>;
+      rules.push({ id: `rule-${rules.length}`, role: 'all', tool, pattern, person_key: personKey, note: '', created_at: '' });
+    }
+    if (ask.path === '/api/tool-rules') return { rules };
   });
   await page.goto('/settings/people');
   await settings(page).getByRole('button', { name: /Kim/ }).click();
@@ -99,6 +105,7 @@ test("a person that a channel renamed while their page was open is shown as they
   live = { ...kim, notes: 'Reviews the pull requests.' };
   await settings(page).getByRole('textbox', { name: 'Pattern' }).fill('ls*');
   await settings(page).getByRole('button', { name: 'Allow' }).click();
+  await expect(settings(page).getByText('bash: ls*', { exact: true })).toBeVisible();
   await expect(notes).toHaveValue('Reviews the pull requests.');
   // Nothing of theirs was typed in: no question on the way out.
   await page.keyboard.press('Escape');
@@ -109,9 +116,10 @@ test("a person that a channel renamed while their page was open is shown as they
   await settings(page).getByRole('button', { name: /Kim/ }).click();
   await notes.fill('Plays the cello.');
   live = { ...kim, notes: 'Reviews the pull requests and the plans.' };
-  await settings(page).getByRole('textbox', { name: 'Pattern' }).fill('ls*');
+  await settings(page).getByRole('textbox', { name: 'Pattern' }).fill('cat*');
   await settings(page).getByRole('button', { name: 'Allow' }).click();
-  await expect(settings(page).getByRole('textbox', { name: 'Pattern' })).toHaveValue('');
+  // The reload has landed once the rule is listed, and the people came with it.
+  await expect(settings(page).getByText('bash: cat*', { exact: true })).toBeVisible();
   await expect(notes).toHaveValue('Plays the cello.');
 });
 

@@ -63,6 +63,15 @@ const homeEnv = (home) => ({
 });
 
 /**
+ * The names pi takes a provider's key or a cloud login from (pi-ai's env-api-keys: `*_API_KEY`, `HF_TOKEN`, the
+ * Anthropic and Copilot tokens, Google's and AWS's credentials). With one of them set, pi has a model it did not
+ * have in a test, picks it, and a chat or a routine that is run for its error goes to the provider, with tools,
+ * on the developer's account.
+ */
+const CREDENTIALS = /_API_KEY$|^ANTHROPIC_(AUTH|OAUTH)_TOKEN$|^HF_TOKEN$|^COPILOT_GITHUB_TOKEN$|^AWS_|^GOOGLE_(CLOUD_|APPLICATION_CREDENTIALS)|^GCLOUD_/;
+export const withoutCredentials = (env) => Object.fromEntries(Object.entries(env).filter(([name]) => !CREDENTIALS.test(name)));
+
+/**
  * A home for a test that loads the server's modules into its own process, as
  * `testHome` is for one that starts the server: this process's environment
  * points every folder into it, so nothing reaches the developer's own pi
@@ -73,6 +82,7 @@ const homeEnv = (home) => ({
 export function inProcessHome(prefix) {
   const home = testHome(prefix);
   Object.assign(process.env, homeEnv(home));
+  for (const name of Object.keys(process.env)) if (CREDENTIALS.test(name)) delete process.env[name];
   mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
   return home;
 }
@@ -82,7 +92,7 @@ export function inProcessHome(prefix) {
  * host. `overrides` change any of it, a test of the login giving it a password.
  */
 export const serverEnv = (home, port, overrides = {}) => ({
-  ...process.env,
+  ...withoutCredentials(process.env),
   PORT: String(port), ...homeEnv(home),
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
   ...overrides,

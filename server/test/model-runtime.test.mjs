@@ -7,7 +7,6 @@ import { inProcessHome, scratch } from "./server-harness.mjs";
 // pi itself, against an agent directory of its own.
 inProcessHome("pi-agent-");
 const dir = process.env.PI_CODING_AGENT_DIR;
-delete process.env.OPENROUTER_API_KEY;
 const pi = await import("@earendil-works/pi-coding-agent");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { modelRuntime } = await import("../dist/api/providers.js");

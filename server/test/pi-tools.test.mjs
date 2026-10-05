@@ -9,7 +9,7 @@ import { inProcessHome } from "./server-harness.mjs";
 
 const home = inProcessHome("pithagoras-pi-tools-");
 
-const { createSession, getDb, setDefaultReportTo } = await import("../dist/db.js");
+const { createSession, getDb, listRoutineSessions, setDefaultReportTo } = await import("../dist/db.js");
 const { createAgent } = await import("../dist/agents.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
 const { routineSupervisor } = await import("../dist/routines/supervisor.js");
@@ -75,6 +75,21 @@ test("the routine tools answer in the shape pi reads, and a failure throws", asy
   } finally {
     routineSupervisor.run = real;
   }
+});
+
+test("a routine the agent makes under the name of a deleted one does not take up that one's conversation", async () => {
+  const tools = toolsOf(routineTools());
+  await run(tools.routine_create, { name: "Weekly digest", instructions: "the old plan", schedule: "@weekly" });
+  const old = getDb().prepare("SELECT * FROM routines WHERE name = 'Weekly digest'").get();
+  // A run of it, as one that ran leaves it behind. The routine is deleted, its runs stay.
+  createSession({ id: "digest-run", title: "A run", workspace: home, executor: "host", kind: "routine", routine_slug: old.slug });
+  getDb().prepare("DELETE FROM routines WHERE id = ?").run(old.id);
+
+  await run(tools.routine_create, { name: "Weekly digest", instructions: "the new plan", schedule: "@weekly" });
+  const again = getDb().prepare("SELECT * FROM routines WHERE name = 'Weekly digest'").get();
+  assert.notEqual(again.slug, old.slug, "not the slug whose runs are still there");
+  assert.deepEqual(listRoutineSessions(again.slug), [], "its first run is not made in the old routine's chat");
+  assert.deepEqual(listRoutineSessions(old.slug).map((x) => x.id), ["digest-run"]);
 });
 
 test("report says whether it went out, and fails when it did not", async () => {

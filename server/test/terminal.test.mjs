@@ -56,6 +56,19 @@ async function settled(value, quietMs = 300) {
   }
 }
 
+/**
+ * The count a shell keeps in `file` (`echo $n > file`), as the highest value read. The shell empties the file before
+ * it writes it, so a read between the two sees nothing, and a test that reads twice (once to see the count is far
+ * enough, once to check it) would take that for a count of 0. The count only goes up.
+ */
+function counted(file) {
+  let most = 0;
+  return () => {
+    try { most = Math.max(most, Number(readFileSync(file, "utf8")) || 0); } catch {}
+    return most;
+  };
+}
+
 /** Reads the terminal's stream until `until` shows up in it. */
 async function read(id, until) {
   const controller = new AbortController();
@@ -113,7 +126,7 @@ test("a command that writes faster than the client reads is held back, not queue
   const counter = path.join(home, "written");
   // 256 KiB a time, counted after each: how much the shell has been let to write.
   await post(`/terminal/${id}/input`, { data: `n=0; while :; do printf '%0262144d\\n' 0; n=$((n+1)); echo $n > ${counter}; done\n` });
-  const written = () => { try { return Number(readFileSync(counter, "utf8")) || 0; } catch { return 0; } };
+  const written = counted(counter);
   // A client that is connected and does not read.
   const res = await new Promise((resolve) => http.get(`${base}/terminal/${id}/stream`, { agent: false }, (r) => { r.pause(); resolve(r); }));
   try {
@@ -139,7 +152,7 @@ test("a client that goes away while the shell is held back for it does not leave
   const id = await openShell(t);
   const counter = path.join(home, "written-away");
   await post(`/terminal/${id}/input`, { data: `n=0; while :; do printf '%0262144d\\n' 0; n=$((n+1)); echo $n > ${counter}; done\n` });
-  const written = () => { try { return Number(readFileSync(counter, "utf8")) || 0; } catch { return 0; } };
+  const written = counted(counter);
   const res = await new Promise((resolve) => http.get(`${base}/terminal/${id}/stream`, { agent: false }, (r) => { r.pause(); resolve(r); }));
   try {
     const held = await settled(written);
@@ -189,7 +202,7 @@ test("a client that is the only one and takes nothing for too long is let go, an
   const id = await openShell(t);
   const counter = path.join(home, "written-dead");
   await post(`/terminal/${id}/input`, { data: `n=0; while :; do printf '%0262144d\\n' 0; n=$((n+1)); echo $n > ${counter}; done\n` });
-  const written = () => { try { return Number(readFileSync(counter, "utf8")) || 0; } catch { return 0; } };
+  const written = counted(counter);
   const res = await stalledClient(id);
   const gone = new Promise((resolve) => { res.on("close", resolve); res.on("error", () => {}); });
   try {

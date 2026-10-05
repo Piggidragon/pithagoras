@@ -282,8 +282,10 @@ test('a routine that the server changed while its form was open is shown as it i
 
   // Something typed: a change on the server does not take it back.
   await instructions.fill('Build it, then test it');
-  server.next = { instructions: 'Build it, then deploy it to production', updatedAt: '3' };
+  // Its last run is shown from the same list, outside the form: once it is there, the list has been taken in.
+  server.next = { instructions: 'Build it, then deploy it to production', updatedAt: '3', lastStatus: 'ok', lastOutput: 'Deployed to production.' };
   await page.clock.runFor(6000);
+  await expect(page.getByText('Deployed to production.')).toBeVisible();
   await expect(instructions).toHaveValue('Build it, then test it');
   await expect(save).toBeEnabled();
   expect(sent.filter((s) => s.method === 'PATCH')).toEqual([]);
