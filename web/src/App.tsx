@@ -299,6 +299,9 @@ function Shell({
     setEvents([]);
     setVersions({});
     setMoreBefore(false);
+    // An earlier page that is still on its way is the left chat's: it is dropped when it arrives, and this chat asks for its own.
+    loadedAgain.current++;
+    setLoadingBefore(false);
     setUiQueue([]);
     setLoadedSession(null);
     setFailures(0);
@@ -416,6 +419,7 @@ function Shell({
           replacing = false;
           // What was being fetched from above the old list belongs to it.
           loadedAgain.current++;
+          setLoadingBefore(false);
           setEvents(appendLiveEvents([], batch));
         } else if (batch.length) setEvents((prev) => appendLiveEvents(prev, batch));
         if (!batch.length) return;
@@ -764,14 +768,15 @@ function Shell({
               const asked = loadedAgain.current;
               try {
                 const r = await api.olderEvents(active.id, oldest);
-                // Loaded again meanwhile: what is above the new list is another question.
+                // Loaded again, or another chat opened, meanwhile: what is above the new list is another question.
                 if (asked !== loadedAgain.current) return;
                 setEvents((prev) => [...r.events, ...prev]);
                 setMoreBefore(r.more);
               } catch {
                 // Leave the button where it is; trying again is free.
               } finally {
-                setLoadingBefore(false);
+                // Not the flag of what was asked since: it was reset when the list was replaced, and may be set again.
+                if (asked === loadedAgain.current) setLoadingBefore(false);
               }
             }}
             onSend={async (msg, options) => {

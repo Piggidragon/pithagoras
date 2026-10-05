@@ -6,12 +6,14 @@ import { test, expect, mockPortal } from './portal-mock';
  * on screen and switches between them, and loads the chat again when one
  * comes back.
  */
-async function portal(page: Page) {
+async function portal(page: Page, { second = false } = {}) {
   const at = new Date().toISOString();
   const session = { id: 'a', title: 'Circle constants', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at };
+  // A chat to go to, for a test of what an answer for the one that was left does.
+  const other = { ...session, id: 'b', title: 'Chat B' };
   const state = { versions: { 5: [2, 5] } as Record<number, number[]>, switched: [] as { path: string; body: any }[] };
   await mockPortal(page, async ({ path: p, json }) => {
-    if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
+    if (p === '/api/sessions') return { sessions: second ? [session, other] : [session], executor: 'host' };
     // Versions come with the stream; this is here for a page that asks anyway (and a test counts that it does not).
     if (p === '/api/sessions/a/versions') return { versions: state.versions };
     if (p.endsWith('/version')) {
@@ -139,6 +141,46 @@ test('earlier messages asked for before the chat was loaded again are not put ab
   release();
   await page.waitForTimeout(500);
   await expect(page.getByText('Ancient question')).toHaveCount(0);
+});
+
+test('earlier messages asked for in a chat that was then left are not put above the chat that is open now, and do not hold up its own', async ({ page }) => {
+  await portal(page, { second: true });
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let askedA = 0;
+  let askedB = 0;
+  await page.route('**/api/sessions/a/events/before**', async (route) => {
+    const limit = new URL(route.request().url()).searchParams.get('limit');
+    if (limit === '1') return route.fulfill({ json: { events: [ev(1, 'portal_prompt', { message: 'x' })], more: true } });
+    // The page of the first chat is slow, and comes when the second is open.
+    askedA++;
+    await held;
+    await route.fulfill({ json: { events: turn(50, 'A old question', 'A old answer'), more: false } });
+  });
+  await page.route('**/api/sessions/b/events/before**', async (route) => {
+    const limit = new URL(route.request().url()).searchParams.get('limit');
+    if (limit === '1') return route.fulfill({ json: { events: [ev(1, 'portal_prompt', { message: 'x' })], more: true } });
+    askedB++;
+    await route.fulfill({ json: { events: turn(150, 'B old question', 'B old answer'), more: false } });
+  });
+  await page.goto('/s/a');
+  await replay(page, turn(100, 'A question', 'A answer'));
+  // Asked for on its own when the top of a short chat is in view; else by the button.
+  await page.getByRole('button', { name: 'Load earlier messages' }).click({ timeout: 1500 }).catch(() => {});
+  await expect.poll(() => askedA).toBeGreaterThan(0);
+  await page.getByText('Chat B').first().click();
+  await expect(page).toHaveURL(/\/s\/b$/);
+  await expect.poll(() => openStreams(page)).toEqual(['/api/sessions/b/events?since=0']);
+  await replay(page, turn(200, 'B question', 'B answer'));
+  // Its own earlier page is not held up by the one still on its way for the chat that was left.
+  await page.getByRole('button', { name: 'Load earlier messages' }).click({ timeout: 1500 }).catch(() => {});
+  await expect.poll(() => askedB).toBeGreaterThan(0);
+  await expect(page.getByText('B old question')).toBeVisible();
+  release();
+  await page.waitForTimeout(500);
+  await expect(page.getByText('A old question')).toHaveCount(0);
+  await expect(page.getByText('A question')).toHaveCount(0);
+  await expect(page.getByText('B question', { exact: true })).toBeVisible();
 });
 
 test('a message with one version has no switch', async ({ page }) => {
