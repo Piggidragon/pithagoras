@@ -141,3 +141,35 @@ test("another package's tool is kept when a removed server's name starts it", as
   assert.equal((await del("web")).status, 200);
   assert.deepEqual(names(), ["jira_search", "web_code", "web_search"]);
 });
+
+test("a server of a project's own files, which the portal never had, keeps its tools remembered", async () => {
+  seed();
+  assert.equal((await del("jira")).status, 200);
+  // The adapter loads it from a .mcp.json in the project: it is in no file the portal writes.
+  db.rememberTools([adapter("cursorsrv_lookup"), adapter("jira_search")]);
+  assert.ok(names().includes("cursorsrv_lookup"));
+  assert.ok(!names().includes("jira_search"), "only the one the portal removed is held back");
+});
+
+test("a removed server that is added again has its tools remembered again", async () => {
+  seed();
+  assert.equal((await del("jira")).status, 200);
+  db.rememberTools([adapter("jira_search")]);
+  assert.ok(!names().includes("jira_search"));
+  assert.equal((await put("jira", { command: "jira-mcp" })).status, 200);
+  db.rememberTools([adapter("jira_search")]);
+  assert.ok(names().includes("jira_search"));
+  // Also when it comes back by the file, not through the portal's form.
+  assert.equal((await del("jira")).status, 200);
+  write({ jira: { command: "jira-mcp" } });
+  db.rememberTools([adapter("jira_create")]);
+  assert.ok(names().includes("jira_create"));
+});
+
+test("a longer name that is still configured keeps its tools when the shorter one is removed", async () => {
+  seed();
+  assert.equal((await del("notes")).status, 200);
+  db.rememberTools([adapter("notes_staging_write"), adapter("notes_write")]);
+  assert.ok(names().includes("notes_staging_write"));
+  assert.ok(!names().includes("notes_write"));
+});
