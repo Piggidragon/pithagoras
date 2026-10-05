@@ -70,9 +70,9 @@ refused:
 | --- | --- |
 | `pipe-to-shell` | Downloading something and running it unseen |
 | `write-to-path` | A file on `PATH` runs later, without anyone asking |
-| `upload` | `curl`/`wget` carrying data out |
+| `upload` | `curl`/`wget` carrying data out: a body (`-d`, `-F`, `-T`, alone or folded into a group like `-sd`; `--data*`, `--form`, `--json`, `--post-data`, `--post-file`, `--body-*`) or a `POST`, `PUT` or `PATCH` |
 | `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens |
-| `publish` | `git push` is not undoable from here |
+| `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
 | `persist` | Scheduling outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file |
 | `delegate` | A `subagent` runs its own pi, which has no guard, so a tainted session may not start one |
 

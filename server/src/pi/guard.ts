@@ -120,6 +120,53 @@ function readsCredentials(tool: string, input: Record<string, unknown>): boolean
   return /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|\.netrc)/i.test(where) || SECRET_NAMES.test(where);
 }
 
+/** The options git takes before the subcommand that read the next word as their value (the others, `--no-pager` or `-p`, stand alone). */
+const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"]);
+
+/**
+ * `git push`, with whatever git's own options stand between: `git -C repo push`,
+ * `git -c color.ui=never push`, `git --git-dir=x --no-pager push`. A model writes
+ * them whenever the repository is not its working folder. Read word by word and not
+ * by one pattern: options before a subcommand can be told apart from it only by
+ * knowing which of them take a value, and a pattern for that backtracks without end.
+ */
+function pushesGit(command: string): boolean {
+  for (const found of command.matchAll(/\bgit\b/g)) {
+    const words = command.slice(found.index + 3).match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) ?? [];
+    let at = 0;
+    while (at < words.length && words[at].startsWith("-")) at += GIT_OPTIONS_WITH_VALUE.has(words[at]) ? 2 : 1;
+    if (at < words.length && /^push(?![\w-])/.test(words[at])) return true;
+  }
+  return false;
+}
+
+/** curl's short flags that take a value, which swallows the rest of their group: in `-ofile.tar` the `f` is no flag. */
+const CURL_VALUE_FLAGS = "oAbcCeEHKmQrtuUwxXyYzW";
+
+/** Whether a short-flag group has one of `wanted` before a flag that takes the rest as its value: `-sd`, `-sSLd@file`, `-sfT`. */
+function hasShortFlag(command: string, wanted: string): boolean {
+  for (const group of command.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
+    for (const flag of group[1]) {
+      if (wanted.includes(flag)) return true;
+      if (CURL_VALUE_FLAGS.includes(flag)) break;
+    }
+  }
+  return false;
+}
+
+/**
+ * curl or wget carrying data out: a body (`-d`, `-F`, `-T` alone or in a group such
+ * as `-sd`, `--data*`, `--form`, `--json`, `--upload-file`, `--post-data`,
+ * `--post-file`, `--body-data`, `--body-file`) or a method that has one. wget's
+ * short flags are not looked at: its `-d` is debug and its `-nd` no directories.
+ */
+function sendsData(command: string): boolean {
+  const withBody = /--(?:data|form|upload-file|json|post-data|post-file|body-data|body-file)\b/;
+  const withMethod = /(?:--request|--method)(?:\s+|=)["']?(?:POST|PUT|PATCH)\b|(?:^|\s)-[A-Za-z]*X\s*["']?(?:POST|PUT|PATCH)\b/i;
+  if (/\bcurl\b/.test(command) && (hasShortFlag(command, "dFT") || withBody.test(command) || withMethod.test(command))) return true;
+  return /\bwget\b/.test(command) && (withBody.test(command) || withMethod.test(command));
+}
+
 const RULES: Rule[] = [
   {
     name: "pipe-to-shell",
@@ -140,12 +187,7 @@ const RULES: Rule[] = [
   {
     name: "upload",
     why: "sending data out of the box",
-    hit: (tool, input) =>
-      tool === "bash" &&
-      /\b(curl|wget)\b/.test(cmd(input)) &&
-      /(\s-d\b|--data|\s-F\b|--form|--upload-file|\s-T\b|-X\s*(POST|PUT|PATCH)|--post-file|--json)/.test(
-        cmd(input),
-      ),
+    hit: (tool, input) => tool === "bash" && sendsData(cmd(input)),
   },
   {
     name: "read-credentials",
@@ -155,7 +197,7 @@ const RULES: Rule[] = [
   {
     name: "publish",
     why: "pushing to a remote is not undoable from here",
-    hit: (tool, input) => tool === "bash" && /\bgit\s+push\b/.test(cmd(input)),
+    hit: (tool, input) => tool === "bash" && pushesGit(cmd(input)),
   },
   {
     name: "persist",
