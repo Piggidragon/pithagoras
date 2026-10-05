@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { BROWSER_CDP } from "../api/mcp.js";
 import { bareRef, REF_TOKEN } from "./ref.js";
+import { pointAt, pointTo, press, typing } from "./cursor.js";
 import { diffViews, findNodes, findRef, pinned, renderView, sectionText, textPage, type AxChild, type View, type Viewport } from "./view.js";
 
 /**
@@ -287,8 +288,9 @@ export function browserTools(sessionId: string) {
       async execute(_id: string, p: { ref: string; double?: boolean }) {
         return act(sessionId, `Clicked ${cleanRef(p.ref)}`, async (page) => {
           const { locator } = await element(page, p.ref);
-          if (p.double) await locator.dblclick({ timeout: 10_000 });
-          else await locator.click({ timeout: 10_000 });
+          await pointAt(page, locator, p.double ? "Double-click" : "Click");
+          if (p.double) await Promise.all([press(page), locator.dblclick({ timeout: 10_000 })]);
+          else await Promise.all([press(page), locator.click({ timeout: 10_000 })]);
         });
       },
     });
@@ -311,8 +313,15 @@ export function browserTools(sessionId: string) {
       async execute(_id: string, p: { ref: string; text: string; submit?: boolean }) {
         return act(sessionId, `Typed into ${cleanRef(p.ref)}`, async (page) => {
           const { locator } = await element(page, p.ref);
-          await locator.fill(p.text, { timeout: 10_000 });
-          if (p.submit) await locator.press("Enter");
+          // The field, never what goes in it: a password or a code would otherwise be on screen.
+          await pointAt(page, locator, "Type");
+          await typing(page, true);
+          try {
+            await locator.fill(p.text, { timeout: 10_000 });
+          } finally {
+            await typing(page, false);
+          }
+          if (p.submit) await Promise.all([press(page, "Press · Enter"), locator.press("Enter")]);
         });
       },
     });
@@ -334,7 +343,8 @@ export function browserTools(sessionId: string) {
       async execute(_id: string, p: { ref: string; option: string }) {
         return act(sessionId, `Chose "${p.option}" in ${cleanRef(p.ref)}`, async (page) => {
           const { locator } = await element(page, p.ref);
-          await locator.selectOption({ label: p.option }, { timeout: 10_000 });
+          await pointAt(page, locator, "Choose", p.option);
+          await Promise.all([press(page), locator.selectOption({ label: p.option }, { timeout: 10_000 })]);
         });
       },
     });
@@ -352,7 +362,7 @@ export function browserTools(sessionId: string) {
       }),
       async execute(_id: string, p: { key: string }) {
         const combo = keyCombo(p.key);
-        return act(sessionId, `Pressed ${combo}`, (page) => page.keyboard.press(combo));
+        return act(sessionId, `Pressed ${combo}`, (page) => Promise.all([press(page, `Press · ${combo}`), page.keyboard.press(combo)]).then(() => {}));
       },
     });
 
@@ -376,9 +386,11 @@ export function browserTools(sessionId: string) {
         if (p.ref) {
           const { locator } = await element(page, p.ref);
           await locator.scrollIntoViewIfNeeded({ timeout: 10_000 });
+          await pointAt(page, locator, "Scroll to");
         } else {
           const { width, height } = await metrics(page);
           const screens = Math.min(Math.max(p.screens ?? 1, 0.25), 10);
+          await pointTo(page, width / 2, height / 2, p.direction === "up" ? "Scroll up" : "Scroll down");
           // At the middle of the page, so a scrolling panel under the pointer scrolls too.
           await page.mouse.move(width / 2, height / 2);
           await page.mouse.wheel(0, (p.direction === "up" ? -1 : 1) * height * 0.9 * screens);
@@ -446,7 +458,8 @@ export function browserTools(sessionId: string) {
       description:
         "Take a picture of what is on screen in the current tab, or of one element by its ref. Use it only when the text view cannot answer: " +
         "layout, images, charts, colours, or a page that shows almost nothing as text, like a canvas. A picture costs more to read than a view. " +
-        "Answers with a JPEG image.",
+        "Answers with a JPEG image. A glass arrow in it, sometimes with a short label, is your own cursor, not part of the page: it points " +
+        "at the element your last action went for, so if it is not where you meant, that action hit the wrong element.",
       promptSnippet: "A picture of the screen, for layout and images",
       promptGuidelines: ["Use browser_screenshot only when layout, images or a canvas matter; browser_snapshot and browser_get_text are cheaper to read."],
       parameters: Type.Object({
@@ -454,8 +467,9 @@ export function browserTools(sessionId: string) {
       }),
       async execute(_id: string, p: { ref?: string }) {
         const page = await pageFor(sessionId);
-        const shot = p.ref
-          ? await (await element(page, p.ref)).locator.screenshot({ type: "jpeg", quality: 70, timeout: 10_000 })
+        const target = p.ref ? (await element(page, p.ref)).locator : null;
+        const shot = target
+          ? await target.screenshot({ type: "jpeg", quality: 70, timeout: 10_000 })
           : await page.screenshot({ type: "jpeg", quality: 70, timeout: 10_000 });
         return { content: [{ type: "image" as const, data: shot.toString("base64"), mimeType: "image/jpeg" }], details: {} };
       },

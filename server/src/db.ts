@@ -1341,6 +1341,16 @@ export function getSkipThinkingProviders(): string[] | undefined {
   }
 }
 
+/** Whether voice mode can speak: the add-on is on, with a speech engine (not recognition alone). */
+export function voiceSpeaks(): boolean {
+  try {
+    const voice = JSON.parse(getSetting("voice") ?? "{}");
+    return voice.enabled === true && voice.runtime !== "none";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Only what the portal was explicitly told; absent keys fall through.
  *
@@ -1832,6 +1842,18 @@ export const portalBrowserOn = () => portalBrowserState() === "on";
 
 export function setPortalBrowser(on: boolean): void {
   putSetting("browser_tools", on ? "1" : "0");
+}
+
+/**
+ * Whether the browser tools show their cursor: on unless switched off on the
+ * Browser page ("0"). Off, nothing moves and the actions do not wait for it.
+ */
+export function browserCursorOn(): boolean {
+  return (getStoredSettings() as Record<string, string>).browser_cursor !== "0";
+}
+
+export function setBrowserCursor(on: boolean): void {
+  putSetting("browser_cursor", on ? "1" : "0");
 }
 
 /** Whether the agent has a browser at all: the portal's tools, or an MCP server pointed at it. */
