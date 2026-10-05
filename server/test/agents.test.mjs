@@ -332,7 +332,7 @@ test("a routine's chat that its agent's delete left in place takes messages agai
   const first = await call("POST", `/api/routines/${routine.id}/run`);
   assert.equal(first.status, 200, JSON.stringify(first.body));
   assert.equal(first.body.lastStatus, "error");
-  assert.match(first.body.lastOutput, /No API key found/);
+  assert.match(first.body.lastOutput, /There is no model to answer with/);
 
   const gone = await call("DELETE", `/api/agents/${made.id}`);
   assert.deepEqual(gone.body.routinesSwitchedOff, ["keeper daily"]);
