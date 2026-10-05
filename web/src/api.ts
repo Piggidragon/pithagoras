@@ -672,7 +672,24 @@ export const api = {
    * Only whether each is on — cheap, for the sidebar and the chat's menus.
    * `images`: image generation is on and has an address, which is when the Images page is in the sidebar.
    */
-  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean } }>("/api/features/flags"),
+  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean }; devices?: { enabled: boolean } }>("/api/features/flags"),
+  /** The Devices add-on's switch; `refused` says why it cannot be switched on here. */
+  devicesFeature: () => json<DevicesFeature>("/api/features/devices"),
+  setDevicesFeature: (enabled: boolean) =>
+    json<DevicesFeature & { reloaded: number; waiting: number }>("/api/features/devices", { method: "PUT", body: JSON.stringify({ enabled }) }),
+  devices: () => json<DevicesList>("/api/devices"),
+  /** A new one-time pairing code, which replaces any open one. */
+  newPairingCode: () => json<PairingCode>("/api/devices/pair", { method: "POST" }),
+  cancelPairingCode: () => json<{ ok: true }>("/api/devices/pair", { method: "DELETE" }),
+  renameDevice: (id: string, name: string) =>
+    json<{ device: Device }>(`/api/devices/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ name }) }),
+  removeDevice: (id: string) => json<{ ok: true }>(`/api/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  clearDeviceAlert: (id: string) => json<{ ok: true }>(`/api/devices/${encodeURIComponent(id)}/alert`, { method: "DELETE" }),
+  answerDeviceApproval: (id: string, approval: number, answer: ApprovalChoice, minutes?: number) =>
+    json<{ ok: true }>(`/api/devices/${encodeURIComponent(id)}/approvals/${approval}`, { method: "POST", body: JSON.stringify({ answer, minutes }) }),
+  devicePolicy: (id: string) => json<{ policy: DevicePolicy }>(`/api/devices/${encodeURIComponent(id)}/policy`),
+  setDevicePolicy: (id: string, settings: DevicePolicy["settings"], ifVersion: string) =>
+    json<{ policy: DevicePolicy | null }>(`/api/devices/${encodeURIComponent(id)}/policy`, { method: "PUT", body: JSON.stringify({ settings, ifVersion }) }),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>
@@ -1296,6 +1313,96 @@ export interface AuditEntry {
 }
 
 /** The agent's browser, and who may drive it. */
+export interface DevicesFeature {
+  enabled: boolean;
+  refused: string | null;
+}
+
+/** A folder the device's owner granted for Folders mode. */
+export interface DeviceFolder {
+  path: string;
+  access: "ro" | "rw";
+  execute: boolean;
+}
+
+/** What a connected device says about itself (`device.info`). */
+export interface DeviceInfo {
+  name: string;
+  os: string;
+  arch: string;
+  os_release: string | null;
+  hostname: string;
+  user: string;
+  uid: number;
+  home: string;
+  shell: string;
+  session: string;
+  mode: "ask" | "folders" | "full";
+  mode_expires_ms: number | null;
+  folders: DeviceFolder[];
+  folders_shell: string;
+  tools: string[];
+  client_version: string;
+}
+
+export type ApprovalChoice = "once" | "chat" | "time" | "deny";
+
+/** A call that waits on the device for the owner's answer. */
+export interface DeviceApproval {
+  id: number;
+  call: number | string | null;
+  chat: string;
+  tool: string;
+  target: string;
+  reasons: string[];
+  preview: string | null;
+  choices: ApprovalChoice[];
+  max_minutes: number;
+  created_ms: number;
+  expires_ms: number;
+}
+
+/** The device's settings as it shares them: `portal_policy` says whether the portal may change them. */
+export interface DevicePolicy {
+  portal_policy: "read" | "write";
+  version: string;
+  settings: { policy?: Record<string, unknown>; exec?: Record<string, unknown>; [key: string]: unknown };
+  device_only: string[];
+}
+
+export interface Device {
+  id: string;
+  name: string;
+  os: string;
+  arch: string;
+  created_at: string;
+  last_seen: string | null;
+  online: boolean;
+  connectedAt: string | null;
+  hello: { clientVersion: string; user: string; shell: string; capabilities: string[] } | null;
+  info: DeviceInfo | null;
+  /** The device is the portal's own machine and user: it reaches nothing the portal's own tools do not. */
+  sameMachine: boolean | null;
+  approvals: DeviceApproval[];
+  policy: DevicePolicy | null;
+  alert: { at: number; message: string } | null;
+}
+
+export interface DevicesList {
+  devices: Device[];
+  /** When the open pairing code runs out; the code itself is shown only once. */
+  pairing: { expires: string } | null;
+  /** The pin of the certificate the portal serves itself, for the pairing link. */
+  spki: string | null;
+}
+
+export interface PairingCode {
+  code: string;
+  expires: string;
+  attempts: number;
+  spki: string | null;
+}
+
 export type SubagentMode = "interrupt" | "background";
 
 /** The subagent tool the portal ships, off until switched on. */

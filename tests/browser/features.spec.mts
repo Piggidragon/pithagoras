@@ -282,15 +282,19 @@ test('forgetting the memory asks first', async ({ page }) => {
   expect(sent.at(-1)!.path).toBe('/api/features/understory/install?memory=forget');
 });
 
-test('the four add-on tabs fit a phone', async ({ page }) => {
+test('the five add-on tabs fit a phone, each with its whole name', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await portal(page);
   await page.goto('/settings/add-ons');
   const tabs = addons(page).getByRole('tab');
-  await expect(tabs).toHaveCount(4);
+  await expect(tabs).toHaveCount(5);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
-  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory']) await expect(addons(page).getByRole('tab', { name })).toBeVisible();
+  for (const name of ['Browser', 'Voice', 'Subagents', 'Memory', 'Devices']) {
+    const tab = addons(page).getByRole('tab', { name });
+    await expect(tab).toBeVisible();
+    expect(await tab.evaluate((el) => el.scrollWidth <= el.clientWidth), name).toBe(true);
+  }
 });
 
 test("a tidy-up that fails says why, not the status it came with", async ({ page }) => {

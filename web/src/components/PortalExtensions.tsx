@@ -1,7 +1,7 @@
 import { VoiceAddon } from "./VoiceAddon";
-import { MemoryAddon, SubagentAddon } from "./FeatureAddons";
+import { DevicesAddon, MemoryAddon, SubagentAddon } from "./FeatureAddons";
 import { useEffect, useId, useState } from "react";
-import { LuBot, LuBrain, LuCheck, LuGlobe, LuMic, LuRefreshCw } from "react-icons/lu";
+import { LuBot, LuBrain, LuCheck, LuGlobe, LuLaptop, LuMic, LuRefreshCw } from "react-icons/lu";
 import { api, type BrowserStatus } from "../api";
 import { BrowserInstall } from "./BrowserInstall";
 import { LoadFailed } from "./SettingsUi";
@@ -14,6 +14,7 @@ const addons = [
   { id: 'voice', label: msg('Voice'), Icon: LuMic },
   { id: 'subagents', label: msg('Subagents'), Icon: LuBot },
   { id: 'memory', label: msg('Memory'), Icon: LuBrain },
+  { id: 'devices', label: msg('Devices'), Icon: LuLaptop },
 ] as const;
 type Addon = typeof addons[number]['id'];
 
@@ -48,6 +49,7 @@ export function PortalExtensions({ onError }: { onError: (e: string) => void }) 
       {visited.includes(addon) && (addon === 'browser' ? <BrowserAddon onError={onError} />
         : addon === 'voice' ? <VoiceAddon onError={onError} />
         : addon === 'subagents' ? <SubagentAddon onError={onError} />
+        : addon === 'devices' ? <DevicesAddon onError={onError} />
         : <MemoryAddon onError={onError} />)}
     </div>)}
   </div>;
