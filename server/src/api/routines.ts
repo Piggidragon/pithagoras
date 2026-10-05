@@ -23,8 +23,8 @@ const toApi = (row: RoutineRow) => ({
   runAt: row.run_at,
   /** "once" or "repeats" — the two are mutually exclusive. */
   mode: isOneOff(row) ? ("once" as const) : ("repeats" as const),
-  /** A one-off that has already run. Kept so its result stays readable. Not one a restart cut off: that did not finish. */
-  done: oneOffDone(row) && row.last_status !== "interrupted",
+  /** A one-off that has already run. Kept so its result stays readable. Not one a restart cut off or somebody stopped: that did not finish. */
+  done: oneOffDone(row) && row.last_status !== "interrupted" && row.last_status !== "stopped",
   instructions: row.instructions,
   freshSession: Boolean(row.fresh_session),
   guard: row.guard === 1,
@@ -97,6 +97,21 @@ export function switchOffRoutines(all: { id: string; name: string; enabled: bool
   })();
   routineSupervisor.refreshSchedules(routines.map((r) => r.id));
   return routines.map((r) => r.name);
+}
+
+/**
+ * Takes the routines out with the folder they ran in, the home of an agent
+ * deleted with its folder: an agent made later under the same name gets a new
+ * folder at the same place, and would otherwise run what was written for the
+ * one before it. Their sessions are left alone, as when a routine is deleted.
+ * Returns their names.
+ */
+export function removeRoutines(all: { id: string; name: string }[]): string[] {
+  const del = getDb().prepare("DELETE FROM routines WHERE id = ?");
+  getDb().transaction(() => {
+    for (const r of all) del.run(r.id);
+  })();
+  return all.map((r) => r.name);
 }
 
 /**

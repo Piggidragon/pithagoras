@@ -91,7 +91,7 @@ const de: Locale = {
     "Keep its folder": "Ordner behalten",
     "Its files and memory stay in {home}. An agent made under the same name picks them up again.": "Seine Dateien und sein Gedächtnis bleiben in {home}. Ein Agent mit demselben Namen übernimmt sie wieder.",
     "Delete its folder too": "Auch den Ordner löschen",
-    "Everything in {home} is removed, its memory with it. This cannot be undone.": "Alles in {home} wird entfernt, auch sein Gedächtnis. Das lässt sich nicht rückgängig machen.",
+    "Everything in {home} is removed, its memory and its routines with it. This cannot be undone.": "Alles in {home} wird entfernt, auch sein Gedächtnis und seine Routinen. Das lässt sich nicht rückgängig machen.",
     "Talks as": "Spricht als",
     "The agent that answers here, with its own character and memory. Moved to another, it starts new conversations; moved back, it picks up the ones it had.": "Der Agent, der hier antwortet, mit eigenem Charakter und Gedächtnis. Einem anderen zugewiesen, beginnt er neue Gespräche; zurückgewechselt, nimmt er die bisherigen wieder auf.",
     "As in the voice settings": "Wie in den Spracheinstellungen",

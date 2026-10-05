@@ -83,8 +83,8 @@ A look never gets in the way: it waits while any chat or routine is working,
 and **Look now** is refused until they are done,
 since a home lab has one model to share, and one agent looks at a time. Each
 agent looks in one conversation of its own, so it remembers what it already
-told you. A look that a restart cuts off shows as "Interrupted by a restart"
-until the next one. Looks need the host executor; under the container executor nothing
+told you. A look that a restart cuts off shows as "Interrupted by a restart",
+and one you stop with Stop in its chat as "Stopped", until the next one. Looks need the host executor; under the container executor nothing
 would hold them to reading, so they do not run.
 
 ## In the sidebar
@@ -107,12 +107,16 @@ A routine can run in any agent's home: choose the agent under **Runs in**.
 ## Deleting one
 
 The bin next to an agent's name deletes it. Its chats are stopped and deleted
-with it, and its routines are switched off. It asks what to do with its folder:
+with it. It asks what to do with its folder, and with it, its routines:
 
 - **Keep its folder**: its files and memory stay, and so do the pictures its chats
-  made, in the [Images page](/guide/images). Make an agent with the same name and
-  it picks them up again.
-- **Delete its folder too**: the folder and everything in it are removed.
+  made, in the [Images page](/guide/images), and its routines, switched off. Make an
+  agent with the same name and it picks them all up again; a routine of its that is
+  left on the Routines page meanwhile says that the agent whose home it was has been
+  deleted.
+- **Delete its folder too**: the folder and everything in it are removed, and its
+  routines with it, so that an agent you make later under the same name starts clean.
+  What its routines did stays in their chats.
 
 The first agent cannot be deleted, only renamed. An agent a channel talks as
 cannot be deleted until the channel is given another.

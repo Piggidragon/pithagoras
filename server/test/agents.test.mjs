@@ -145,3 +145,27 @@ test("the pictures of a deleted agent's chats stay with a kept folder, and go wi
   assert.ok(!existsSync(bot.home));
   assert.deepEqual(await listed(), []);
 });
+
+test("a deleted agent's routines are switched off with its folder kept, and gone with it deleted, so a new agent of that name does not run them", async () => {
+  const made = (await call("POST", "/api/agents", { name: "Scout" })).body;
+  const routine = await call("POST", "/api/routines", { name: "scout daily", schedule: "@daily", instructions: "Look around.", workspace: made.home });
+  assert.equal(routine.status, 200, JSON.stringify(routine.body));
+  const routines = async () => (await call("GET", "/api/routines")).body.routines.filter((r) => r.name === "scout daily");
+
+  // Its folder kept: the routine stays, off, and says why it cannot run.
+  const kept = await call("DELETE", `/api/agents/${made.id}`);
+  assert.deepEqual([kept.body.routinesSwitchedOff, kept.body.routinesDeleted], [["scout daily"], []]);
+  const [left] = await routines();
+  assert.equal(left.enabled, false);
+  assert.match(left.workspaceProblem, /agent whose home this was has been deleted/, "not a complaint about the workspace root");
+  // The agent made under the name has the folder again, and the routine with it, still off.
+  assert.equal((await call("POST", "/api/agents", { name: "Scout" })).body.id, made.id);
+  assert.deepEqual((await routines()).map((r) => [r.enabled, r.workspaceProblem]), [[false, null]]);
+
+  // Its folder deleted: nothing of it is left for the next agent of that name.
+  const gone = await call("DELETE", `/api/agents/${made.id}?folder=delete`);
+  assert.deepEqual([gone.body.routinesSwitchedOff, gone.body.routinesDeleted], [[], ["scout daily"]]);
+  assert.deepEqual(await routines(), []);
+  assert.equal((await call("POST", "/api/agents", { name: "Scout" })).body.id, made.id);
+  assert.deepEqual(await routines(), [], "the agent made again starts without it");
+});

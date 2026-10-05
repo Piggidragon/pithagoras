@@ -127,8 +127,9 @@ function release(term: Term, listener: Listener): void {
  * terminated only after that: gone first, it takes the pty with it, and what
  * the walk is still looking for has been left to itself in the meantime.
  */
-function end(term: Term): void {
+function end(term: Term): Promise<void> {
   clearTimeout(term.reaper);
+  let done: Promise<void> = Promise.resolve();
   if (!term.exited) {
     // Read once: a second look could find the shell gone, and the two
     // answers disagree.
@@ -145,22 +146,38 @@ function end(term: Term): void {
     void members.then(() => {
       if (!term.exited) term.proc.kill("SIGTERM");
     });
-    setTimeout(() => {
-      if (!term.exited) term.proc.kill("SIGKILL");
-      void members.then((pids) => {
-        for (const pid of pids) {
-          // Still in that session: a pid given to something else since is not.
-          if (Number(statOf(pid)?.[3]) !== session) continue;
-          try {
-            process.kill(pid, "SIGKILL");
-          } catch {
-            // Gone in the meantime.
-          }
-        }
-      });
-    }, 2000).unref();
+    done = new Promise((resolve) => {
+      setTimeout(() => {
+        if (!term.exited) term.proc.kill("SIGKILL");
+        void members
+          .then((pids) => {
+            for (const pid of pids) {
+              // Still in that session: a pid given to something else since is not.
+              if (Number(statOf(pid)?.[3]) !== session) continue;
+              try {
+                process.kill(pid, "SIGKILL");
+              } catch {
+                // Gone in the meantime.
+              }
+            }
+          })
+          .then(resolve);
+      }, 2000).unref();
+    });
   }
   terms.delete(term.id);
+  return done;
+}
+
+/**
+ * Ends every shell, for a portal that is stopping. The shells are the portal's
+ * children but live on the pty in sessions of their own, so a stopped portal
+ * leaves them running for init, with whatever they started: a dev server or a
+ * build, holding its port and memory, with no panel left to close it. Resolves
+ * when the last has been given its two seconds.
+ */
+export function endAllTerminals(): Promise<void> {
+  return Promise.all([...terms.values()].map(end)).then(() => {});
 }
 
 /** The shell `script` started: the child that leads the session on the pty. */

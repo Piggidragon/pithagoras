@@ -44,6 +44,13 @@ Reloading the page, or opening the panel again, starts a new shell in the same
 folder and does not come back to the old one: that is ended after five minutes
 with nobody watching, with what it started.
 
+Stopping the portal, an update or a restart, ends every open shell the same way,
+and the stop waits two seconds for them. A portal that is killed or crashes
+cannot: its shells and what they started are left running on the machine, with no
+panel to close them and nothing that ends them later. In a container the
+container's end takes them along; on a host, end them yourself (`ps` lists them
+as `script -qfec …`).
+
 If the connection to the shell is lost — it exited, or the portal restarted — the
 panel says so once; close it and open it again for a new one. If the connection
 comes back and the replay clears the screen, the notice goes with it, and it is

@@ -102,6 +102,28 @@ test("a run a restart cut off is no longer shown as running, and a one-off is no
   });
 });
 
+test("a run stopped in its chat is not an ok one, and a one-off it stopped is not counted as done", async () => {
+  const past = new Date(Date.now() - 3_600_000).toISOString();
+  await withApi(async (call) => {
+    const daily = await call("POST", "/routines", { name: "Stoppable", schedule: "@daily", instructions: "x" });
+    const once = await call("POST", "/routines", { name: "Stoppable once", runAt: past, instructions: "x" });
+    // What ask does for a run somebody pressed Stop in: tells the caller, and hands back what was written.
+    sessions.ask = async (_id, _message, opts) => {
+      opts.onStopped();
+      return "Half of the answer";
+    };
+    const stopped = await call("POST", `/routines/${daily.id}/run`);
+    assert.equal(stopped.lastStatus, "stopped");
+    assert.equal(stopped.lastOutput, "Stopped before it finished.\n\nHalf of the answer");
+    assert.equal(stopped.enabled, true, "a recurring one carries on with its next slot");
+
+    const cut = await call("POST", `/routines/${once.id}/run`);
+    assert.equal(cut.lastStatus, "stopped");
+    assert.equal(cut.done, false, "it did not finish, so it is not shown as having run");
+    assert.equal(cut.enabled, false, "and it is not run again behind the person's back");
+  });
+});
+
 test("refreshing the schedule of one routine leaves the others as they are", async () => {
   await withApi(async (call) => {
     const a = await call("POST", "/routines", { name: "A", schedule: "@daily", instructions: "x" });

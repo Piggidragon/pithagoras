@@ -164,6 +164,39 @@ test("a look that a stop of the portal aborts is shown as interrupted, not as on
   assert.equal(getAgent(agent.id).heartbeat_status, "Interrupted by a restart");
 });
 
+test("a routine's run that is stopped in its chat is recorded as stopped, with what it had written, and a one-off is switched off", async () => {
+  const recurring = routine();
+  const once = routine({ once: true });
+  const started = launched.length;
+  const runs = [routineSupervisor.run(recurring, "schedule"), routineSupervisor.run(once, "schedule")];
+  await until(() => launched.slice(started).filter((pi) => pi.idle === false).length === 2, "both runs to start");
+  launched.at(-1).emit("event", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Half an answer" } });
+
+  // What Stop in the chat does, to each run's session.
+  for (const made of [recurring, once]) await sessions.abort(sessionOf(made.slug).id);
+  await Promise.all(runs);
+
+  for (const made of [recurring, once]) {
+    const after = row(made.id);
+    assert.equal(after.last_status, "stopped", "it was cut off, whatever pi made of the abort");
+    assert.match(after.last_output, /^Stopped before it finished\./);
+  }
+  assert.match(row(once.id).last_output, /Half an answer$/, "what the agent had written stays readable");
+  assert.equal(row(once.id).enabled, 0, "a one-off is not run again by itself");
+  assert.equal(row(recurring.id).enabled, 1);
+});
+
+test("a look that is stopped in its chat says so, not that it found nothing", async () => {
+  const agent = createAgent({ name: "Stopped Watcher" });
+  writeFileSync(path.join(agent.home, WATCH_FILE), "The open PRs on the repo.\n");
+  const started = launched.length;
+  const look = heartbeat.run(getAgent(agent.id), "manual");
+  await until(() => launched.length > started && launched.at(-1).idle === false, "the look to start");
+  const chat = getDb().prepare("SELECT id FROM sessions WHERE kind = 'heartbeat' AND workspace = ?").get(agent.home);
+  await sessions.abort(chat.id);
+  assert.equal((await look).heartbeat_status, "Stopped");
+});
+
 test("a look that ends by itself says what it found", async () => {
   const agent = createAgent({ name: "Scout" });
   writeFileSync(path.join(agent.home, WATCH_FILE), "The open PRs on the repo.\n");

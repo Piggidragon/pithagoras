@@ -839,7 +839,7 @@ export const api = {
     json<Agent>(`/api/agents/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   /** The agent and its chats; its folder too when `folder` is "delete". */
   deleteAgent: (id: string, folder: "keep" | "delete") =>
-    json<{ ok: true; sessionsDeleted: number; routinesSwitchedOff: string[] }>(
+    json<{ ok: true; sessionsDeleted: number; routinesSwitchedOff: string[]; routinesDeleted: string[] }>(
       `/api/agents/${encodeURIComponent(id)}?folder=${folder}`,
       { method: "DELETE" }
     ),

@@ -195,11 +195,14 @@ class HeartbeatSupervisor {
     const before = countNotes(agent.id);
     try {
       const session = sessionFor(agent);
-      await sessions.ask(session.id, prompt(agent, watch, trigger), { timeoutMs: LOOK_TIMEOUT_MS });
+      // Stop pressed in the look's chat ends it like any other, and would read
+      // as one that found nothing.
+      let stopped = false;
+      await sessions.ask(session.id, prompt(agent, watch, trigger), { timeoutMs: LOOK_TIMEOUT_MS, onStopped: () => (stopped = true) });
       const left = countNotes(agent.id) - before;
       // A look the portal's own stop aborted ends like any other, and would read
       // as one that found nothing: it was cut off, as a crash cuts one off.
-      status(sessions.closing ? INTERRUPTED : left ? `${left} new ${left === 1 ? "note" : "notes"}` : "Nothing new");
+      status(sessions.closing ? INTERRUPTED : stopped ? "Stopped" : left ? `${left} new ${left === 1 ? "note" : "notes"}` : "Nothing new");
     } catch (e) {
       // The first line: pi's errors go on to explain where its docs are.
       status(sessions.closing ? INTERRUPTED : `Failed: ${(e as Error).message.split("\n")[0]}`);

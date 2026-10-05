@@ -631,7 +631,7 @@ function DeleteAgent({ agent, onClose, onDeleted }: { agent: Agent; onClose: () 
             {tp(agent.chats, "Its one chat is stopped and deleted with it.", "Its {n} chats are stopped and deleted with it.")}
           </p>
           {choice("keep", t("Keep its folder"), t("Its files and memory stay in {home}. An agent made under the same name picks them up again.", { home: agent.home }))}
-          {choice("delete", t("Delete its folder too"), t("Everything in {home} is removed, its memory with it. This cannot be undone.", { home: agent.home }))}
+          {choice("delete", t("Delete its folder too"), t("Everything in {home} is removed, its memory and its routines with it. This cannot be undone.", { home: agent.home }))}
         </div>
       )}
     </Modal>

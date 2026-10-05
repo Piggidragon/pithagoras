@@ -62,7 +62,7 @@ import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, r
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
-import { routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
+import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
 import { gitRouter } from "./api/git.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
@@ -76,7 +76,7 @@ import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { adoptPortalBrowser, browserRouter, pinConnection } from "./api/browser.js";
-import { terminalRouter } from "./api/terminal.js";
+import { endAllTerminals, terminalRouter } from "./api/terminal.js";
 import { BACKGROUND_SUPPORTED, MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
@@ -550,7 +550,8 @@ app.delete("/api/projects/:name", async (req, res) => {
  * otherwise, and taken up again by an agent made under the same name. Refused
  * for the first agent, for one a channel talks as, and while any of its chats
  * or a routine running as it is working. Its routines are switched off, as a
- * deleted project's are, and keep their sessions.
+ * deleted project's are, and keep their sessions; with `?folder=delete` they are
+ * deleted, since the folder they ran in is gone.
  */
 app.delete("/api/agents/:id", async (req, res) => {
   try {
@@ -578,12 +579,16 @@ app.delete("/api/agents/:id", async (req, res) => {
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       if (req.query.folder === "delete") forgetPicturesIn(agent.home);
       deleteNotesOf(agent.id);
-      const switchedOff = switchOffRoutines(routines);
+      // With its folder they have nowhere left to run, and an agent made under the
+      // same name must not take them over. Kept with the folder, they stay, switched off.
+      const deleted = req.query.folder === "delete";
+      const switchedOff = deleted ? [] : switchOffRoutines(routines);
+      const removed = deleted ? removeRoutines(routines) : [];
       getDb().transaction(() => {
         for (const chat of chats) deleteSession(chat.id);
       })();
       for (const chat of chats) sessions.removeFiles(chat.id);
-      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff });
+      res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff, routinesDeleted: removed });
     } finally {
       sessions.reopen([...runs, ...chats].map((s) => s.id));
       release();
@@ -1460,8 +1465,11 @@ scheduleDreams();
 async function shutdown(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
   routineSupervisor.stop();
+  // Alongside the rest: their shells are given a moment to wind down.
+  const shells = endAllTerminals();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
+  await shells;
   server.close(() => process.exit(0));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds

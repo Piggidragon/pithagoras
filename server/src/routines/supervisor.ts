@@ -59,6 +59,8 @@ const TICK_MS = 20_000;
 
 /** What a run that a restart cut off says of itself. */
 const INTERRUPTED = "The portal restarted during this run";
+/** And one that somebody stopped in its chat. */
+const STOPPED = "Stopped before it finished.";
 
 class RoutineSupervisor {
   /** Routines with a run in flight — a slow one must not stack on itself. */
@@ -198,10 +200,15 @@ class RoutineSupervisor {
     try {
       const session = this.sessionFor(row);
       if (row.fresh_session) fresh = session;
+      // Stop pressed in its chat: pi settles as it does for any run that ends,
+      // so this would be recorded as ok, with half an answer.
+      let stopped = false;
       const output = await sessions.ask(session.id, prompt(row, trigger), {
         timeoutMs: RUN_TIMEOUT_MS,
+        onStopped: () => (stopped = true),
       });
-      this.finish(row.id, "ok", output, Date.now() - started);
+      if (stopped) this.finish(row.id, "stopped", output ? `${STOPPED}\n\n${output}` : STOPPED, Date.now() - started);
+      else this.finish(row.id, "ok", output, Date.now() - started);
     } catch (e) {
       this.finish(row.id, "error", (e as Error).message, Date.now() - started);
     } finally {

@@ -33,6 +33,11 @@ itself: the run may have done part of what it was asked, and doing that twice
 can be worse than not finishing. Look at what it did, then run it again by hand
 or give it a new time.
 
+A run that you stop with Stop in its chat is listed as **stopped**, with the note
+"Stopped before it finished." and what the agent had written by then, not as a
+success with half an answer. A recurring routine carries on with its next slot;
+a one-off is switched off and does not count as done, as after a restart.
+
 By default a routine keeps one session, so a run can see what the last one did —
 "nothing new since yesterday" needs yesterday. **Fresh session each run** gives
 each one a clean start instead, for work where history is only noise.

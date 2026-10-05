@@ -305,4 +305,18 @@ test.describe('in a browser set to German', () => {
     await expect(row).toContainText('deaktiviert');
     await expect(row).not.toContainText('fertig');
   });
+
+  test('a run stopped in its chat is shown as stopped, in the colour of a run that was cut off', async ({ page }) => {
+    await portal(page, {
+      routine: {
+        name: 'Report', enabled: true, schedule: '0 9 * * *', mode: 'repeats', done: false,
+        lastStatus: 'stopped', lastOutput: 'Stopped before it finished.', lastRun: '2026-10-01T09:00:01.000Z',
+      },
+    });
+    await page.goto('/routines');
+    const row = page.getByRole('button', { name: /Report/ });
+    await expect(row).toContainText('gestoppt');
+    await expect(row.getByText('gestoppt')).toHaveClass(/text-warn/);
+    await expect(row).not.toContainText('stopped');
+  });
 });

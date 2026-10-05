@@ -146,8 +146,9 @@ test("a message that came through ask() and met a Stop while pi was starting is 
   const id = chat();
   const release = hold();
   let accepted = false;
+  let stopped = false;
   // As a channel's message is asked: pi is started for it before it is handed over.
-  const asking = sessions.ask(id, () => ({ message: "delete the branches", onAccepted: () => (accepted = true) }), { timeoutMs: 2000 });
+  const asking = sessions.ask(id, () => ({ message: "delete the branches", onAccepted: () => (accepted = true) }), { timeoutMs: 2000, onStopped: () => (stopped = true) });
   await until(() => sessions.starting.has(id), "pi to be starting");
   assert.equal(sessions.isBusy(id), true, "so the channel's stop has something to stop");
   await sessions.abort(id);
@@ -155,6 +156,7 @@ test("a message that came through ask() and met a Stop while pi was starting is 
 
   assert.equal(await asking, "", "nothing to answer");
   assert.equal(accepted, false, "and what the message carried is not used up");
+  assert.equal(stopped, true, "a routine asking this way is told it was stopped, not that it finished");
   assert.deepEqual(lastPi().prompts, [], "never handed to pi");
   assert.equal(getSession(id).status, "idle");
   assert.ok(events(id).some((r) => r.type === "portal_unsent"), "the words go back as not sent");

@@ -35,8 +35,20 @@ is nothing for them to talk the agent into:
 > I only talk to people I have been introduced to. I have let my primary user
 > know you got in touch — if they add you, try again.
 
-You are told once, not once per attempt. Their id is recorded so you can promote
-them from the list rather than going to find it on the platform.
+You are told once, not once per attempt, in the chat your routine reports go to
+(Settings → Defaults → Routine reports). That message is the portal's, not something the agent said:
+it is not added to that conversation as a note, so a stranger writing to the bot
+cannot make your own chat refuse a routine or a push. Their id is recorded so you
+can promote them from the list rather than going to find it on the platform.
+
+With no report chat set, or when the message could not be sent, nobody was told,
+and the stranger is told so instead:
+
+> I only talk to people I have been introduced to, and I could not reach my
+> primary user about you. Ask them to add you, then try again.
+
+Their next message tries again, so setting a report chat later still brings the
+word.
 
 ::: tip The gate opens itself until you name a primary
 With nobody marked primary, the portal has no basis for deciding who is a

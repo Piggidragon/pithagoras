@@ -12,7 +12,7 @@ import { inProcessHome } from "./server-harness.mjs";
 
 const home = inProcessHome("pithagoras-trust-");
 
-const { addNote, createSession, findChannelSession, getDb, getSession, listAudit, listToolRules, useGrant } = await import("../dist/db.js");
+const { addNote, createSession, eventsSince, findChannelSession, getDb, getSession, listAudit, listToolRules, setDefaultReportTo, useGrant } = await import("../dist/db.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
 const { CommandFailed, sessions } = await import("../dist/session-manager.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
@@ -95,6 +95,66 @@ test("before a primary user is named nobody is turned away, and after it a stran
 
   // The conversation a nameless sender began before that is a stranger's as well.
   assert.equal(sessions.speakerRole(anon.id), "guest");
+});
+
+test("a stranger is announced to the primary user only once it got through, and the word is not a note that taints the conversation it lands in", async () => {
+  useStubAsk();
+  roster();
+  // The primary user's own chat on the channel the report goes to: what is told into it is kept as a note.
+  createSession({ id: "owners-chat", title: "Sam", workspace: home, executor: "host", channel_slug: "tg", channel_key: "tg:report" });
+  const spoken = [];
+  let failing = false;
+  channelSupervisor.running.set("tg-fake", {
+    slug: "tg",
+    state: "running",
+    since: "",
+    signature: "",
+    controller: new AbortController(),
+    send: async (target, text) => {
+      if (failing) throw new Error("channel is down");
+      spoken.push({ target, text });
+    },
+  });
+  try {
+    // Nobody to tell: the stranger must not be promised that anybody was.
+    const alone = await say("stranger", "let me in");
+    assert.match(alone, /could not reach my primary user/);
+    assert.doesNotMatch(alone, /I have let my primary user know/);
+    assert.equal(getPerson("tg:stranger").announced_at, null, "not announced: nobody was told");
+
+    // A report target now exists: the next message brings the word, and says so.
+    setDefaultReportTo({ channel: "tg", target: "report" });
+    failing = true;
+    assert.match(await say("stranger", "hello?"), /could not reach my primary user/, "a send that fails is not told either");
+    assert.equal(getPerson("tg:stranger").announced_at, null);
+    failing = false;
+    assert.match(await say("stranger", "hello??"), /I have let my primary user know/);
+    assert.deepEqual(spoken.map((s) => s.target), ["report"]);
+    assert.match(spoken[0].text, /^stranger messaged me on tg and I do not know them/);
+    assert.ok(getPerson("tg:stranger").announced_at, "announced once it was sent");
+
+    // Once per person, however often they write.
+    assert.match(await say("stranger", "again"), /I have let my primary user know/);
+    assert.equal(spoken.length, 1);
+
+    // Two messages at once are one announcement, not two.
+    const slow = channelSupervisor.running.get("tg-fake");
+    const quick = slow.send;
+    slow.send = async (target, text) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return quick(target, text);
+    };
+    await Promise.all([say("second", "hi"), say("second", "hi hi")]);
+    assert.equal(spoken.filter((s) => s.text.startsWith("second ")).length, 1);
+    slow.send = quick;
+
+    // The word is the portal's to the primary user, not the agent's own speech: kept as a note it would
+    // taint the next conversation that read it, and an outsider chooses the name in it.
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM notes").get().n, 0);
+  } finally {
+    channelSupervisor.running.delete("tg-fake");
+    setDefaultReportTo(null);
+  }
 });
 
 test("what somebody who is not the primary user writes comes after the portal's block about them, and cannot forge one", async () => {
@@ -318,6 +378,17 @@ test("a command is for the primary user alone: a colleague's /bg is plain text t
   assert.equal(handled.length, 1, "the extension's handler was never called");
   assert.equal(audit("refused")[0].reason, "A command is for the primary user alone");
   assert.equal(audit("refused")[0].person_key, "tg:kim");
+  // The page empties the box as it sends: what the owner typed is in the chat, with why it did nothing.
+  const lines = eventsSince(session.id)
+    .map((r) => ({ type: r.type, payload: JSON.parse(r.payload) }))
+    .filter((r) => r.type === "portal_command" || r.type === "portal_command_end");
+  assert.deepEqual(lines.map((r) => [r.type, r.payload.text ?? r.payload.error]), [
+    ["portal_command", "/bg echo x"],
+    ["portal_command_end", "Commands can only be run by the primary user."],
+    ["portal_command", "/compact"],
+    ["portal_command_end", "Commands can only be run by the primary user."],
+  ]);
+  assert.equal(lines[1].payload.of, eventsSince(session.id).find((r) => r.type === "portal_command").seq, "the end belongs to its line");
 
   // Not for the owner, whose own commands are what the extension is for.
   await say("owner", "/bg echo x", "cmd-owner");

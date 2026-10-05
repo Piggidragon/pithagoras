@@ -30,6 +30,7 @@ const STATUS_STYLE: Record<string, string> = {
   error: "text-danger",
   running: "text-accent",
   interrupted: "text-warn",
+  stopped: "text-warn",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -37,6 +38,7 @@ const STATUS_LABEL: Record<string, string> = {
   error: msg("error"),
   running: msg("running"),
   interrupted: msg("interrupted"),
+  stopped: msg("stopped"),
 };
 const statusLabel = (status: string) => labelOf(STATUS_LABEL, status);
 

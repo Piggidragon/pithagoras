@@ -41,8 +41,9 @@ Nor can a colleague or a guest run a **slash command**. An extension's command
 (`/bg`, `/logs`, whatever a package adds) runs in the portal's own process with
 its full rights, and no tool call is made that a refusal could stop, so
 commands are the primary user's alone. Their message is shown to the agent as
-words, and a command sent into their conversation from the portal is refused
-and noted in the [audit log](/guide/security).
+words, and a command sent into their conversation from the portal is refused:
+its line in the chat says it failed and why ("Commands can only be run by the
+primary user."), and it is noted in the [audit log](/guide/security).
 
 Refusals are **enforced, not requested**. The agent usually declines before
 reaching for a tool, because it is told who it is speaking to. If it tries

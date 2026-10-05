@@ -1201,6 +1201,13 @@ class SessionManager extends EventEmitter {
    */
   private stops = new Map<string, number>();
 
+  /**
+   * Every Stop pressed, per session, whether pi was up or not. What is waiting
+   * on a run reads it before and after, to tell one that was stopped from one
+   * that finished: see ask's onStopped.
+   */
+  private aborts = new Map<string, number>();
+
   /** Client startup in flight, so two callers cannot launch two of them. */
   private starting = new Map<string, Promise<PiClient>>();
 
@@ -1417,8 +1424,12 @@ class SessionManager extends EventEmitter {
         personKey: this.speakerKey(sessionId),
         sessionId,
       });
+      // The line the caller leaves the word to: the page empties the box as it
+      // sends, so without one the text would be gone and nothing said why.
+      const refusal = "Commands can only be run by the primary user.";
+      this.endCommand(sessionId, this.startCommand(sessionId, message), { error: refusal });
       logged.failedOnLine = true;
-      throw new Error("Commands can only be run by the primary user.");
+      throw new Error(refusal);
     }
     // A command is not a chat message, but it is in the chat: a line that
     // says it was sent, and then whether it is running, done, started a run,
@@ -2041,6 +2052,12 @@ class SessionManager extends EventEmitter {
        */
       streamText?: boolean;
       /**
+       * Called when the run ended because somebody pressed Stop, before ask()
+       * hands back what the agent had written by then. Without it a stopped run
+       * reads as one that finished, and a routine records half an answer as done.
+       */
+      onStopped?: () => void;
+      /**
        * An extension asking the user something mid-run. The browser draws a
        * modal for these; a channel has to ask in the chat and wait for the
        * next message, so it needs to know one is open.
@@ -2060,7 +2077,8 @@ class SessionManager extends EventEmitter {
           opts.timeoutMs ?? 15 * 60_000,
           opts.onReply,
           opts.streamText,
-          opts.onUi
+          opts.onUi,
+          opts.onStopped
         );
       });
     // Kept only while it is the newest, so a finished chain is not held forever.
@@ -2089,12 +2107,14 @@ class SessionManager extends EventEmitter {
     timeoutMs: number,
     onReply?: (text: string) => void | Promise<void>,
     streamText = true,
-    onUi?: (request: any) => void
+    onUi?: (request: any) => void,
+    onStopped?: () => void
   ): Promise<string> {
     // Counted before pi is started here, not in submit: a Stop that comes while
     // it starts is counted by then, and submit would take it for one that was
     // there before the message.
     const stopsBefore = this.stops.get(sessionId) ?? 0;
+    const abortsBefore = this.aborts.get(sessionId) ?? 0;
     await this.ensureClient(sessionId);
     const prepared = typeof message === "function" ? message() : { message };
 
@@ -2226,9 +2246,14 @@ class SessionManager extends EventEmitter {
       finished.catch(() => {});
       // Stopped before it was sent: nothing for the channel to wait on, and what
       // it had to tell the agent is still to be told.
-      if ((await this.prompt(sessionId, prepared.message, undefined, false, stopsBefore)) === false) return "";
+      if ((await this.prompt(sessionId, prepared.message, undefined, false, stopsBefore)) === false) {
+        onStopped?.();
+        return "";
+      }
       prepared.onAccepted?.();
       await finished;
+      // Counted by abort() before it asks pi to stop, so it is in by the time the run settles.
+      if ((this.aborts.get(sessionId) ?? 0) !== abortsBefore) onStopped?.();
       // Already relayed piece by piece; handing it back would post it twice.
       return onReply && streamText ? "" : all.join("\n\n").trim();
     } finally {
@@ -2476,6 +2501,7 @@ class SessionManager extends EventEmitter {
   }
 
   async abort(sessionId: string): Promise<void> {
+    this.aborts.set(sessionId, (this.aborts.get(sessionId) ?? 0) + 1);
     const live = this.live.get(sessionId);
     if (!live?.client.running) {
       // Nothing to abort yet — but a compaction waiting on pi to start is
@@ -2669,6 +2695,7 @@ class SessionManager extends EventEmitter {
     this.discarding.delete(sessionId);
     this.drafts.delete(sessionId);
     this.stops.delete(sessionId);
+    this.aborts.delete(sessionId);
     // Its temporary canvases are in memory only, so no row delete reaches them.
     forgetCanvases(sessionId);
     // Each on its own: pi's folder is the one that can refuse, and the pictures

@@ -388,23 +388,43 @@ class ChannelSupervisor {
     }
   }
 
-  /** Tell the primary user that somebody new turned up — once per person. */
-  private async announce(person: PersonRow, slug: string): Promise<void> {
-    if (person.announced_at) return;
-    markAnnounced(person.key);
-    const to = getDefaultReportTo();
-    if (!to) return;
-    try {
-      await this.send(
-        to.channel,
-        to.target,
-        `${person.name} messaged me on ${slug} and I do not know them, so I said no. ` +
-          `Add them in Settings → People if they should get through.`
-      );
-    } catch {
-      // Nothing to do about it here; they are recorded either way.
-    }
+  /**
+   * Tell the primary user that somebody new turned up — once per person, once it
+   * got through. Whether they know: a person not announced yet is tried again
+   * with their next message, so that a report target set later, or a channel that
+   * is back, still brings the word.
+   *
+   * Not through send(): that keeps what it says as a note for the agent, and a note
+   * taints the conversation for good (see notesBlock) — here with the stranger's
+   * own name in it, which an outsider can set to anything and trigger as often as
+   * they have accounts. The agent has no need of it to answer the primary user.
+   */
+  private announce(person: PersonRow, slug: string): Promise<boolean> {
+    if (person.announced_at) return Promise.resolve(true);
+    // Two messages together are one announcement.
+    const going = this.announcing.get(person.key);
+    if (going) return going;
+    const attempt = (async () => {
+      const to = getDefaultReportTo();
+      const live = to ? this.liveBySlug(to.channel) : undefined;
+      if (!to || !live?.send) return false;
+      try {
+        await live.send(
+          to.target,
+          `${person.name} messaged me on ${slug} and I do not know them, so I said no. ` +
+            `Add them in Settings → People if they should get through.`
+        );
+      } catch (e) {
+        console.error(`[portal] could not tell ${to.channel} about ${person.key}: ${(e as Error).message}`);
+        return false;
+      }
+      markAnnounced(person.key);
+      return true;
+    })().finally(() => this.announcing.delete(person.key));
+    this.announcing.set(person.key, attempt);
+    return attempt;
   }
+  private announcing = new Map<string, Promise<boolean>>();
 
   private liveBySlug(slug: string): Running | undefined {
     for (const live of this.running.values()) {
@@ -488,11 +508,12 @@ class ChannelSupervisor {
       });
       // Refused before a session exists: an unclassified sender never reaches
       // the agent at all, so there is nothing for them to talk it into.
-      await this.announce(person, row.slug);
-      return (
-        "I only talk to people I have been introduced to. I have let my primary user know you " +
-        "got in touch — if they add you, try again."
-      );
+      // Said as it is: with nobody to tell, "I have let them know" would have them wait for it.
+      return (await this.announce(person, row.slug))
+        ? "I only talk to people I have been introduced to. I have let my primary user know you " +
+            "got in touch — if they add you, try again."
+        : "I only talk to people I have been introduced to, and I could not reach my primary user " +
+            "about you. Ask them to add you, then try again.";
     }
 
     // The primary user answering a question a colleague's session raised. Handled
