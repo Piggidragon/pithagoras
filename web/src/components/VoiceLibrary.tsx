@@ -43,6 +43,8 @@ export function VoiceLibrary({value,onChange,onError,onPending}:{value:string;on
  // What the page's save button stores along with the settings. A voice that is not selected and was emptied is
  // an edit given up, not one to be refused with an error about a field that is not on screen.
  const toSave=edited.filter(v=>v.id===value||drafts[v.id].trim());
+ // Where it is typed, in the render of the keystroke: through the page, which learns of it a render later, a dialog closed at once would not ask.
+ useUnsavedDraft(toSave.length>0&&!busy);
  useEffect(()=>{onPending(toSave.length?async()=>{for(const v of toSave)await saveDescription(v.id,drafts[v.id]);}:null);return()=>onPending(null);},[voices,drafts,value]);
  const field=`mt-1 ${inputSmCls}`;
  return <div className="space-y-2">

@@ -403,6 +403,30 @@ test('Escape over a new voice that was named and described asks first, and over 
   await asksBeforeClosing(page, words, 'Once upon a time.');
 });
 
+test('Escape that follows a voice description as soon as it is typed asks, as for every other field', async ({ page }) => {
+  const voice = { id: 'v1', name: 'Night narrator', kind: 'design', instruction: 'Warm delivery', transcript: '' };
+  await voiceSettings(page, [voice]);
+  const description = settings(page).getByLabel('Voice description');
+  await expect(description).toHaveValue('Warm delivery');
+  // The next key at once: only what the page does in the same task, and the microtasks after it, has happened by then.
+  await description.evaluate((field: HTMLTextAreaElement) => new Promise<void>((done) => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Warm and slow.');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    let ticks = 0;
+    const tick = () => {
+      if (++ticks < 5) return void Promise.resolve().then(tick);
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      done();
+    };
+    tick();
+  }));
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(settings(page)).toBeVisible();
+  await expect(description).toHaveValue('Warm and slow.');
+});
+
 test('Escape over a voice description that its own button saved does not ask, and over one that was not saved does', async ({ page }) => {
   const voice = { id: 'v1', name: 'Night narrator', kind: 'design', instruction: 'Warm delivery', transcript: '' };
   const sent: string[] = [];
