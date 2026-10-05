@@ -115,20 +115,38 @@ export function runToEnd(args, env, { cwd, ms = 60_000 } = {}) {
   return new Promise((resolve) => child.on("close", (code) => { clearTimeout(timer); resolve({ code, out, err }); }));
 }
 
-/** Starts the server and waits until it answers. When it never does, the error carries what it printed. */
-export async function startServer(env) {
-  const base = `http://127.0.0.1:${env.PORT}`;
-  const child = spawn(process.execPath, [ENTRY], { env, stdio: ["ignore", "pipe", "pipe"] });
-  started.push(child);
-  let log = "";
-  child.stdout.on("data", (d) => { log += d; });
-  child.stderr.on("data", (d) => { log += d; });
-  for (let i = 0; ; i++) {
-    try {
-      if ((await fetch(`${base}/api/auth/status`)).ok) break;
-    } catch { /* not up yet */ }
-    if (i > 200 || child.exitCode !== null) throw new Error(`the server did not start:\n${log}`);
-    await new Promise((r) => setTimeout(r, 50));
+/**
+ * Starts the server and waits until it says it listens. A port from `freePort` is free only until something else
+ * takes it, and that can be another test's server or a fake one before this server has opened its database: whatever
+ * answers on the port is not the server that was started, so the line the server itself prints is what is waited for.
+ * When it could not take the port, it is started again on another one. `port` is the one it listens on.
+ */
+export async function startServer(env, tries = 5) {
+  for (let attempt = 1; ; attempt++) {
+    const run = attempt === 1 ? env : { ...env, PORT: String(await freePort()) };
+    const child = spawn(process.execPath, [ENTRY], { env: run, stdio: ["ignore", "pipe", "pipe"] });
+    started.push(child);
+    let log = "";
+    const listening = new RegExp(`pithagoras listening on :${run.PORT}\\b`);
+    const outcome = await new Promise((resolve) => {
+      const seen = () => { if (listening.test(log)) resolve("listening"); };
+      child.stdout.on("data", (d) => { log += d; seen(); });
+      child.stderr.on("data", (d) => { log += d; });
+      // "close", not "exit": by then everything it printed has been read.
+      child.once("close", () => resolve("exited"));
+      setTimeout(() => resolve("silent"), 20_000).unref();
+    });
+    if (outcome === "listening") {
+      const base = `http://127.0.0.1:${run.PORT}`;
+      for (let i = 0; i < 200; i++) {
+        try {
+          if ((await fetch(`${base}/api/auth/status`)).ok) return { child, base, port: Number(run.PORT) };
+        } catch { /* not answering yet */ }
+        if (child.exitCode !== null) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+    if (attempt < tries && /could not listen on .*(EADDRINUSE|address already in use)/.test(log)) continue;
+    throw new Error(`the server did not start:\n${log}`);
   }
-  return { child, base };
 }

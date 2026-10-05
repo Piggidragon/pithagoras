@@ -798,7 +798,11 @@ export function updateSession(
     .run(...values, id);
 }
 
-export function deleteSession(id: string): void {
+// One transaction: the chat of a delete that failed stays, and it takes messages again, so it must still have its transcript and canvases.
+// Inside the bulk routes' own transaction this is a savepoint, so they still remove all of their chats or none.
+export const deleteSession = (id: string): void => getDb().transaction(() => removeSession(id))();
+
+function removeSession(id: string): void {
   const d = getDb();
   const folder = (d.prepare("SELECT workspace FROM sessions WHERE id = ?").get(id) as { workspace: string } | undefined)?.workspace;
   d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);

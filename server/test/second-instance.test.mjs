@@ -38,14 +38,16 @@ export default function () {
 }
 `);
 
-const port = await freePort();
+let port = await freePort();
 const env = serverEnv(home, port);
 
 const db = await import("../dist/db.js");
 
 let base;
 before(async () => {
-  ({ base } = await startServer(env));
+  ({ base, port } = await startServer(env));
+  // The port it listens on, which is another than it was given where that one was taken meanwhile.
+  env.PORT = String(port);
 });
 
 const newChat = async () =>

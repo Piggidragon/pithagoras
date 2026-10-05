@@ -152,8 +152,10 @@ export function saveCanvasPrefix(session: string,id: string,call: string,content
   if(content.length>1_000_000) throw new Error('Canvas exceeds one million characters');
   const row=readCanvas(session,id);
   if(row.active_call!==call) throw new Error('Canvas write is no longer active');
-  // By length: the pieces of one write are prefixes of one text, and comparing two long strings is a pass over both.
-  if(row.content.length===content.length) return row;
+  // The pieces of one write are prefixes of one text, so a piece as long as the row is the text it holds. The length
+  // goes first: comparing two long strings is a pass over both. Only for the first piece the row still holds the old
+  // document, and a new text of the same length is not that text.
+  if(row.content.length===content.length&&row.content===content) return row;
   const next={...row,content,revision:(writeBase.get(call)??row.revision)+1,updated_at:new Date().toISOString()};
   if(next.persisted) hold(next); else temporary.set(id,next);
   return notify(next);

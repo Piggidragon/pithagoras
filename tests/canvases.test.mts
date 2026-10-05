@@ -303,3 +303,26 @@ test('the restore route puts the text from before the cut-off write back',async(
   assert.equal(body.content,original);assert.equal(body.restorable,false);assert.equal(readCanvas('s1',id).content,original);
  }finally{portal.close()}
 });
+// A call whose arguments come in one piece (a provider that does not stream them token by token) hands the new text
+// to a canvas that still holds the old document: text of the same length is a different text all the same.
+test('a replace with text as long as the old document is written, whole or in one piece',async()=>{
+ const {controller,tools}=setup();
+ const temporary=value(await tools.canvas_create.execute('create',{title:'Same length'}));
+ value(await tools.canvas_write.execute('first',{canvas_id:temporary.id,revision:0,operation:'replace',content:'Meet at 10:00 on Monday'}));
+ const before=value(await tools.canvas_read.execute('read',{canvas_id:temporary.id}));
+ const whole={canvas_id:temporary.id,revision:before.revision,operation:'replace',content:'Meet at 09:15 on Friday'};
+ value(await tools.canvas_write.execute('same',whole));
+ assert.equal(readCanvas('s1',temporary.id).content,'Meet at 09:15 on Friday','execute alone');
+ const id=await storedCanvas(tools,'Budget: 4000 EUR','Same length stored');
+ const fresh=value(await tools.canvas_read.execute('read-stored',{canvas_id:id}));
+ const args={canvas_id:id,revision:fresh.revision,operation:'replace',content:'Budget: 9500 EUR'};
+ delta(controller,'one-piece',JSON.stringify(args));
+ value(await tools.canvas_write.execute('one-piece',args));
+ assert.equal(readCanvas('s1',id).content,'Budget: 9500 EUR','one toolcall_delta with the whole arguments');
+ assert.equal(inTable(id).content,'Budget: 9500 EUR');
+ // The same text again is still not written twice.
+ const again=value(await tools.canvas_read.execute('read-again',{canvas_id:id}));
+ const revision=again.revision;
+ value(await tools.canvas_write.execute('same-text',{...args,revision}));
+ assert.equal(readCanvas('s1',id).content,'Budget: 9500 EUR');
+});

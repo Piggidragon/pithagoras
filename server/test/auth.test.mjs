@@ -68,8 +68,7 @@ let base;
 let port;
 let server;
 before(async () => {
-  port = await freePort();
-  ({ base, child: server } = await startServer(serverEnv(home, port, {
+  ({ base, child: server, port } = await startServer(serverEnv(home, await freePort(), {
     PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET,
     BROWSER_HTTPS_PORT: String(upstreamPort), BROWSER_USER: "agent", BROWSER_PASSWORD,
   })));
@@ -141,10 +140,11 @@ test("signing out refuses the login it ended, also a copy of its cookie", async 
 test("changing the password ends the logins made under the old one", async () => {
   const cookie = await signedIn();
   const other = testHome("pithagoras-auth-other-");
-  const otherPort = await freePort();
+  let otherPort = await freePort();
   const env = (extra) => serverEnv(other, otherPort, { PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET, PORTAL_PASSWORD: PASSWORD, ...extra });
-  const { child } = await startServer(env({ PORTAL_PASSWORD: "another long password" }));
-  const there = `http://127.0.0.1:${otherPort}`;
+  const { child, base: there, port: took } = await startServer(env({ PORTAL_PASSWORD: "another long password" }));
+  // The restarts below are on the port it took.
+  otherPort = took;
   assert.equal((await fetch(`${there}/api/settings`, { headers: { Cookie: cookie } })).status, 401, "same secret, new password");
   child.kill();
   await new Promise((resolve) => child.once("exit", resolve));
