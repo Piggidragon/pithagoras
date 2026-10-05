@@ -30,7 +30,11 @@ it opens the tool, not the files the guard keeps from them, so an allowed
 command that names a secret or one of those two files is refused, and so is a
 `write` or `edit` rule that reaches `SOUL.md`, `PrimaryUser.md` or `MEMORY.md`:
 they are loaded into your own conversations in that folder as the agent's words,
-and a colleague's text there would be an instruction to it.
+and a colleague's text there would be an instruction to it. The same holds for
+what pi itself loads from a folder: an `AGENTS.md` or `CLAUDE.md` in any folder
+(pi reads the ones above the conversation's too), anything in a `.pi` or
+`.agents` folder (its system prompt, its extensions, which run in the portal, its
+skills and settings), and pi's own agent folder.
 
 A `bash` rule is the exception to the folder: a command runs as the agent, and
 what a shell makes of `cat *` or of a path built while it runs cannot be
@@ -70,10 +74,11 @@ Context files split at the same boundary:
 | `MEMORY.md` | You only — and nobody while [Understory](/guide/features#memory-understory) is the agent's memory |
 
 So a teammate messaging your bot gets an agent that knows its own name and your
-team's shared notes, and not your private context. `TEAM.md` is the one file a
-colleague or a guest may write, so it is never loaded into your own
+team's shared notes, and not your private context. `TEAM.md` is the only one of
+these files a colleague or a guest may write, so it is never loaded into your own
 conversations: what somebody else wrote there would reach the agent as its own
-words.
+words. Files that pi loads on its own (`AGENTS.md`, `.pi`, see above) are closed
+to a `write` rule for the same reason.
 
 ## What the agent is told
 

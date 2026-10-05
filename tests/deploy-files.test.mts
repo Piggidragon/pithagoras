@@ -30,6 +30,17 @@ test('the Portainer stack passes the same environment as the Compose file', () =
   assert.deepEqual([...environmentOf('docker-compose.portainer.yml')].sort(), [...environmentOf('docker-compose.yml')].sort());
 });
 
+test('the portal runs under an init in both Compose files, which collects the processes its jobs and shells leave behind', () => {
+  for (const file of COMPOSE) {
+    assert.match(read(file), /^ {4}init: true$/m, `${file} gives the portal an init`);
+    if (spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status !== 0) continue;
+    const shown = JSON.parse(
+      execFileSync('docker', ['compose', '-f', path.join(root, file), 'config', '--format', 'json', '--no-interpolate'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString(),
+    );
+    assert.equal(Object.values<any>(shown.services)[0].init, true, `${file}: Compose reads it as the service's init`);
+  }
+});
+
 test('the data folder PORTAL_DATA_DIR names is mounted by both Compose files, and without it the data is in a volume', () => {
   for (const file of COMPOSE) {
     assert.match(read(file), /- \$\{PORTAL_DATA_DIR:-[\w-]+\}:\/data$/m, `${file} mounts PORTAL_DATA_DIR at /data`);

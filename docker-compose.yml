@@ -3,6 +3,9 @@ services:
     build: .
     container_name: pithagoras
     restart: unless-stopped
+    # Docker's own init as PID 1: it collects the processes the agent's jobs and the terminal's shells
+    # leave behind, which the portal never waits for and which would stay as zombies until a restart.
+    init: true
     network_mode: host
     volumes:
       # Database, pi's settings and packages, sessions. A named volume unless

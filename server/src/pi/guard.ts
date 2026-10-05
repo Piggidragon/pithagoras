@@ -10,6 +10,7 @@ import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
 import { UNDERSTORY } from "../features.js";
 import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
+import { piAgentDir } from "../pi-settings.js";
 import { isWithinText, realPath } from "../within.js";
 import { CONTEXT_FILES, PRIVATE_FILES } from "./context-files.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
@@ -524,14 +525,32 @@ function unreadable(toolName: string, input: Record<string, unknown>, workspace:
 }
 
 /**
+ * Whether pi loads `where` into the conversations that work in its folder: an
+ * AGENTS.md or CLAUDE.md, which it reads from the folder and from every folder
+ * above it, and the `.pi` and `.agents` folders, which hold its system prompt, its
+ * extensions, skills and settings, as does its own agent folder. What is written
+ * there reaches the primary user's conversations as the agent's own words, and an
+ * extension runs in the portal. Names and folders are told apart from their case,
+ * as a file system may not.
+ */
+function loadedByPi(where: string): boolean {
+  const parts = where.toLowerCase().split(/[\\/]+/);
+  if (["agents.md", "claude.md"].includes(parts.at(-1) ?? "")) return true;
+  if (parts.includes(".pi") || parts.includes(".agents")) return true;
+  const agentDir = piAgentDir();
+  return isWithinText(realPath(agentDir) ?? path.resolve(agentDir), where);
+}
+
+/**
  * Why a call that is not a read may not run for somebody who is not the primary
  * user even where a rule or an approval opens its tool, or undefined. A command
  * is the agent's own, run as it: its paths cannot be followed through a shell,
  * so what it names is all that is checked — a place secrets are kept, and the
  * private files by name. A tool that writes to a path is held to the files the
  * agent's own context is made of (CONTEXT_FILES), where a link at their name
- * leads as well: they are loaded into the primary user's conversations in the
- * folder as the agent's own words, so a write there is an instruction to it.
+ * leads as well, and to what else pi loads into a conversation (loadedByPi):
+ * they are loaded into the primary user's conversations in the folder as the
+ * agent's own words, so a write there is an instruction to it.
  */
 function unrunnable(toolName: string, input: Record<string, unknown>, workspace: string | undefined): string | undefined {
   if (readsCredentials(toolName, input)) return "it reads a place where secrets are kept";
@@ -539,14 +558,19 @@ function unrunnable(toolName: string, input: Record<string, unknown>, workspace:
     const asked = target(input);
     if (!asked) return undefined;
     const reach = "it writes to the files the agent's own context is made of";
-    if (workspace === undefined) return CONTEXT_FILES.some((name) => path.basename(asked).toLowerCase() === name.toLowerCase()) ? reach : undefined;
+    const loaded = "it writes to a place that pi loads the agent's instructions and extensions from";
+    if (workspace === undefined) {
+      if (CONTEXT_FILES.some((name) => path.basename(asked).toLowerCase() === name.toLowerCase())) return reach;
+      return loadedByPi(path.resolve(asked)) ? loaded : undefined;
+    }
     const root = realPath(workspace) ?? path.resolve(workspace);
     const where = whereToolsLook(asked, workspace);
     if (where === undefined) return undefined;
-    return CONTEXT_FILES.some((name) => {
+    if (CONTEXT_FILES.some((name) => {
       const file = path.join(root, name);
       return [file, realPath(file) ?? file].some((own) => where.toLowerCase() === own.toLowerCase());
-    }) ? reach : undefined;
+    })) return reach;
+    return loadedByPi(where) ? loaded : undefined;
   }
   const command = cmd(input).toLowerCase();
   return PRIVATE_FILES.some((name) => command.includes(name.toLowerCase())) ? "it reads what is private to the primary user" : undefined;
