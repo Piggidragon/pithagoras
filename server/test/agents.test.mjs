@@ -217,3 +217,20 @@ test("a folder in an agent's home is not said to be the home of a deleted agent"
   assert.match((await place(agents)).error, /inside the workspace root/);
   assert.match((await place("/etc")).error, /inside the workspace root/);
 });
+
+test("a routine's chat that its agent's delete left in place takes messages again, so the routine runs once the agent is made again", async () => {
+  const made = (await call("POST", "/api/agents", { name: "Keeper" })).body;
+  const routine = (await call("POST", "/api/routines", { name: "keeper daily", schedule: "@daily", instructions: "Look around.", workspace: made.home })).body;
+  // By hand. With no model it ends in an error, with its pi still loaded: the delete lets go of that pi and keeps the chat.
+  const first = await call("POST", `/api/routines/${routine.id}/run`);
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.lastStatus, "error");
+  assert.match(first.body.lastOutput, /./);
+
+  const gone = await call("DELETE", `/api/agents/${made.id}`);
+  assert.deepEqual(gone.body.routinesSwitchedOff, ["keeper daily"]);
+  assert.equal((await call("POST", "/api/agents", { name: "Keeper" })).body.id, made.id);
+  // The same run again, in the same chat: not "being deleted", which every run after it would meet until the portal restarted.
+  const again = await call("POST", `/api/routines/${routine.id}/run`);
+  assert.equal(again.body.lastOutput, first.body.lastOutput);
+});
