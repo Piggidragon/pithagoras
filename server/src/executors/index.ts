@@ -147,6 +147,9 @@ export class ContainerExecutor implements Executor {
       "run",
       "-i",
       "--rm",
+      // pi is not PID 1: a command's background child that outlives its shell is handed to PID 1, and
+      // pi (node) never waits for it, so it stays a zombie and keeps one of the --pids-limit slots.
+      "--init",
       "--user",
       runnerUser,
       "--name",

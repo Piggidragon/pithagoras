@@ -18,7 +18,7 @@ test('runner uses the portal uid/gid and a pre-created private session directory
   assert.equal(args[args.indexOf('--user')+1],`${process.getuid!()}:${process.getgid!()}`);
   assert.equal(statSync(join(temp,'sessions','abc')).uid,process.getuid!());
   assert.equal(statSync(join(temp,'sessions','abc')).mode & 0o777,0o700);
-  assert.ok(args.includes('--rm'));assert.ok(args.includes('no-new-privileges'));assert.ok(args.includes('ALL'));
+  assert.ok(args.includes('--rm'));assert.ok(args.includes('--init'),'an init as PID 1, which collects what the agent\'s commands leave behind');assert.ok(args.includes('no-new-privileges'));assert.ok(args.includes('ALL'));
  }finally{process.env.PATH=saved;if(prior===undefined)delete process.env.ARG_FILE;else process.env.ARG_FILE=prior;rmSync(temp,{recursive:true,force:true});}
 });
 
