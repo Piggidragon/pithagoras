@@ -1,7 +1,7 @@
 import { test, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import https from "node:https";
 import net from "node:net";
 import path from "node:path";
@@ -66,9 +66,10 @@ upstream.listen(upstreamPort, "127.0.0.1");
 
 let base;
 let port;
+let server;
 before(async () => {
   port = await freePort();
-  ({ base } = await startServer(serverEnv(home, port, {
+  ({ base, child: server } = await startServer(serverEnv(home, port, {
     PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET,
     BROWSER_HTTPS_PORT: String(upstreamPort), BROWSER_USER: "agent", BROWSER_PASSWORD,
   })));
@@ -382,6 +383,69 @@ test("an upgrade that is not the browser's is answered and closed, not held open
     await Promise.race([stream.closed, new Promise((_, reject) => setTimeout(() => reject(new Error(`${url} was left open`)), 3000))]);
   }
   assert.equal(browser.upgrades.length, 0, "and nothing went to the browser");
+});
+
+/** Whether the server process itself still holds the connection a client opened from `clientPort`, which is what a left-open one costs it. */
+function heldByServer(clientPort) {
+  const hex = (n) => n.toString(16).toUpperCase().padStart(4, "0");
+  let inode;
+  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    for (const line of readFileSync(file, "utf8").split("\n").slice(1)) {
+      const f = line.trim().split(/\s+/);
+      if (f.length > 9 && f[1].endsWith(`:${hex(port)}`) && f[2].endsWith(`:${hex(clientPort)}`)) inode = f[9];
+    }
+  }
+  // A connection nobody holds any more is listed with no inode: the kernel's, waiting out its own timeout.
+  if (!inode || inode === "0") return false;
+  return readdirSync(`/proc/${server.pid}/fd`).some((fd) => {
+    try {
+      return readlinkSync(`/proc/${server.pid}/fd/${fd}`) === `socket:[${inode}]`;
+    } catch {
+      return false;
+    }
+  });
+}
+
+test("clients that reset the connection while an upgrade is refused do not take the portal down", async () => {
+  // Written, and reset as soon as the bytes are out: the answer the portal then writes meets a closed connection.
+  const resets = [];
+  for (const url of ["/", "/browser-ui/websockify", "/browser-ui/websockify"]) {
+    for (let i = 0; i < 30; i++) {
+      resets.push(new Promise((resolve) => {
+        const socket = net.connect(port, "127.0.0.1");
+        socket.on("error", () => {});
+        socket.on("close", resolve);
+        socket.write(
+          [`GET ${url} HTTP/1.1`, `Host: 127.0.0.1:${port}`, "Connection: Upgrade", "Upgrade: websocket", "Sec-WebSocket-Version: 13", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "", ""].join("\r\n"),
+          () => socket.resetAndDestroy(),
+        );
+      }));
+    }
+  }
+  await Promise.all(resets);
+  // Whatever the portal did with them, it is the same portal, and it answers.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(server.exitCode, null, "the portal is still running");
+  assert.equal((await fetch(`${base}/api/auth/status`)).status, 200);
+});
+
+test("a refused upgrade whose client keeps its side open is let go of after a few seconds", { skip: process.platform !== "linux" }, async () => {
+  const client = net.connect({ port, host: "127.0.0.1", allowHalfOpen: true });
+  let text = "";
+  client.on("data", (d) => { text += d; });
+  client.on("error", () => {});
+  client.write([`GET /api/sessions HTTP/1.1`, `Host: 127.0.0.1:${port}`, "Connection: Upgrade", "Upgrade: websocket", "Sec-WebSocket-Version: 13", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "", ""].join("\r\n"));
+  try {
+    await until(() => text.includes("\r\n\r\n"), "an answer");
+    assert.match(text, /^HTTP\/1\.1 404 /);
+    // Answered and closed on the portal's side; ours is never closed. The portal has it until it gives up.
+    assert.equal(heldByServer(client.localPort), true, "the portal still has the connection just after the answer");
+    // It gives up after five seconds; a loaded machine may be later than that.
+    for (let end = Date.now() + 20_000; heldByServer(client.localPort) && Date.now() < end; ) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(heldByServer(client.localPort), false, "and no longer once it has given up");
+  } finally {
+    client.destroy();
+  }
 });
 
 test("signed in, the page is the browser's, with the browser's own login added and the portal's left out", async () => {
