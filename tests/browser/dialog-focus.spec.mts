@@ -11,14 +11,14 @@ const chat = { id: 'a', title: 'Chat A', workspace: '/w/site', status: 'idle', k
 
 const alpha = { id: 'm', name: 'Alpha', provider: 'prov-a' };
 
-async function portal(page: Page, { withModel = false } = {}) {
+async function portal(page: Page, { withModel = false, expired = false } = {}) {
   const answered: unknown[] = [];
   await mockPortal(page, ({ path, method, json }) => {
     if (path === '/api/sessions') return { sessions: [chat], executor: 'host' };
     if (/^\/api\/sessions\/\w+$/.test(path)) return chat;
     if (path.endsWith('/ui-response')) {
       answered.push(json());
-      return { ok: true };
+      return expired ? { ok: false, note: 'Expired.' } : { ok: true };
     }
     if (path.endsWith('/config') && withModel) return { live: true, state: { model: alpha, thinkingLevel: 'off' }, stats: null, thinking: { levels: [] }, models: { models: [alpha] }, named: { provider: 'prov-a', model: 'm' } };
     if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
@@ -102,6 +102,26 @@ test("after two questions that came together, focus goes back to the composer, a
   await second.getByRole('button', { name: 'Yes' }).click();
   await expect(second).toBeHidden();
   expect(answered).toEqual([{ id: 'q1', value: true }, { id: 'q2', value: true }]);
+  await expect(composer).toBeFocused();
+});
+
+test("an extension's question whose answer failed gives focus back to the composer when a click beside it closes it", async ({ page }) => {
+  const { answered } = await portal(page, { expired: true });
+  await page.goto('/s/a');
+  const composer = page.getByLabel('Message', { exact: true });
+  await composer.focus();
+  await caughtUp(page);
+  await page.evaluate(() =>
+    (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('message', { seq: -1, type: 'extension_ui_request', payload: { id: 'q1', method: 'input', title: 'Name it' } }),
+  );
+  const dialog = page.getByRole('dialog', { name: 'Name it' });
+  await dialog.getByRole('textbox').fill('x');
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('alert')).toHaveText('Expired.');
+  // The question stays, with its error, until it is dismissed; a press beside it does that without a request.
+  await page.mouse.click(3, 3);
+  await expect(dialog).toBeHidden();
+  expect(answered).toEqual([{ id: 'q1', value: 'x' }]);
   await expect(composer).toBeFocused();
 });
 
