@@ -63,15 +63,23 @@ Three answers. On a channel that draws buttons you get **Approve once**,
 | `#abcd no` | Refused, and they are told |
 
 The words are exactly `approve` and `always`, in any case, with a full stop or
-an exclamation mark after them if your phone puts one there. Anything else is
-relayed to them as an ordinary answer and **authorises nothing**, including
-`yes`, `ok`, `do it`, `approved`, and an answer that merely begins with one of
-those or with `approve` (`#abcd ok, but not before Friday`, `#abcd always check
-with me first`). When your answer to a question about an action was neither, the
+an exclamation mark after them if your phone puts one there. For a question about
+an action, anything else is relayed to them as an ordinary answer and
+**authorises nothing**, including `yes`, `ok`, `do it`, `approved`, and an answer
+that merely begins with one of those or with `approve` (`#abcd ok, but not before
+Friday`, `#abcd always check with me first`). When your answer was neither, the
 reply you get says so: *It was not an approval (only "approve" and "always"
-are), so nothing will run.* Only the word `always` creates a standing
+are), so nothing will run.* The agent that asked is told the same, and that it
+may ask again: it is not a no. Only the word `always` creates a standing
 permission — something that outlives the conversation should never come from a
 reply that merely sounded enthusiastic.
+
+A question that asks for a **decision** rather than permission (no command to run:
+"Fine to show her how the servers are laid out?") has nothing to approve, so there
+are no words to get right. Your answer is handed to the agent as it was written,
+`#abcd yes, go ahead` included, and the agent goes on as it says, within what it
+may do for that person: the answer allows nothing more than before. The Audit page
+shows it as *Answered*, not *Refused*.
 
 The `#abcd` prefix is what makes it an answer rather than a remark. It is
 matched only at the start of a message and only against a question still
@@ -101,7 +109,9 @@ tells the person who asked what came of it — you do not go and prod it, and
 neither do they.
 
 A refusal resumes it too. Being told no is an outcome worth delivering; silence
-reads as the question having been lost.
+reads as the question having been lost. An answer to a question about an action
+that was neither of the words and not a no resumes it as well, and tells the agent
+that it was not an approval, so that it can say so and ask again.
 
 The resumed turn runs **as that conversation**, so a colleague's session is
 still a colleague's session. The approval permits one action inside it, not a

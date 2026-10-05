@@ -533,6 +533,49 @@ test("only the words the question offers approve: an answer that merely begins w
   await settle();
 });
 
+test("what the asker's agent is told of an answer follows what was asked: a decision is answered as it is, a permission only by its words", async () => {
+  useStubAsk();
+  roster();
+  await say("kim", "hi", "kim");
+  const asking = findChannelSession("tg:kim");
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const rules = listToolRules().length;
+  const answered = async (question, answer) => {
+    turns.length = 0;
+    await say("owner", `#${question.id} ${answer}`, "owner");
+    await settle();
+    assert.equal(turns.length, 1, `${answer}: the conversation was picked up again`);
+    return turns[0].message;
+  };
+  const ask = (action) =>
+    askQuestion({ sessionId: asking.id, personKey: "tg:kim", personName: "Kim", channelSlug: "tg", channelKey: "kim", question: "Fine to show her the layout?", ...(action ? { actionTool: "bash", action } : {}) });
+
+  // A question that asks for a decision has nothing to approve: a yes is the answer, not a refusal, and it may be followed.
+  for (const answer of ["yes", "yes, go ahead", "no, not before Friday"]) {
+    const message = await answered(ask(), answer);
+    assert.match(message, new RegExp(`has answered the question you put to them: ${answer}`));
+    assert.doesNotMatch(message, /not an approval|Do not ask again|do not attempt/, `${answer}: it is told as it was said`);
+    assert.match(message, /go on as that answer says/, `${answer}: and may go on`);
+    assert.equal(audit("answered")[0].reason, "Answered for Kim", `${answer}: not recorded as a refusal`);
+  }
+  assert.equal(listToolRules().length, rules);
+  assert.equal(useGrant(asking.id, "bash", "anything"), false, "and it allowed nothing");
+
+  // A question about an action, answered with something that is neither of the words: nothing ran, and it is told how to ask again.
+  const action = "git push origin release";
+  for (const answer of ["yes", "ok, but not before Friday", "do it"]) {
+    const message = await answered(ask(action), answer);
+    assert.match(message, /not an approval/, answer);
+    assert.match(message, /approve.*always/, `${answer}: the words that would have approved`);
+    assert.match(message, /may ask again/, `${answer}: it is not told to give up`);
+    assert.doesNotMatch(message, /Do not ask again/, answer);
+    assert.equal(audit("answered")[0].reason, "Refused for Kim", answer);
+  }
+  // A no is a no.
+  assert.match(await answered(ask(action), "no"), /Do not ask again/);
+  assert.equal(useGrant(asking.id, "bash", action), false);
+});
+
 test("an approval makes the action run in the conversation that asked: neither the relay of the answer nor the resumed reply taints it", async () => {
   useStubAsk();
   roster();

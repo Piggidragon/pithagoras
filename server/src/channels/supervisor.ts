@@ -369,17 +369,25 @@ class ChannelSupervisor {
     approves: boolean
   ): Promise<void> {
     const who = primaryName();
+    const asker = question.person_name;
+    // A question without an action asked for a decision, not permission: nothing was held back, so the answer is an
+    // answer, whatever words it is in. One about an action is a permission, and only its words give it.
+    const verdict = !question.action
+      ? `Tell ${asker} what ${who} said, and go on as that answer says, within what you may do for them: ` +
+        `it allows nothing more than before.`
+      : approves
+        ? `That is an approval. You may run \`${question.action}\` once, now — exactly as ` +
+          `written. Do it, then tell ${asker} what came of it.`
+        : /^no\b/i.test(answer)
+          ? `That is a no. Tell ${asker} what ${who} said and do not attempt it. Do not ask again.`
+          : `That is not an approval: only "approve" and "always" are, so nothing ran and nothing is allowed. ` +
+            `Tell ${asker} what ${who} said. If you still need it, you may ask again, and ${who} has to answer ` +
+            `with approve or always (or no).`;
     const prompt = [
       "<answer-from-primary>",
       `${who} has answered the question you put to them: ${answer}`,
-      approves && question.action
-        ? `That is an approval. You may run \`${question.action}\` once, now — exactly as ` +
-          `written. Do it, then tell ${question.person_name} what came of it.`
-        : approves
-          ? `Carry on with what you were asked, then tell ${question.person_name}.`
-          : `That is not an approval. Tell ${question.person_name} what ${who} said and do not ` +
-            `attempt it. Do not ask again.`,
-      `Reply to ${question.person_name}, not to ${who} — this is their conversation.`,
+      verdict,
+      `Reply to ${asker}, not to ${who} — this is their conversation.`,
       "</answer-from-primary>",
     ].join("\n");
 
@@ -563,11 +571,14 @@ class ChannelSupervisor {
           kind: "answered",
           tool: question.action_tool || "",
           subject: question.action || question.question.slice(0, 200),
-          reason: always
-            ? `Always allowed for ${question.person_name}`
-            : approves
-              ? `Approved once for ${question.person_name}`
-              : `Refused for ${question.person_name}`,
+          // Only a question about an action can be refused: one for a decision was answered, whatever the answer was.
+          reason: !question.action
+            ? `Answered for ${question.person_name}`
+            : always
+              ? `Always allowed for ${question.person_name}`
+              : approves
+                ? `Approved once for ${question.person_name}`
+                : `Refused for ${question.person_name}`,
           personKey: question.person_key,
           sessionId: asking?.id ?? null,
         });
