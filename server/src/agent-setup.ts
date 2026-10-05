@@ -29,7 +29,13 @@ const EDITABLE_FILES = [...AGENT_FILES, WATCH_FILE] as const;
 /** A file of an agent's: the first agent's, unless another's home is given. */
 const filePath = (name: string, home = agentHome()) => path.join(home, name);
 
-export const isInitialised = (home = agentHome()): boolean => AGENT_FILES.every((f) => existsSync(filePath(f, home)));
+/**
+ * Whether the three files are there. By lstat, as the wizard asks: a link that leads
+ * nowhere is something there, and the wizard does not write through it, so asking
+ * `existsSync` would offer a wizard that can never finish.
+ */
+export const isInitialised = (home = agentHome()): boolean =>
+  AGENT_FILES.every((f) => lstatSync(filePath(f, home), { throwIfNoEntry: false }));
 
 /**
  * A file of the agent's as it is now: its text and when it last changed, or

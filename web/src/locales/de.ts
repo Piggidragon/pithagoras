@@ -89,9 +89,9 @@ const de: Locale = {
     "{channels} talks as this agent. Give it another agent under Settings → Channels first.": "{channels} spricht als dieser Agent. Weise zuerst unter Einstellungen → Kanäle einen anderen Agenten zu.",
     "Its {n} chats are stopped and deleted with it.": { one: "Sein einziger Chat wird angehalten und mit ihm gelöscht.", other: "Seine {n} Chats werden angehalten und mit ihm gelöscht." },
     "The background jobs running in its folder, a dev server for example, are stopped too, whichever you choose below.": "Die Hintergrundjobs, die in seinem Ordner laufen, zum Beispiel ein Dev-Server, werden ebenfalls angehalten, was du unten auch wählst.",
-    "This agent took up a folder that was kept from before. {files} are as they were, so what you answered was not written to them. Edit them under Files.": {
-      one: "Dieser Agent hat einen früher behaltenen Ordner übernommen. {files} ist, wie es war, deine Antworten wurden also nicht hineingeschrieben. Bearbeite die Datei unter Dateien.",
-      other: "Dieser Agent hat einen früher behaltenen Ordner übernommen. {files} sind, wie sie waren, deine Antworten wurden also nicht hineingeschrieben. Bearbeite sie unter Dateien.",
+    "This agent's folder already had {files}, so what you answered was not written to them. Edit them under Files.": {
+      one: "Im Ordner dieses Agenten gab es {files} schon, deine Antworten wurden also nicht hineingeschrieben. Bearbeite die Datei unter Dateien.",
+      other: "Im Ordner dieses Agenten gab es {files} schon, deine Antworten wurden also nicht hineingeschrieben. Bearbeite sie unter Dateien.",
     },
     "Keep its folder": "Ordner behalten",
     "Its files and memory stay in {home}. An agent made under the same name picks them up again.": "Seine Dateien und sein Gedächtnis bleiben in {home}. Ein Agent mit demselben Namen übernimmt sie wieder.",

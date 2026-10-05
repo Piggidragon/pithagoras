@@ -40,7 +40,7 @@ The **Files** tab edits `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` and `WATCH.md`.
 The agent writes these files too, `MEMORY.md` above all, so a save made from a
 copy the agent has changed since is not applied. The tab says "This file changed
 after you opened it" and offers **Load the new version** or **Save mine anyway**.
-A file that is a link is left alone: it is neither shown nor written through.
+A file that is a link is left alone: it is neither shown nor written through. It counts as there, so an agent whose `SOUL.md` is a link that leads nowhere (by a path that only the container knows) is not asked to be set up again.
 
 ## Its voice
 

@@ -42,7 +42,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const [params, setParams] = useSearchParams();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [creating, setCreating] = useState(false);
-  // The files a new agent's folder already had, and so its answers did not replace: shown on its page once it opens.
+  // The files an agent's folder already had, and so its answers did not replace: said on its page until it is told to go or the page is left, not again.
   const [madeKept, setMadeKept] = useState<{ id: string; files: string[] } | null>(null);
   const [error, setError] = useState("");
 
@@ -97,10 +97,14 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
       // Its own state for each agent: a draft of one's SOUL.md is not another's.
       key={agent.id}
       agent={agent}
-      startKept={madeKept?.id === agent.id ? madeKept.files : []}
+      kept={madeKept?.id === agent.id ? madeKept.files : []}
+      onKept={(files) => setMadeKept({ id: agent.id, files })}
       back={
         <button
-          onClick={() => setParams({})}
+          onClick={() => {
+            setMadeKept(null);
+            setParams({});
+          }}
           className="mb-4 inline-flex items-center gap-1.5 text-xs text-fg-subtle transition hover:text-fg-muted"
         >
           <LuChevronLeft className="h-3.5 w-3.5" /> {t("Agents")}
@@ -109,6 +113,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
       onChanged={loadAgents}
       onDeleted={async () => {
         await loadAgents();
+        setMadeKept(null);
         setParams({});
       }}
       onSelect={onSelect}
@@ -185,15 +190,17 @@ const BROWSER = "browser";
  */
 function AgentView({
   agent,
-  startKept,
+  kept,
+  onKept,
   back,
   onChanged,
   onDeleted,
   onSelect,
 }: {
   agent: Agent;
-  /** The files its folder already had when it was made, whose files the answers did not replace (see `answersLeft`). */
-  startKept: string[];
+  /** The files its folder already had, which the answers did not replace (see `answersLeft`), until they are dismissed. Held by the page, so that it is said once and not again each time the agent is opened. */
+  kept: string[];
+  onKept: (files: string[]) => void;
   back: ReactNode;
   onChanged: () => Promise<void>;
   onDeleted: () => Promise<void>;
@@ -214,7 +221,6 @@ function AgentView({
   // The conversation whose name is open for editing, if any; the agent's own as "agent".
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [kept, setKept] = useState(startKept);
   // The tab shown, kept in the link beside the agent: Conversations without one.
   const [params, setParams] = useSearchParams();
   const tab: AgentTab = AGENT_TABS.find(([id]) => id === params.get("tab"))?.[0] ?? "conversations";
@@ -333,7 +339,7 @@ function AgentView({
           onSubmit={async (input) => {
             const done = await api.runAgentWizard(agent.id, input);
             setSetup(done);
-            setKept(answersLeft(done.kept));
+            onKept(answersLeft(done.kept));
             await onChanged();
           }}
         />
@@ -421,12 +427,12 @@ function AgentView({
               <span className="min-w-0 flex-1">
                 {tp(
                   kept.length,
-                  "This agent took up a folder that was kept from before. {files} is as it was, so what you answered was not written to it. Edit it under Files.",
-                  "This agent took up a folder that was kept from before. {files} are as they were, so what you answered was not written to them. Edit them under Files.",
+                  "This agent's folder already had {files}, so what you answered was not written to it. Edit it under Files.",
+                  "This agent's folder already had {files}, so what you answered was not written to them. Edit them under Files.",
                   { files: kept.join(", ") },
                 )}
               </span>
-              <button type="button" onClick={() => setKept([])} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-warn/10">
+              <button type="button" onClick={() => onKept([])} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-warn/10">
                 <LuX aria-hidden className="h-4 w-4" />
               </button>
             </div>

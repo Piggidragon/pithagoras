@@ -1,4 +1,4 @@
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 import { DEFAULT_ORB } from '../../server/src/orb-style';
 
@@ -7,8 +7,9 @@ const agent = (id: string, name: string, extra: Record<string, unknown> = {}) =>
 });
 
 /** A portal with the first agent and one more, "ada", whose folder the answers of a new agent made under that name meet. */
-async function portal(page: Page, opts: { kept?: string[]; deleted?: string[] } = {}) {
+async function portal(page: Page, opts: { kept?: string[]; deleted?: string[]; wizard?: { initialised: boolean; kept: string[] } } = {}) {
   let made = false;
+  let ran = false;
   await mockPortal(page, async ({ path: p, method, url }) => {
     if (p === '/api/agents' && method === 'GET') return { agents: [agent('home', 'Nova'), ...(made ? [agent('ada', 'Ada', { chats: 3 })] : [agent('ada', 'Ada')])] };
     if (p === '/api/agents' && method === 'POST') {
@@ -20,7 +21,12 @@ async function portal(page: Page, opts: { kept?: string[]; deleted?: string[] } 
       return { ok: true, sessionsDeleted: 3, routinesSwitchedOff: [], routinesDeleted: [], jobsStopped: 1 };
     }
     if (p === '/api/agent/sessions') return { sessions: [], agentHome: '/a/ada' };
-    if (/^\/api\/agents\/[^/]+\/setup$/.test(p)) return { initialised: true, home: '/a/ada', files: [] };
+    if (/^\/api\/agents\/[^/]+\/setup$/.test(p)) {
+      // With `wizard`, the folder lacks one of the files until the wizard has been run, and the wizard answers as it is told to.
+      if (method === 'POST') ran = true;
+      if (!opts.wizard) return { initialised: true, home: '/a/ada', files: [] };
+      return { initialised: ran && opts.wizard.initialised, home: '/a/ada', files: [], ...(method === 'POST' ? { kept: opts.wizard.kept } : {}) };
+    }
   }, { settings: true });
 }
 
@@ -42,32 +48,76 @@ test('the delete dialog of an agent says that what runs in its folder is stopped
   await expect.poll(() => deleted).toEqual(['?folder=keep']);
 });
 
-/** Makes "Ada" with the wizard: the answers are a character and a name. */
-async function makeAda(page: Page) {
-  await page.goto('/agents');
-  const main = page.getByRole('main');
-  await main.getByRole('button', { name: 'New agent' }).click();
+/** The wizard's two steps, answered: a character and a name. */
+async function answerWizard(main: Locator) {
   await main.getByLabel('Name').fill('Ada');
   await main.getByLabel('Character').fill('Brisk, answers in two lines.');
   await main.getByRole('button', { name: 'Next' }).click();
   await main.getByLabel('Your name').fill('Sam');
   await main.getByRole('button', { name: 'Create' }).click();
+}
+
+/** Makes "Ada" with the wizard. */
+async function makeAda(page: Page) {
+  await page.goto('/agents');
+  const main = page.getByRole('main');
+  await main.getByRole('button', { name: 'New agent' }).click();
+  await answerWizard(main);
   return main;
 }
 
-test('an agent that took up a folder kept from before says that its answers were not written, once, and can be told to go', async ({ page }) => {
+test('an agent whose folder already had its files says that its answers were not written, once, and can be told to go', async ({ page }) => {
   await portal(page, { kept: ['SOUL.md', 'PrimaryUser.md', 'MEMORY.md'] });
   const main = await makeAda(page);
-  const note = main.getByRole('status').filter({ hasText: 'took up a folder that was kept from before' });
-  await expect(note).toContainText('SOUL.md, PrimaryUser.md are as they were, so what you answered was not written to them. Edit them under Files.');
+  const note = main.getByRole('status').filter({ hasText: "folder already had" });
+  await expect(note).toContainText("This agent's folder already had SOUL.md, PrimaryUser.md, so what you answered was not written to them. Edit them under Files.");
   await expect(note).not.toContainText('MEMORY.md');
   await note.getByRole('button', { name: 'Dismiss' }).click();
   await expect(note).toHaveCount(0);
+  // Told to go, it stays gone: not back when the cards are opened and the agent again.
+  await main.getByRole('button', { name: 'Agents' }).click();
+  await expect(main.getByRole('button', { name: 'New agent' })).toBeVisible();
+  await main.getByRole('button', { name: /^Ada/ }).click();
+  await expect(main.getByRole('heading', { name: 'Ada' })).toBeVisible();
+  await expect(note).toHaveCount(0);
+});
+
+test('the note is said once for a page that was not dismissed either: leaving it ends it', async ({ page }) => {
+  await portal(page, { kept: ['SOUL.md'] });
+  const main = await makeAda(page);
+  const note = main.getByRole('status').filter({ hasText: 'folder already had' });
+  await expect(note).toContainText("This agent's folder already had SOUL.md, so what you answered was not written to it. Edit it under Files.");
+  await main.getByRole('button', { name: 'Agents' }).click();
+  await expect(main.getByRole('button', { name: 'New agent' })).toBeVisible();
+  await main.getByRole('button', { name: /^Ada/ }).click();
+  await expect(main.getByRole('heading', { name: 'Ada' })).toBeVisible();
+  await expect(note).toHaveCount(0);
+});
+
+test("an agent that lost one of its files and is set up again is not said to have taken up a folder from before", async ({ page }) => {
+  await portal(page, { wizard: { initialised: true, kept: ['SOUL.md', 'PrimaryUser.md'] } });
+  await page.goto('/agents?agent=ada');
+  const main = page.getByRole('main');
+  await expect(main.getByRole('heading', { name: 'Set up the agent' })).toBeVisible();
+  await answerWizard(main);
+  const note = main.getByRole('status');
+  await expect(note).toContainText("This agent's folder already had SOUL.md, PrimaryUser.md, so what you answered was not written to them.");
+  await expect(main.getByText('kept from before')).toHaveCount(0);
+});
+
+test('a wizard that is answered and still not done is usable again, and not left spinning', async ({ page }) => {
+  await portal(page, { wizard: { initialised: false, kept: ['SOUL.md'] } });
+  await page.goto('/agents?agent=ada');
+  const main = page.getByRole('main');
+  await answerWizard(main);
+  await expect(main.getByRole('heading', { name: 'Set up the agent' })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Create' })).toBeEnabled();
+  await expect(main.getByLabel('Your name')).toBeEnabled();
 });
 
 test('an agent made in a folder of its own says nothing of the kind, and one that kept only its memory does not either', async ({ page }) => {
   await portal(page, { kept: ['MEMORY.md'] });
   const main = await makeAda(page);
   await expect(main.getByRole('heading', { name: 'Ada' })).toBeVisible();
-  await expect(main.getByText('took up a folder that was kept from before')).toHaveCount(0);
+  await expect(main.getByText('folder already had')).toHaveCount(0);
 });

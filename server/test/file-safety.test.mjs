@@ -10,7 +10,7 @@ const dist = (name) => pathToFileURL(new URL(`../dist/${name}`, import.meta.url)
 const home = inProcessHome("file-safety-");
 const { writeFileAtomic } = await import("../dist/atomic-write.js");
 const { writeMcpText, writeMcpFile } = await import("../dist/api/mcp.js");
-const { agentFileStatus, readAgentFile, runWizard, writeAgentFile } = await import("../dist/agent-setup.js");
+const { agentFileStatus, isInitialised, readAgentFile, runWizard, writeAgentFile } = await import("../dist/agent-setup.js");
 const { removeFolderLater, sweepRemoved } = await import("../dist/folder-removal.js");
 const { FileError, removeEntry, renameEntry } = await import("../dist/workspace-files.js");
 const P = await import("../dist/projects.js");
@@ -147,6 +147,21 @@ test("a link in place of an agent's file is neither read nor written through", (
   const answer = runWizard({ agentName: "Ada", userName: "Sam" }, dir);
   assert.deepEqual(answer.kept, ["SOUL.md", "MEMORY.md"]);
   assert.equal(readFileSync(secret, "utf8"), "the database");
+});
+
+test("a link that leads nowhere is something there: the wizard keeps it, and so the agent counts as set up", () => {
+  // An agent under the container executor leaves SOUL.md as a link by the container's path, which is no path here.
+  const dir = fresh("agent-dangling");
+  for (const name of ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]) symlinkSync("/home/agent/notes/missing.md", path.join(dir, name));
+  assert.equal(isInitialised(dir), true, "the wizard cannot write through the links, so it cannot be asked for");
+  assert.equal(agentFileStatus(dir).initialised, true);
+  assert.deepEqual(runWizard({ agentName: "Ada", userName: "Sam" }, dir).kept, ["SOUL.md", "PrimaryUser.md", "MEMORY.md"]);
+  assert.equal(isInitialised(dir), true);
+  // One file of three gone is still a wizard.
+  rmSync(path.join(dir, "MEMORY.md"));
+  assert.equal(isInitialised(dir), false);
+  runWizard({ agentName: "Ada", userName: "Sam" }, dir);
+  assert.equal(isInitialised(dir), true);
 });
 
 test("the wizard writes the files that are not there and keeps the ones that are", () => {

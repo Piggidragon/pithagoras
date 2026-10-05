@@ -58,8 +58,9 @@ export function AgentSetup({
       await onSubmit({ agentName, vibe, userName, userAbout, userPrefers });
     } catch (e) {
       setError((e as Error).message);
-      setBusy(false);
     }
+    // Whatever the answer: where it makes this page go away, setting it is nothing, and where the wizard stays the form is not left disabled.
+    setBusy(false);
   };
 
   return (
