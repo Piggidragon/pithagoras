@@ -23,6 +23,7 @@ import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { forgetBrowserSession } from "./browser/tools.js";
+import { BACKGROUND_SUPPORTED, listJobs } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
 import { forgetCanvases } from "./canvases.js";
 import { forTranscript } from "./stored-event.js";
@@ -291,6 +292,13 @@ class SessionManager extends EventEmitter {
   private stopping = new WeakSet<PiClient>();
   /** The pis being let go, by chat: a new one is not started beside the old one's shutdown. */
   private releasing = new Map<string, Promise<void>>();
+  /**
+   * Chats being deleted: from `discard` to the end of the delete. Letting a pi
+   * go takes as long as its extensions need, and a message that comes in
+   * meanwhile — another tab, a channel — finds the row and would start a new pi
+   * for a chat that is about to be gone, to run the message in its folder.
+   */
+  private discarding = new Set<string>();
   private stream = new LiveEvents(appendEvent);
   /** Model failures pi has not recovered from: see model-errors.ts. */
   private modelErrors = new ModelErrors();
@@ -905,6 +913,7 @@ class SessionManager extends EventEmitter {
    * nobody has opened yet will do it.
    */
   private async ensureClient(sessionId: string, insideEdit = false): Promise<PiClient> {
+    this.refuseIfDiscarded(sessionId);
     this.touch(sessionId);
     // A client started now would read the file the edit is about to rewrite, and
     // go on holding the conversation as it was.
@@ -926,6 +935,8 @@ class SessionManager extends EventEmitter {
     // The pi that was let go still has its extensions winding down, on the same
     // conversation file: the next one starts after them.
     await this.releasing.get(sessionId);
+    // A delete began while this waited, or while it was held at the edit.
+    this.refuseIfDiscarded(sessionId);
     const session = getSession(sessionId);
     if (!session) throw new Error(`Unknown session ${sessionId}`);
 
@@ -1228,10 +1239,25 @@ class SessionManager extends EventEmitter {
       // A pi that cannot carry on its conversation when it is started again
       // would make the next message a new one: not let go for being idle.
       if (executor.resumes === false) continue;
+      // Letting pi go tells its extensions, and one that started a build or a
+      // dev server in the background ends it then, with nobody told. Its jobs
+      // are not use of the chat as far as pi knows, so they are looked for here.
+      const seen = this.activity.get(id);
+      if (await this.jobsRunning(id)) continue;
+      // The look took a moment: the chat may have been used, or let go, since.
+      if (this.live.get(id)?.client !== client || this.activity.get(id) !== seen || this.inUse(id, client)) continue;
       await this.stop(id);
       stopped.push(id);
     }
     return stopped;
+  }
+
+  /** Whether the agent left something running in this chat's folder, whatever started it: see background.ts. */
+  private async jobsRunning(sessionId: string): Promise<boolean> {
+    const workspace = getSession(sessionId)?.workspace;
+    if (!BACKGROUND_SUPPORTED || !workspace) return false;
+    const jobs = await listJobs(workspace).catch(() => []);
+    return jobs.some((job) => job.state !== "exited");
   }
 
   /** Whether stopping this chat's pi would take something with it: a run, a command, a dialog, a subagent, an edit. */
@@ -1272,6 +1298,8 @@ class SessionManager extends EventEmitter {
    * start pi for it, for one that started it before asking: see askNow.
    */
   async prompt(sessionId: string, message: string, options?: PromptOptions, insideEdit = false, stopsBefore?: number): Promise<boolean> {
+    // Before the session is marked as anything: nothing of it is to be written once it is going.
+    this.refuseIfDiscarded(sessionId);
     // Callers ask first, where there is someone to tell; this is so that one
     // which did not is refused too, before the session is marked as anything.
     const refused = options?.images?.length ? await picturesRefused(message) : undefined;
@@ -2609,6 +2637,7 @@ class SessionManager extends EventEmitter {
    * and waited for, and only then is the process disposed.
    */
   async discard(sessionId: string): Promise<void> {
+    this.discarding.add(sessionId);
     await this.settleStart(sessionId);
     await this.abort(sessionId).catch(() => {});
     // A prompt can have started a launch while the abort was being waited for.
@@ -2620,11 +2649,24 @@ class SessionManager extends EventEmitter {
   }
 
   /**
+   * A delete that did not go through: these chats are there to be used again.
+   * Safe for one that did, whose rows are gone.
+   */
+  reopen(sessionIds: Iterable<string>): void {
+    for (const id of sessionIds) this.discarding.delete(id);
+  }
+
+  private refuseIfDiscarded(sessionId: string): void {
+    if (this.discarding.has(sessionId)) throw new Error("This chat is being deleted");
+  }
+
+  /**
    * Removes what pi wrote for a session, once its rows are gone. It never fails
    * the caller: the chat is already deleted, and a folder that will not go —
    * one a container wrote as another user — is a leftover, not an error.
    */
   removeFiles(sessionId: string): void {
+    this.discarding.delete(sessionId);
     this.drafts.delete(sessionId);
     this.stops.delete(sessionId);
     // Its temporary canvases are in memory only, so no row delete reaches them.

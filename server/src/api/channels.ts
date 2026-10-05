@@ -239,6 +239,7 @@ export function channelsRouter(): Router {
           for (const s of ids) deleteSession(s.id);
         })();
       } catch (e) {
+        sessions.reopen(ids.map((s) => s.id));
         return res.status(500).json({ error: (e as Error).message });
       }
       for (const s of ids) sessions.removeFiles(s.id);

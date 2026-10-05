@@ -77,7 +77,7 @@ import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { adoptPortalBrowser, browserRouter, pinConnection } from "./api/browser.js";
 import { terminalRouter } from "./api/terminal.js";
-import { MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
+import { BACKGROUND_SUPPORTED, MARKER, clearFinished, listJobs, readOutput, stopJob } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
@@ -534,6 +534,8 @@ app.delete("/api/projects/:name", async (req, res) => {
       for (const chat of chats) sessions.removeFiles(chat.id);
       res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff });
     } finally {
+      // The chats that were not deleted take messages again.
+      sessions.reopen([...runs, ...chats].map((s) => s.id));
       release();
     }
   } catch (e) {
@@ -583,6 +585,7 @@ app.delete("/api/agents/:id", async (req, res) => {
       for (const chat of chats) sessions.removeFiles(chat.id);
       res.json({ ok: true, sessionsDeleted: chats.length, routinesSwitchedOff: switchedOff });
     } finally {
+      sessions.reopen([...runs, ...chats].map((s) => s.id));
       release();
     }
   } catch (e) {
@@ -736,8 +739,14 @@ app.patch("/api/sessions/:id", (req, res) => {
 app.delete("/api/sessions/:id", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  await sessions.discard(session.id);
-  deleteSession(session.id);
+  try {
+    await sessions.discard(session.id);
+    deleteSession(session.id);
+  } catch (e) {
+    // The chat stays: it takes messages again.
+    sessions.reopen([session.id]);
+    throw e;
+  }
   sessions.removeFiles(session.id);
   res.json({ ok: true });
 });
@@ -968,8 +977,6 @@ app.post("/api/sessions/:id/abort", async (req, res) => {
 });
 
 // --- what runs beside the conversation: background jobs, extension status, subagents ---
-
-const BACKGROUND_SUPPORTED = EXECUTOR_KIND !== "container" && process.platform === "linux";
 
 app.get("/api/sessions/:id/background", async (req, res) => {
   const session = getSession(req.params.id);

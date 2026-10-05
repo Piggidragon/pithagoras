@@ -142,6 +142,12 @@ pi's `session_shutdown` event (reason `quit`), so that they can stop their timer
 and the servers they started. One that has not finished after three seconds is
 let go regardless.
 
+That includes the jobs an extension started for the agent, which it ends when it
+is told. So a chat whose agent left a job running in its folder
+([Background jobs](#subagents-and-background-jobs), below) is not let go for
+being idle until the job is over. Deleting the chat or stopping the portal ends
+such a job all the same.
+
 ## Switching tools off for one chat
 
 The blocks icon in the composer says which tools the agent may reach for **in

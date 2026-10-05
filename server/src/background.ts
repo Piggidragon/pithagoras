@@ -4,6 +4,7 @@ import path from "node:path";
 import { fieldsOf, signalSession, statOf } from "./proc-stat.js";
 import { within } from "./paths.js";
 import { realPath } from "./within.js";
+import { EXECUTOR_KIND } from "./executor-kind.js";
 
 /**
  * What the agent left running in a workspace: background shells, servers,
@@ -21,6 +22,9 @@ import { realPath } from "./within.js";
  * not in this /proc with paths that mean anything here.
  */
 export const MARKER = "PITHAGORAS_AGENT=1";
+
+/** Whether this portal can see the agent's processes at all: not a container's, and not off Linux. */
+export const BACKGROUND_SUPPORTED = EXECUTOR_KIND !== "container" && process.platform === "linux";
 
 export interface BackgroundJob {
   /**

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
@@ -12,7 +13,7 @@ import { inProcessHome } from "./server-harness.mjs";
 const home = inProcessHome("pithagoras-lifecycle-");
 mkdirSync(path.join(home, "work"), { recursive: true });
 
-const { appendEvent, createSession, eventsSince, getDb, getSession, pendingNotes, updateSession } = await import("../dist/db.js");
+const { appendEvent, createSession, deleteSession, eventsSince, getDb, getSession, pendingNotes, updateSession } = await import("../dist/db.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 const { sessions, IMAGE_ROOT, SESSION_ROOT } = await import("../dist/session-manager.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
@@ -498,6 +499,51 @@ test("a pi that is let go is told first, so that its extensions stop what they s
   assert.equal(taintSession(id), false, "the guard's hook, which holds the whole pi, is let go");
 });
 
+test("a chat whose agent left a job running in its folder is not let go, and is once the job is over", { skip: process.platform !== "linux" }, async () => {
+  const folder = path.join(home, "jobs");
+  mkdirSync(folder, { recursive: true });
+  const id = chat({ workspace: folder });
+  const pi = await sessions.client(id);
+  sessions.activity.set(id, Date.now() - 60 * 60_000);
+  // As what the agent starts runs: marked as the portal's, in the chat's folder, in a Unix session of its own. A build, a dev server, or what pi-background-tasks runs for the agent, which kills it when pi is let go.
+  const job = spawn("sleep", ["60"], { cwd: folder, detached: true, stdio: "ignore", env: { ...process.env, PITHAGORAS_AGENT: "1" } });
+  try {
+    await until(() => job.pid, "the job to start");
+    assert.deepEqual(await sessions.reapIdle(), [], "its job would end with it, and the chat looks idle");
+    assert.equal(pi.disposed, false);
+    assert.equal(pi.calls.includes("shutdown"), false, "the extensions are not told either");
+
+    process.kill(-job.pid, "SIGKILL");
+    // The list of what runs is read once a second.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.deepEqual(await sessions.reapIdle(), [id], "and let go once the job is over");
+    assert.equal(pi.disposed, true);
+  } finally {
+    try {
+      process.kill(-job.pid, "SIGKILL");
+    } catch {
+      // Gone already.
+    }
+  }
+});
+
+test("a chat used while its jobs were being looked for is not let go", { skip: process.platform !== "linux" }, async () => {
+  const { id, pi } = await idleFor(60);
+  const was = sessions.jobsRunning;
+  sessions.jobsRunning = async (asked) => {
+    sessions.touch(asked);
+    return false;
+  };
+  try {
+    assert.deepEqual(await sessions.reapIdle(), [], "somebody wrote to it meanwhile");
+    assert.equal(pi.disposed, false);
+  } finally {
+    sessions.jobsRunning = was;
+  }
+  sessions.activity.set(id, Date.now() - 60 * 60_000);
+  assert.deepEqual(await sessions.reapIdle(), [id]);
+});
+
 test("an extension that never winds down, or fails to, does not keep a pi from being let go", async () => {
   const slow = sessions.releaseMs;
   sessions.releaseMs = 40;
@@ -541,6 +587,56 @@ test("a message for a chat whose pi is winding down starts the next one after it
   assert.equal(launched.length, before + 1);
   assert.equal(pi.disposed, true);
   assert.deepEqual(lastPi().prompts, ["back again"]);
+});
+
+test("a message that comes in while a chat is being deleted does not start a pi for it", async () => {
+  const { id, pi } = await idleFor(1);
+  // An extension that takes its time, as one that stops a server does.
+  pi.onShutdown = () => new Promise((resolve) => setTimeout(resolve, 80));
+  const before = launched.length;
+  // The steps of the delete route.
+  const deleting = (async () => {
+    await sessions.discard(id);
+    deleteSession(id);
+    sessions.removeFiles(id);
+  })();
+  await until(() => pi.calls.includes("shutdown"), "the extensions to be told");
+  await assert.rejects(sessions.prompt(id, "second"), /being deleted/);
+  await assert.rejects(sessions.client(id), /being deleted/);
+  await deleting;
+  assert.equal(launched.length, before, "no pi was started for it");
+  assert.equal(sessions.isLoaded(id), false);
+  assert.equal(getSession(id), undefined);
+  assert.deepEqual(eventsSince(id), [], "and nothing was written for a chat that is gone");
+});
+
+test("a message that was waiting for the old pi to wind down is refused when its chat is deleted meanwhile", async () => {
+  const { id, pi } = await idleFor(1);
+  let finish;
+  pi.onShutdown = () => new Promise((resolve) => (finish = resolve));
+  const before = launched.length;
+  const stopping = sessions.stop(id);
+  await until(() => finish, "the extensions to be told");
+  // Asked for before the delete began: it waits for the release, as it should.
+  const sent = sessions.client(id);
+  const settled = sent.catch((e) => e);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const deleting = sessions.discard(id);
+  finish();
+  await stopping;
+  await deleting;
+  assert.match((await settled).message, /being deleted/);
+  assert.equal(launched.length, before);
+  sessions.reopen([id]);
+});
+
+test("a delete that did not go through leaves the chat open for messages", async () => {
+  const { id } = await idleFor(1);
+  await sessions.discard(id);
+  await assert.rejects(sessions.prompt(id, "too early"), /being deleted/);
+  sessions.reopen([id]);
+  assert.equal(await sessions.prompt(id, "after all"), true);
+  assert.deepEqual(lastPi().prompts, ["after all"]);
 });
 
 test("the SDK client tells the extensions their session ends, once, and only if one is listening", async () => {
