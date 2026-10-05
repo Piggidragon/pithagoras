@@ -2,9 +2,9 @@ import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
-import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
+import { PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
-import { browserServers, mcpServerNames, serversAndBrowsers } from "./api/mcp.js";
+import { browserServers, dropMcpCache, mcpServerNames, serversAndBrowsers } from "./api/mcp.js";
 import { mkdirSync, realpathSync } from "node:fs";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
@@ -2245,6 +2245,33 @@ export function forgetPackageTools(spec: string): void {
   const all = knownTools();
   const kept = all.filter((t) => !gone(t));
   if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
+}
+
+/**
+ * An MCP server was removed from the configuration: its tools are not
+ * remembered any more, and the adapter's cache of them goes too, or the tools
+ * would be listed under it for ever.
+ *
+ * `before` is the servers as they were, because a tool is told to a server by
+ * its name (`browser_staging_click` is not the tool of `browser`) and that
+ * needs the longer name to still be there; `after` is what is left. The
+ * portal's own browser tools and the adapter's own are the ones a server's
+ * name can claim without being its, and they stay. The defaults and exceptions
+ * somebody set for the tools are kept, as for any tool that is not loaded: a
+ * server that comes back gets them back.
+ */
+export function mcpServersRemoved(before: string[], after: string[]): void {
+  const removed = before.filter((name) => !after.includes(name));
+  if (!removed.length) return;
+  const own: readonly string[] = [...PORTAL_BROWSER_TOOLS, "mcp", "mcpScript"];
+  const all = knownTools();
+  const kept = all.filter((t) => {
+    if (own.includes(t.name)) return true;
+    const server = mcpServerOf(t.name, before);
+    return server === undefined || !removed.includes(server);
+  });
+  if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
+  dropMcpCache(removed);
 }
 
 /**
