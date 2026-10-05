@@ -5,6 +5,7 @@ import { askQuestion } from "../questions.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { sessions } from "../session-manager.js";
 import { getPerson } from "../people.js";
+import { approvalCannotHelp } from "./guard.js";
 import { fail, say } from "./tool-result.js";
 
 /**
@@ -65,6 +66,17 @@ export function askPrimaryTool(sessionId: string) {
         if (!session?.channel_slug || !session.channel_key) {
           return fail("This conversation has nowhere to send an answer back to.");
         }
+        // An approval opens what a rule could open, not what the guard keeps from
+        // everybody who is not the primary user: asked anyway, they would be told
+        // that something could be done once, and it could not.
+        const wanted = typeof p.actionTool === "string" ? p.actionTool : "bash";
+        const never = typeof p.action === "string" && p.action.trim() ? approvalCannotHelp(wanted, p.action.trim(), session.workspace) : undefined;
+        if (never) {
+          return fail(
+            `That cannot be approved: ${never}. Not even the primary user can allow it for somebody else, ` +
+              `so do not ask. Tell the person plainly that it is not something you can do for them.`,
+          );
+        }
         // Whether it arrives the moment it is written, or waits for them to
         // speak again. Either way it arrives, so neither the question nor the
         // promise changes — only the timing does.
@@ -80,7 +92,7 @@ export function askPrimaryTool(sessionId: string) {
           channelSlug: session.channel_slug,
           channelKey: unscopeKey(session.channel_slug, session.channel_key),
           question,
-          actionTool: typeof p.actionTool === "string" ? p.actionTool : "bash",
+          actionTool: wanted,
           action: typeof p.action === "string" && p.action.trim() ? p.action.trim() : null,
         });
 

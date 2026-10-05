@@ -16,3 +16,10 @@ export const CONTEXT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"];
 export const SHARED_FILES = ["SOUL.md", "TEAM.md"];
 /** The ones only the primary user's conversations may see. */
 export const PRIVATE_FILES = CONTEXT_FILES.filter((name) => !SHARED_FILES.includes(name));
+
+/**
+ * What the agent's heartbeat is asked, on every look: read from the agent's home
+ * as the primary user's own words. Not context for a chat, but it is as good as
+ * an instruction to the agent, so it is held like the files above.
+ */
+export const WATCH_FILE = "WATCH.md";

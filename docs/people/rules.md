@@ -36,7 +36,10 @@ accident.
 What **Always allow** writes is the command or path exactly as it was asked, so a
 `*` in it is a star and not a wildcard. To allow a family of commands, write the
 pattern yourself. A path is tidied before it is matched, so a `..` in it cannot
-reach out of the folder a rule names.
+reach out of the folder a rule names. A `write` or `edit` rule reaches what its
+pattern names and nothing more, apart from what the guard keeps from everybody
+who is not you (see [roles](/people/roles#what-a-colleague-may-do)): give it the
+folder it is for, not `*`.
 
 ## One command, never a pipeline
 

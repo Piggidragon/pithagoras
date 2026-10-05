@@ -7,6 +7,7 @@ import { countNotes } from "./activity.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions } from "./session-manager.js";
 import { NOTE_TOOL } from "./pi/heartbeat-names.js";
+import { WATCH_FILE } from "./pi/context-files.js";
 
 /**
  * An agent looking around on its own.
@@ -21,7 +22,7 @@ import { NOTE_TOOL } from "./pi/heartbeat-names.js";
  * told to.
  */
 
-export const WATCH_FILE = "WATCH.md";
+export { WATCH_FILE };
 
 /** The shortest interval offered: a look costs a turn of the model, and more often than this is a busy loop. */
 export const MIN_MINUTES = 15;

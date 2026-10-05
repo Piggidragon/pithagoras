@@ -217,6 +217,42 @@ test("a guest's question to the primary user reaches their chat, and is not a no
   }
 });
 
+test("a question is not put to the primary user for an approval that could not make the action run", async () => {
+  roster();
+  createSession({ id: "kim-chat", title: "Kim", workspace: home, executor: "host", channel_slug: "tg", channel_key: "tg:chat:kim" });
+  getDb().prepare("UPDATE sessions SET last_person_key = 'tg:kim' WHERE id = 'kim-chat'").run();
+  setDefaultReportTo({ channel: "tg", target: "report" });
+  const spoken = [];
+  channelSupervisor.running.set("tg-fake", {
+    slug: "tg",
+    state: "running",
+    since: "",
+    signature: "",
+    controller: new AbortController(),
+    send: async (target, text) => void spoken.push({ target, text }),
+  });
+  let tool;
+  askPrimaryTool("kim-chat")({ registerTool: (t) => (tool = t) });
+  const asked = () => getDb().prepare("SELECT COUNT(*) AS n FROM questions").get().n;
+  try {
+    // What the guard keeps from them whatever is allowed: the agent's own instructions, the private notes, a place with secrets.
+    for (const [actionTool, action] of [["write", "AGENTS.md"], ["write", "WATCH.md"], ["edit", `${home}/SOUL.md`], ["bash", "cat PrimaryUser.md"], ["write", ".env"]]) {
+      await assert.rejects(tool.execute("call", { question: "Kim wants this.", actionTool, action }), /That cannot be approved: it /, `${actionTool} ${action}`);
+    }
+    assert.equal(spoken.length, 0, "the primary user was not asked");
+    assert.equal(asked(), 0, "and nothing waits for an answer");
+    // What can be approved still is, and so is a question that asks for no action.
+    await tool.execute("call", { question: "Kim wants to know the year.", actionTool: "bash", action: "date -u +%Y" });
+    await tool.execute("call", { question: "Kim wants to write a note.", actionTool: "write", action: `${home}/notes/new.md` });
+    await tool.execute("call", { question: "Is the office open?" });
+    assert.equal(spoken.length, 3);
+    assert.equal(asked(), 3);
+  } finally {
+    channelSupervisor.running.delete("tg-fake");
+    setDefaultReportTo(null);
+  }
+});
+
 test("what somebody who is not the primary user writes comes after the portal's block about them, and cannot forge one", async () => {
   useStubAsk();
   roster();

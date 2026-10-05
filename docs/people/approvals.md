@@ -31,6 +31,13 @@ exactly which when the call is refused. The prompt is not part of what is
 approved. **Always allow** then writes one rule for each picture, since a rule is
 matched against each picture of a call and one for all of them would match none.
 
+Nothing is put to you that an approval could not make run. The guard keeps
+some things from everybody who is not you, whatever is allowed: a write to the
+agent's own instructions, a place where secrets are kept, your private notes (see
+[roles](/people/roles#what-a-colleague-may-do)). If the agent asks for one of those,
+the question is refused before it reaches you, and it tells the person it is not
+something it can do for them.
+
 The agent chooses neither the recipient nor the route. A session working for
 somebody else must not be able to pick who hears from it.
 

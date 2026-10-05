@@ -9,6 +9,8 @@ const { guardExtension, ruleAllows, ruleApplies, taintSession, wrapUntrusted } =
 const { BROWSER_UNTRUSTED_GUIDELINE, browserTools, cleanRef } = await import("../dist/browser/tools.js");
 const { addToolRule, deleteToolRule, listAudit, listToolRules, useGrant } = await import("../dist/db.js");
 const { recordApproval } = await import("../dist/approvals.js");
+const { createAgent } = await import("../dist/agents.js");
+const { bundledPath } = await import("../dist/bundled.js");
 
 const guard = () => {
   const h = {};
@@ -460,6 +462,71 @@ test("a rule for writing opens no place where pi loads the agent's instructions 
     for (const where of ["docs/AGENTS.md", "x/.pi/extensions/e.ts"]) {
       assert.equal(refused(call(guardAs({ role: "colleague", key: "priya" }), "write", { path: where, content: "x" })), true, where);
     }
+  } finally {
+    for (const id of ids) deleteToolRule(id);
+  }
+});
+
+test("a rule for writing opens nothing that is loaded as instructions into somebody else's conversation: the heartbeat's WATCH.md, another agent's files, what ships with the portal, and where a link leads", () => {
+  const ids = ["write", "edit"].map((tool) => {
+    const id = `rule-instructions-${tool}`;
+    addToolRule({ id, role: "all", tool, pattern: "*", note: "", person_key: null });
+    return id;
+  });
+  // Another agent, whose conversations are the primary user's own, and a project, which a chat may run in as well.
+  const nova = createAgent({ name: "Nova" }).home;
+  mkdirSync(path.join(nova, "notes"), { recursive: true });
+  writeFileSync(path.join(nova, "notes", "mem.md"), "the notes behind the link");
+  symlinkSync(path.join("notes", "mem.md"), path.join(nova, "MEMORY.md"));
+  const project = path.join(process.env.WORKSPACE_ROOT, "site");
+  mkdirSync(path.join(project, "docs"), { recursive: true });
+  // A folder of the conversation's own with links in it: into pi's agent folder, to a folder pi will load from, out of a folder it loads from, at a name.
+  const linked = path.join(folder, "write-linked");
+  mkdirSync(path.join(linked, "notes"), { recursive: true });
+  mkdirSync(path.join(folder, "somewhere", "extensions"), { recursive: true });
+  mkdirSync(path.join(process.env.PI_CODING_AGENT_DIR, "skills"), { recursive: true });
+  symlinkSync(path.join(process.env.PI_CODING_AGENT_DIR, "skills"), path.join(linked, "skills"));
+  symlinkSync(path.join(".pi", "extensions"), path.join(linked, "ext"));
+  symlinkSync(path.join("..", "somewhere"), path.join(linked, ".pi"));
+  symlinkSync(path.join("notes", "a.md"), path.join(linked, "AGENTS.md"));
+  const skills = bundledPath("skills");
+  const extensions = bundledPath("extensions");
+  assert.ok(skills && extensions, "the folders that ship with the portal are found from here");
+  const refusal = /^Refused: it writes to (the files the agent's own context is made of|the file that tells the agent what to watch|a place that pi loads)/;
+  try {
+    for (const role of ["colleague", "guest"]) {
+      const writing = (where, ...paths) => {
+        for (const written of paths) {
+          for (const tool of ["write", "edit"]) {
+            const result = call(guardAs({ role, key: "priya", workspace: where }), tool, { path: written, content: "x", edits: [] });
+            assert.equal(refused(result), true, `${role}: ${tool} ${written}`);
+            assert.match(result.reason, refusal, `${role}: ${written}`);
+          }
+        }
+      };
+      // What the heartbeat is asked on every look, in whatever way it is written.
+      writing(workspace, "WATCH.md", "./watch.md", path.join(workspace, "WATCH.md"));
+      // Another agent's own files, by the path to them, and the file a link at their name leads to; and a project's: a chat may run in any folder of it.
+      writing(workspace, path.join(nova, "SOUL.md"), path.join(nova, "PrimaryUser.md"), path.join(nova, "memory.md"), path.join(nova, "WATCH.md"), path.join(nova, "notes", "mem.md"));
+      writing(workspace, path.join(project, "SOUL.md"), path.join(project, "docs", "MEMORY.md"));
+      // What ships with the portal and pi loads: the skills it offers, the extensions it runs.
+      writing(workspace, path.join(skills, "team-rules", "SKILL.md"), path.join(extensions, "subagent", "index.ts"));
+      // Through links, to a place that is not there yet as to one that is: the file lands where the link leads.
+      writing(linked, "skills/greeting/SKILL.md", "ext/colin.ts", ".pi/extensions/x.ts", "AGENTS.md");
+
+      // What the rule is for goes through, and names that only look like these: a note called memory.md in a folder no chat runs in.
+      const as = guardAs({ role, key: "priya", workspace });
+      for (const where of ["notes/new.md", "TEAM.md", "watch-list.md", path.join(nova, "TEAM.md"), path.join(nova, "notes", "memory.md"), path.join(nova, "notes", "other.md"), path.join(project, "docs", "TEAM.md")]) {
+        assert.equal(call(as, "write", { path: where, content: "x" }), undefined, `${role}: ${where}`);
+        assert.equal(lastAudit().kind, "allowed-by-rule");
+      }
+    }
+    // The primary user, and the agent looking around for them, are not held to it.
+    for (const role of ["primary", "heartbeat"]) {
+      for (const where of ["WATCH.md", path.join(nova, "SOUL.md")]) assert.equal(call(guardAs({ role, workspace }), "write", { path: where, content: "x" }), undefined, `${role}: ${where}`);
+    }
+    // Without a folder to hold it to, by name in every folder.
+    for (const where of ["docs/WATCH.md", "/anywhere/soul.md"]) assert.equal(refused(call(guardAs({ role: "colleague", key: "priya" }), "write", { path: where, content: "x" })), true, where);
   } finally {
     for (const id of ids) deleteToolRule(id);
   }

@@ -11,8 +11,11 @@ import { UNDERSTORY } from "../features.js";
 import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
 import { piAgentDir } from "../pi-settings.js";
-import { isWithinText, realPath } from "../within.js";
-import { CONTEXT_FILES, PRIVATE_FILES } from "./context-files.js";
+import { isWithinText, realPath, realPathAhead } from "../within.js";
+import { listAgents } from "../agents.js";
+import { bundledPath } from "../bundled.js";
+import { workspaceRoot } from "../workspaces.js";
+import { CONTEXT_FILES, PRIVATE_FILES, WATCH_FILE } from "./context-files.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
 
@@ -473,10 +476,10 @@ const PATH_READERS = new Set(["read", "grep", "find", "ls"]);
 /**
  * Where pi's file tools would look for `asked`, worked out as pi works it out —
  * `~`, a leading `@`, a file: URL and odd spaces included — so that what is
- * checked here is what is opened there. Links are followed. Undefined for a
- * path that is no path.
+ * checked is what is opened there. Not followed through links: see
+ * whereToolsLook. Undefined for a path that is no path.
  */
-function whereToolsLook(asked: string, workspace: string): string | undefined {
+function askedPath(asked: string, workspace: string): string | undefined {
   let text = asked.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
   if (text.startsWith("@")) text = text.slice(1);
   if (text === "~") text = os.homedir();
@@ -488,8 +491,17 @@ function whereToolsLook(asked: string, workspace: string): string | undefined {
       return undefined;
     }
   }
-  const resolved = path.resolve(workspace, text);
-  return realPath(resolved) ?? resolved;
+  return path.resolve(workspace, text);
+}
+
+/**
+ * Where those tools really end up: links are followed, those at the end of the
+ * path and those in the middle of it, for a file that is not there yet as for
+ * one that is.
+ */
+function whereToolsLook(asked: string, workspace: string): string | undefined {
+  const resolved = askedPath(asked, workspace);
+  return resolved && realPathAhead(resolved);
 }
 
 /**
@@ -524,21 +536,76 @@ function unreadable(toolName: string, input: Record<string, unknown>, workspace:
   return undefined;
 }
 
+/** What pi reads as a project's instructions, from the folder and every one above it, and the folders it loads its own from. */
+const PI_FILES = ["AGENTS.md", "CLAUDE.md"];
+const PI_FOLDERS = [".pi", ".agents"];
+
 /**
  * Whether pi loads `where` into the conversations that work in its folder: an
  * AGENTS.md or CLAUDE.md, which it reads from the folder and from every folder
  * above it, and the `.pi` and `.agents` folders, which hold its system prompt, its
- * extensions, skills and settings, as does its own agent folder. What is written
- * there reaches the primary user's conversations as the agent's own words, and an
- * extension runs in the portal. Names and folders are told apart from their case,
- * as a file system may not.
+ * extensions, skills and settings, as does its own agent folder. So do the folders
+ * that ship with the portal and that it hands pi: the skills every conversation
+ * has, the extensions it installs. What is written there reaches the primary
+ * user's conversations as the agent's own words, and an extension runs in the
+ * portal. Names and folders are told apart from their case, as a file system may not.
  */
 function loadedByPi(where: string): boolean {
   const parts = where.toLowerCase().split(/[\\/]+/);
-  if (["agents.md", "claude.md"].includes(parts.at(-1) ?? "")) return true;
-  if (parts.includes(".pi") || parts.includes(".agents")) return true;
-  const agentDir = piAgentDir();
-  return isWithinText(realPath(agentDir) ?? path.resolve(agentDir), where);
+  if (PI_FILES.some((name) => name.toLowerCase() === parts.at(-1))) return true;
+  if (PI_FOLDERS.some((name) => parts.includes(name))) return true;
+  const folders = [piAgentDir(), bundledPath("skills"), bundledPath("extensions")];
+  return folders.some((dir) => dir !== undefined && isWithinText(realPath(dir) ?? path.resolve(dir), where));
+}
+
+/**
+ * Whether the portal reads the agent's own files out of `dir`: an agent's home,
+ * and any folder of a project, for a chat of the primary user may run in each of
+ * them. `notes/memory.md` in an agent's home is a note, and is not loaded.
+ */
+function readsOwnFilesFrom(dir: string, homes: string[]): boolean {
+  if (homes.includes(dir)) return true;
+  const root = workspaceRoot();
+  return [root, realPath(root) ?? root].some((projects) => isWithinText(projects, dir));
+}
+
+const REACH = "it writes to the files the agent's own context is made of";
+const WATCHING = "it writes to the file that tells the agent what to watch on its own";
+const LOADED = "it writes to a place that pi loads the agent's instructions and extensions from";
+
+/**
+ * Why a write to any of these places would put words into what the agent takes as
+ * its own instructions, or undefined. The same place written two ways — as
+ * asked, and where its links lead — for pi loads a file under the name it has
+ * in the folder, and a file written under a link goes where the link leads.
+ *
+ * The agent's own files (CONTEXT_FILES) are read out of the folder a conversation
+ * runs in, whichever it is, so they are held wherever such a folder is — another
+ * agent's home included, and a link at their name in any of `homes` — and
+ * WATCH.md, which tells its heartbeat what to do, is held with them.
+ * `homes` is not given where there is no folder to hold it to, and then the names
+ * are held in every folder.
+ */
+function writesInstructions(places: string[], homes?: string[]): string | undefined {
+  const files = [...CONTEXT_FILES, WATCH_FILE];
+  for (const where of places) {
+    const name = path.basename(where).toLowerCase();
+    const own = files.find((file) => file.toLowerCase() === name);
+    if (own && (homes === undefined || readsOwnFilesFrom(path.dirname(where), homes))) return own === WATCH_FILE ? WATCHING : REACH;
+    if (loadedByPi(where)) return LOADED;
+  }
+  // Where a link at the name of one of them leads is what is loaded.
+  for (const dir of homes ?? []) {
+    const at = (name: string) => realPath(path.join(dir, name));
+    const hit = (real: string | null) => real !== null && places.some((where) => where.toLowerCase() === real.toLowerCase());
+    for (const file of files) if (hit(at(file))) return file === WATCH_FILE ? WATCHING : REACH;
+    for (const file of PI_FILES) if (hit(at(file))) return LOADED;
+    for (const folder of PI_FOLDERS) {
+      const real = at(folder);
+      if (real !== null && places.some((where) => isWithinText(real, where))) return LOADED;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -546,34 +613,35 @@ function loadedByPi(where: string): boolean {
  * user even where a rule or an approval opens its tool, or undefined. A command
  * is the agent's own, run as it: its paths cannot be followed through a shell,
  * so what it names is all that is checked — a place secrets are kept, and the
- * private files by name. A tool that writes to a path is held to the files the
- * agent's own context is made of (CONTEXT_FILES), where a link at their name
- * leads as well, and to what else pi loads into a conversation (loadedByPi):
- * they are loaded into the primary user's conversations in the folder as the
- * agent's own words, so a write there is an instruction to it.
+ * private files by name. A tool that writes to a path is held to what is loaded
+ * into a conversation as the agent's own words, for a write there is an
+ * instruction to it: see writesInstructions.
  */
-function unrunnable(toolName: string, input: Record<string, unknown>, workspace: string | undefined): string | undefined {
+export function unrunnable(toolName: string, input: Record<string, unknown>, workspace: string | undefined): string | undefined {
   if (readsCredentials(toolName, input)) return "it reads a place where secrets are kept";
   if (toolName !== "bash") {
     const asked = target(input);
     if (!asked) return undefined;
-    const reach = "it writes to the files the agent's own context is made of";
-    const loaded = "it writes to a place that pi loads the agent's instructions and extensions from";
-    if (workspace === undefined) {
-      if (CONTEXT_FILES.some((name) => path.basename(asked).toLowerCase() === name.toLowerCase())) return reach;
-      return loadedByPi(path.resolve(asked)) ? loaded : undefined;
-    }
-    const root = realPath(workspace) ?? path.resolve(workspace);
-    const where = whereToolsLook(asked, workspace);
-    if (where === undefined) return undefined;
-    if (CONTEXT_FILES.some((name) => {
-      const file = path.join(root, name);
-      return [file, realPath(file) ?? file].some((own) => where.toLowerCase() === own.toLowerCase());
-    })) return reach;
-    return loadedByPi(where) ? loaded : undefined;
+    if (workspace === undefined) return writesInstructions([path.resolve(asked)]);
+    const typed = askedPath(asked, workspace);
+    if (typed === undefined) return undefined;
+    // The folder of this conversation and every agent's home, as written and as they really are.
+    const homes = [workspace, ...listAgents().map((agent) => agent.home)].flatMap((home) => [path.resolve(home), realPath(home) ?? path.resolve(home)]);
+    return writesInstructions([typed, realPathAhead(typed)], homes);
   }
   const command = cmd(input).toLowerCase();
   return PRIVATE_FILES.some((name) => command.includes(name.toLowerCase())) ? "it reads what is private to the primary user" : undefined;
+}
+
+/**
+ * Why approving this action would not make it run for somebody who is not the
+ * primary user, or undefined when it would. What the guard refuses a rule or an
+ * approval cannot open (see unrunnable), so asking the primary user for it would
+ * have them say yes to something that cannot happen.
+ */
+export function approvalCannotHelp(toolName: string, action: string, workspace: string | undefined): string | undefined {
+  if (toolName === EDIT_IMAGE_TOOL) return undefined;
+  return unrunnable(toolName, toolName === "bash" ? { command: action } : { path: action }, workspace);
 }
 
 /** The opening of an envelope, as every one of them begins: a fresh id of eight bytes. */

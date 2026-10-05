@@ -3,6 +3,7 @@ import path from "node:path";
 import { agentHome } from "./agent-home.js";
 import { writeFileAtomic } from "./atomic-write.js";
 import { understoryOn } from "./features.js";
+import { WATCH_FILE } from "./pi/context-files.js";
 import { CHANGED, FileError, baseDir, writeText } from "./workspace-files.js";
 
 /**
@@ -23,7 +24,7 @@ export const AGENT_FILES = ["SOUL.md", "PrimaryUser.md", "MEMORY.md"] as const;
  * what its heartbeat keeps an eye on. WATCH.md is not context and is not made
  * by the wizard: an agent without one simply has nothing to watch.
  */
-const EDITABLE_FILES = [...AGENT_FILES, "WATCH.md"] as const;
+const EDITABLE_FILES = [...AGENT_FILES, WATCH_FILE] as const;
 
 /** A file of an agent's: the first agent's, unless another's home is given. */
 const filePath = (name: string, home = agentHome()) => path.join(home, name);

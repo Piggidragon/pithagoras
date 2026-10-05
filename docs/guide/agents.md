@@ -65,6 +65,8 @@ so hours of 22:00 to 07:00 typed in another zone would otherwise be kept in that
 What it looks at is its `WATCH.md`, the fourth file under **Files**: what to keep
 an eye on, and what counts as worth telling you. It is not context for its
 chats; only a look reads it. An agent with an empty one has nothing to watch.
+It is as good as an instruction to the agent, so a colleague's or guest's rule
+for writing files [cannot reach it](/people/roles#what-a-colleague-may-do).
 
 A look is held to reading. It runs as the role `heartbeat`, which may read
 files and leave notes, and nothing else: no commands, no edits, no messages,

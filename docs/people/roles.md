@@ -27,14 +27,25 @@ the agent's skills. A secret (`auth.json`, `.env`, `.ssh/`, a file called
 refused. Secrets are told by the name of the file, so a `tokenizer.ts` or a page
 about credentials is read like any other. The same goes for a rule you allowed:
 it opens the tool, not the files the guard keeps from them, so an allowed
-command that names a secret or one of those two files is refused, and so is a
-`write` or `edit` rule that reaches `SOUL.md`, `PrimaryUser.md` or `MEMORY.md`:
-they are loaded into your own conversations in that folder as the agent's words,
-and a colleague's text there would be an instruction to it. The same holds for
-what pi itself loads from a folder: an `AGENTS.md` or `CLAUDE.md` in any folder
-(pi reads the ones above the conversation's too), anything in a `.pi` or
-`.agents` folder (its system prompt, its extensions, which run in the portal, its
-skills and settings), and pi's own agent folder.
+command that names a secret or one of those two files is refused. So is a
+`write` or `edit` rule that reaches what is loaded into your own conversations,
+or what your agent's heartbeat is told, as the agent's own words, where a
+colleague's text would be an instruction to it:
+
+- `SOUL.md`, `PrimaryUser.md` and `MEMORY.md` in an agent's home or any folder of
+  a project, **any agent's** and not only the one they are talking to, and
+  `WATCH.md`, which tells the heartbeat what to look at on every look. A file
+  with one of those names in a folder no conversation runs in, such as
+  `notes/memory.md` in an agent's home, is only a note.
+- What pi itself loads: an `AGENTS.md` or `CLAUDE.md` in any folder (pi reads the
+  ones above the conversation's too), anything in a `.pi` or `.agents` folder (its
+  system prompt, its extensions, which run in the portal, its skills and
+  settings), pi's own agent folder, and the folders that come with the portal: the
+  skills every conversation has and the extensions it installs.
+
+A link does not lead round this: a file is judged by where it really ends up, and
+by the name it has in the folder that is read from, for a file that is not there
+yet as for one that is.
 
 A `bash` rule is the exception to the folder: a command runs as the agent, and
 what a shell makes of `cat *` or of a path built while it runs cannot be
