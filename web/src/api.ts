@@ -673,7 +673,7 @@ export const api = {
    * `images`: image generation is on and has an address, which is when the Images page is in the sidebar.
    */
   featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean }; devices?: { enabled: boolean } }>("/api/features/flags"),
-  /** The Devices add-on's switch. */
+  /** The Devices add-on's switch; `refused` says why it cannot be switched on here. */
   devicesFeature: () => json<DevicesFeature>("/api/features/devices"),
   setDevicesFeature: (enabled: boolean) =>
     json<DevicesFeature & { reloaded: number; waiting: number }>("/api/features/devices", { method: "PUT", body: JSON.stringify({ enabled }) }),
@@ -1322,6 +1322,7 @@ export interface AuditEntry {
 /** The agent's browser, and who may drive it. */
 export interface DevicesFeature {
   enabled: boolean;
+  refused: string | null;
 }
 
 /** A folder the device's owner granted for Folders mode. */

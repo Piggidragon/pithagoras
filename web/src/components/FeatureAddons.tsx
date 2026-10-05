@@ -1048,7 +1048,7 @@ export function DevicesAddon({ onError }: { onError: (e: string) => void }) {
     setNote(null);
     try {
       const { waiting, ...saved } = await api.setDevicesFeature(enabled);
-      setDevices({ enabled: saved.enabled });
+      setDevices({ enabled: saved.enabled, refused: saved.refused });
       setNote(() => () => reloadNote(waiting));
       // The sidebar has the Devices page while the add-on is on.
       window.dispatchEvent(new Event("features-changed"));
@@ -1071,7 +1071,8 @@ export function DevicesAddon({ onError }: { onError: (e: string) => void }) {
         detail={devices.enabled ? t("On: devices can pair and connect.") : t("Off: no device can pair or connect, and paired ones wait until it is on again.")}
         on={devices.enabled}
         onChange={(enabled) => void change(enabled)}
-        disabled={busy}
+        disabled={busy || (!devices.enabled && devices.refused !== null)}
+        note={!devices.enabled && devices.refused !== null ? t("The portal runs without a password, and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.") : undefined}
       />
       {devices.enabled && (
         <Link to="/devices" className="inline-block text-xs text-accent hover:underline">
