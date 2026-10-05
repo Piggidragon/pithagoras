@@ -173,7 +173,6 @@ export function routineTools(sessionId?: string) {
         const back = reportBackTo(sessionId);
         const { id, slug } = insertRoutine({
           name: p.name,
-          slug: p.name,
           timing: t,
           instructions: p.instructions ?? "",
           freshSession: Boolean(p.freshSession),

@@ -56,8 +56,8 @@ export function timingSets(
 
 export interface NewRoutine {
   name: string;
-  /** What the slug is made from: the name, or one that reconnects a routine to its old sessions. */
-  slug: string;
+  /** A slug that reconnects the routine to the sessions that slug had; without one it is made from the name. */
+  slug?: string;
   timing: Timing;
   instructions: string;
   freshSession: boolean;
@@ -67,17 +67,24 @@ export interface NewRoutine {
   workspace: string | null;
 }
 
-/** Slugs own the sessions, so two routines must never share one. */
-export const freeRoutineSlug = (desired: string): string =>
-  freeSlug(
-    desired,
-    (getDb().prepare("SELECT slug FROM routines").all() as { slug: string }[]).map((r) => r.slug),
-    "routine",
-  );
+/**
+ * Slugs own the sessions, so two routines must never share one. Nor may a new
+ * routine take the name of one that was deleted, which would continue that
+ * one's conversation, with its instructions and what it read: it gets a slug
+ * of its own, unless it is asked for by `explicit`, the way back to the old runs.
+ */
+export const freeRoutineSlug = (desired: string, explicit = false): string => {
+  const taken = (getDb().prepare("SELECT slug FROM routines").all() as { slug: string }[]).map((r) => r.slug);
+  if (!explicit) {
+    const runs = getDb().prepare("SELECT DISTINCT routine_slug FROM sessions WHERE kind = 'routine' AND routine_slug IS NOT NULL").all() as { routine_slug: string }[];
+    taken.push(...runs.map((r) => r.routine_slug));
+  }
+  return freeSlug(desired, taken, "routine");
+};
 
 export function insertRoutine(r: NewRoutine): { id: string; slug: string } {
   const id = nanoid(10);
-  const slug = freeRoutineSlug(r.slug);
+  const slug = freeRoutineSlug(r.slug ?? r.name, r.slug !== undefined);
   getDb()
     .prepare(
       `INSERT INTO routines

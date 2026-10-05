@@ -116,7 +116,8 @@ with it. It asks what to do with its folder, and with it, its routines:
   deleted.
 - **Delete its folder too**: the folder and everything in it are removed, and its
   routines with it, so that an agent you make later under the same name starts clean.
-  What its routines did stays in their chats.
+  What its routines did stays in their chats, and a routine you make later under the
+  same name does not continue them: it starts a conversation of its own.
 
 The first agent cannot be deleted, only renamed. An agent a channel talks as
 cannot be deleted until the channel is given another.

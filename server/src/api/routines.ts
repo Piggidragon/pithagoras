@@ -190,7 +190,7 @@ export function routinesRouter(): Router {
 
     const { id } = insertRoutine({
       name,
-      slug: typeof req.body?.slug === "string" && req.body.slug ? req.body.slug : name,
+      slug: typeof req.body?.slug === "string" && req.body.slug ? req.body.slug : undefined,
       timing,
       instructions: typeof instructions === "string" ? instructions : "",
       freshSession: Boolean(freshSession),

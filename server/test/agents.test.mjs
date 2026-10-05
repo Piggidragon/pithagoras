@@ -169,3 +169,51 @@ test("a deleted agent's routines are switched off with its folder kept, and gone
   assert.equal((await call("POST", "/api/agents", { name: "Scout" })).body.id, made.id);
   assert.deepEqual(await routines(), [], "the agent made again starts without it");
 });
+
+test("a routine made under the name of a deleted one starts a conversation of its own, and an explicit slug takes the old one up again", async () => {
+  const made = (await call("POST", "/api/agents", { name: "Slug Bot" })).body;
+  const first = (await call("POST", "/api/routines", { name: "slug daily", schedule: "@daily", instructions: "Old agent's plan.", workspace: made.home })).body;
+  assert.equal(first.slug, "slug-daily");
+  // A run of it, as one that ran leaves it behind.
+  const db = new Database(path.join(home, "portal.db"));
+  db.prepare("INSERT INTO sessions (id, title, workspace, executor, kind, routine_slug) VALUES ('slug-run', 'A run', ?, 'host', 'routine', ?)").run(made.home, first.slug);
+  db.close();
+  const runsOf = async (id) => (await call("GET", `/api/routines/${id}/sessions`)).body.sessions.map((s) => s.id);
+  assert.deepEqual(await runsOf(first.id), ["slug-run"]);
+
+  // Its agent deleted with its folder, and made again: its routine of that name is a new one.
+  assert.deepEqual((await call("DELETE", `/api/agents/${made.id}?folder=delete`)).body.routinesDeleted, ["slug daily"]);
+  assert.equal((await call("POST", "/api/agents", { name: "Slug Bot" })).body.home, made.home);
+  const again = (await call("POST", "/api/routines", { name: "slug daily", schedule: "@daily", instructions: "New agent's plan.", workspace: made.home })).body;
+  assert.notEqual(again.slug, first.slug, "not the slug whose runs are still there");
+  assert.deepEqual(await runsOf(again.id), [], "it does not list the deleted routine's runs, and its first run is not made in one of them");
+
+  // The same for one deleted by itself, once it has a run.
+  const more = new Database(path.join(home, "portal.db"));
+  more.prepare("INSERT INTO sessions (id, title, workspace, executor, kind, routine_slug) VALUES ('slug-run-2', 'A run', ?, 'host', 'routine', ?)").run(made.home, again.slug);
+  more.close();
+  assert.equal((await call("DELETE", `/api/routines/${again.id}`)).status, 200);
+  const third = (await call("POST", "/api/routines", { name: "slug daily", schedule: "@daily", workspace: made.home })).body;
+  assert.ok(![first.slug, again.slug].includes(third.slug));
+
+  // A slug asked for is the way back to what that slug had.
+  assert.equal((await call("DELETE", `/api/routines/${third.id}`)).status, 200);
+  const back = (await call("POST", "/api/routines", { name: "slug daily", slug: first.slug, schedule: "@daily", workspace: made.home })).body;
+  assert.equal(back.slug, first.slug);
+  assert.deepEqual(await runsOf(back.id), ["slug-run"]);
+});
+
+test("a folder in an agent's home is not said to be the home of a deleted agent", async () => {
+  const made = (await call("POST", "/api/agents", { name: "Path Bot" })).body;
+  mkdirSync(path.join(made.home, "reports"));
+  const place = async (workspace) => (await call("POST", "/api/sessions", { workspace })).body;
+  assert.equal((await place(made.home)).workspace, made.home);
+  assert.match((await place(path.join(made.home, "reports"))).error, /only an agent's home itself/, "a folder of an agent that is there");
+  assert.match((await call("POST", "/api/routines", { name: "p", schedule: "@daily", workspace: path.join(made.home, "reports") })).body.error, /only an agent's home itself/);
+  // Only a folder directly in the agents' folder was ever a home.
+  const agents = path.dirname(made.home);
+  assert.match((await place(path.join(agents, "nobody"))).error, /agent whose home this was has been deleted/);
+  assert.match((await place(path.join(agents, "nobody", "reports"))).error, /inside the workspace root/);
+  assert.match((await place(agents)).error, /inside the workspace root/);
+  assert.match((await place("/etc")).error, /inside the workspace root/);
+});
