@@ -452,6 +452,31 @@ function schema(db: Database.Database): void {
       read_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_activity_agent ON activity(agent_id, at DESC);
+
+    -- The computers paired with the portal (the Devices add-on, see sync/hub.ts).
+    -- The connector token is kept as its sha256 only: it is 256 random bits, so
+    -- the hash cannot be turned back, and a copy of the database does not let
+    -- anybody connect as the device. The name is what the agent passes as
+    -- "device", unique and renamable.
+    CREATE TABLE IF NOT EXISTS devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      os TEXT NOT NULL,
+      arch TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen TEXT
+    );
+
+    -- Which chats may use which device, and in which folder there. A chat
+    -- starts with none; the grant goes with the chat and with the device.
+    CREATE TABLE IF NOT EXISTS session_devices (
+      session_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      cwd TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (session_id, device_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_devices_device ON session_devices(device_id);
   `);
   migrate(db);
   if ((db.pragma("user_version", { simple: true }) as number) < SCHEMA_VERSION) db.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -816,6 +841,7 @@ function removeSession(id: string): void {
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   setSessionSubagentModel(id, null);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
+  d.prepare("DELETE FROM session_devices WHERE session_id = ?").run(id);
   // The pictures stay in the chat's folder, which is not the chat's to take away, and so they stay in the gallery, as pictures of that folder with what they were asked for.
   // Nothing else may name the folder once the chat is gone, so it is kept with them (see image-gallery.ts).
   let real: string | undefined;

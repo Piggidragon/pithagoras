@@ -17,7 +17,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 3, fingerprint: "adcce7e7608d0fb960e55b42357b368bc7ba514d9b9ee4912963e1333375c9e5" };
+const PINNED = { version: 4, fingerprint: "1f76ac5cce9909b4c5bdaace9fb5b027d7a8161086ec8851addfcb0d41df11e2" };
 
 const home = inProcessHome("pithagoras-schema-");
 
@@ -132,7 +132,7 @@ test("a database at the schema before this one is checked and backed up, brought
   const run = startUpgrade(dir, await freePort());
   const exited = await new Promise((resolve) => run.child.on("exit", resolve));
   assert.equal(exited, 0, run.output());
-  assert.match(run.output(), /upgrading the database from version 2 to 3/);
+  assert.match(run.output(), new RegExp(`upgrading the database from version 2 to ${SCHEMA_VERSION}`));
   assert.match(run.output(), /database upgraded; the copy from before is /);
 
   // The copy from before is the database as it was.
@@ -164,4 +164,34 @@ test("a database at the schema before this one is checked and backed up, brought
   assert.deepEqual(result, { title: "A chat from the 2026-10-02 build", messages: ["Write the summary", "Shorter, please"], canvas: [["The whole summary.", false]], voices: ["Calm"] });
   assert.ok(!readdirSync(dir).some((f) => f.endsWith(".partial")));
   assert.equal(existsSync(path.join(dir, "backups")), true);
+});
+
+// Version 4 added the paired devices and which chat may use which (the Devices add-on). A database of version 3 is the
+// fresh one of this version without them; it is upgraded like any other, and has them after.
+test("a database of version 3 gets the device tables, after its backup", async () => {
+  const dir = path.join(home, "from-v3");
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "portal.db");
+  await getDb().backup(file);
+  const before = new Database(file);
+  before.exec("DROP INDEX idx_session_devices_device; DROP TABLE session_devices; DROP TABLE devices;");
+  before.pragma("user_version = 3");
+  before.pragma("journal_mode = DELETE");
+  before.prepare("INSERT INTO sessions (id, title, workspace) VALUES ('chat1', 'Before devices', '/data/ws/chat1')").run();
+  before.close();
+  assert.deepEqual(upgradeCheck(file), { needed: true, from: 3 });
+
+  const run = startUpgrade(dir, await freePort());
+  const exited = await new Promise((resolve) => run.child.on("exit", resolve));
+  assert.equal(exited, 0, run.output());
+  assert.match(run.output(), new RegExp(`upgrading the database from version 3 to ${SCHEMA_VERSION}`));
+  const backups = backupsIn(path.join(dir, "backups"));
+  assert.equal(backups.length, 1);
+  assert.match(path.basename(backups[0]), /^portal-v3-\d{8}-\d{6}\.db$/);
+
+  const d = new Database(file, { readonly: true });
+  assert.equal(d.pragma("user_version", { simple: true }), SCHEMA_VERSION);
+  assert.equal(schemaFingerprint(d), PINNED.fingerprint);
+  assert.equal(d.prepare("SELECT title FROM sessions WHERE id = 'chat1'").get().title, "Before devices");
+  d.close();
 });

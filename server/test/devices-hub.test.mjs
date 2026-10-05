@@ -1,0 +1,385 @@
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import http from "node:http";
+import express from "express";
+import WebSocket from "ws";
+import { inProcessHome } from "./server-harness.mjs";
+
+// The portal's end of Pithagoras Sync against a device that speaks the client's protocol
+// (docs/protocol.md of pithagoras-sync): pairing, who may connect, and the calls on a connection.
+inProcessHome("pithagoras-devices-");
+process.env.PORTAL_PASSWORD = "a-long-enough-password";
+
+const { pairRouter } = await import("../dist/sync/pair.js");
+const { attachSyncUpgrade, linkOf, dropDevice, hub } = await import("../dist/sync/hub.js");
+const store = await import("../dist/sync/store.js");
+const { getDb, listAudit } = await import("../dist/db.js");
+const { encodeFrame, decodeFrame, FRAME, CLOSE } = await import("../dist/sync/protocol.js");
+
+let server;
+let base;
+before(async () => {
+  const app = express();
+  app.use(pairRouter());
+  server = http.createServer(app);
+  attachSyncUpgrade(server);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  base = `127.0.0.1:${server.address().port}`;
+  store.setDevicesEnabled(true);
+});
+after(() => {
+  for (const d of store.listDevices()) dropDevice(d.id);
+  server.closeAllConnections();
+  server.close();
+});
+
+const pair = (body, headers = {}) =>
+  fetch(`http://${base}/sync/v1/pair`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: await r.json() }));
+
+async function paired(name = "laptop") {
+  const { code } = store.newPairingCode();
+  const r = await pair({ code, name, os: "linux", arch: "x86_64" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.body;
+}
+
+/**
+ * A device as the client is one: the token in the Authorization header, no Origin, `hello` first, and
+ * answers to what the portal asks. `answers` say what each method returns; the rest is recorded.
+ */
+class Device {
+  constructor(ws, token, answers) {
+    this.ws = ws;
+    this.answers = answers;
+    this.got = [];
+    this.binary = [];
+    ws.on("message", (data, isBinary) => {
+      if (isBinary) return this.binary.push(decodeFrame(data));
+      const m = JSON.parse(String(data));
+      // The portal sends nothing but the four fields of JSON-RPC 2.0 (the device refuses any other).
+      assert.deepEqual(Object.keys(m).filter((k) => !["jsonrpc", "id", "method", "params"].includes(k)), []);
+      assert.equal(m.jsonrpc, "2.0");
+      this.got.push(m);
+      const answer = this.answers[m.method];
+      if (m.id === undefined || answer === undefined) return;
+      const out = typeof answer === "function" ? answer(m.params, m.id, this) : answer;
+      if (out === undefined) return;
+      this.send(out.error ? { jsonrpc: "2.0", id: m.id, error: out.error } : { jsonrpc: "2.0", id: m.id, result: out });
+    });
+  }
+  send(m) { this.ws.send(JSON.stringify(m)); }
+  notify(method, params) { this.send({ jsonrpc: "2.0", method, params }); }
+  asked(method) { return this.got.filter((m) => m.method === method); }
+  async waitFor(method, n = 1) {
+    for (let i = 0; i < 200 && this.asked(method).length < n; i++) await new Promise((r) => setTimeout(r, 10));
+    return this.asked(method);
+  }
+}
+
+const INFO = { name: "laptop", os: "linux", arch: "x86_64", os_release: null, hostname: "laptop", user: "alice", uid: 4242, home: "/home/alice", shell: "bash", session: "headless", mode: "ask", mode_expires_ms: null, folders: [{ path: "/home/alice/src", access: "rw", execute: true }], folders_shell: "landlock", tools: ["read", "write", "edit", "bash", "grep", "find", "ls"], mcp_tools: [], client_version: "0.1.0" };
+const BASE_ANSWERS = { "device.info": INFO, "device.probe": { found: false, sha256: null, user: "alice", uid: 4242 }, "approval.list": { approvals: [] } };
+
+/** Opens the socket as the client does; the status of a refused upgrade, or the device once it said hello. */
+function connect(token, { origin, hello = {}, answers = {}, sayHello = true } = {}) {
+  return new Promise((resolve) => {
+    const headers = { "User-Agent": "pithagoras-sync/0.1.0", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+    const ws = new WebSocket(`ws://${base}/sync/v1/connect`, { headers, ...(origin ? { origin } : {}), perMessageDeflate: false });
+    ws.on("unexpected-response", (_req, res) => resolve({ status: res.statusCode }));
+    ws.on("error", () => {});
+    ws.on("open", () => {
+      const device = new Device(ws, token, { ...BASE_ANSWERS, ...answers });
+      device.closed = new Promise((r) => ws.on("close", (code, reason) => r({ code, reason: String(reason) })));
+      const id = token.split(".")[0];
+      if (sayHello) device.notify("hello", { proto: 1, device_id: id, client_version: "0.1.0", os: "linux", user: "alice", shell: "bash", capabilities: ["fs", "grep", "find", "exec", "probe", "approvals"], ...hello });
+      resolve({ status: 101, device });
+    });
+  });
+}
+
+const until = async (check, what) => {
+  for (let i = 0; i < 300; i++) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.fail(`waited in vain for ${what}`);
+};
+
+test("a code pairs once, a wrong one counts against it, and the token is kept only as its hash", async () => {
+  assert.equal((await pair({ code: "ABCDEFGH", name: "laptop", os: "linux", arch: "x86_64" })).status, 403, "no code open");
+  const { code } = store.newPairingCode();
+  // A browser cannot spend it, and a bad request does not either.
+  assert.equal((await pair({ code, name: "laptop", os: "linux", arch: "x86_64" }, { origin: "https://elsewhere.example" })).status, 403);
+  assert.equal((await pair({ code, name: "Server", os: "linux", arch: "x86_64" })).status, 400);
+  assert.equal((await pair({ code, name: "portal", os: "linux", arch: "x86_64" })).status, 400);
+  const r = await pair({ code: code.toLowerCase(), name: "box", os: "linux", arch: "x86_64" });
+  assert.equal(r.status, 200);
+  assert.match(r.body.connector_token, /^d[0-9a-f]{16}\.[A-Za-z0-9_-]{43}$/);
+  assert.equal(r.body.device_id, r.body.connector_token.split(".")[0]);
+  assert.equal(r.body.overlay_token, undefined);
+  assert.equal((await pair({ code, name: "box", os: "linux", arch: "x86_64" })).status, 403, "used up");
+  const row = getDb().prepare("SELECT * FROM devices WHERE id = ?").get(r.body.device_id);
+  assert.equal(row.token_hash, createHash("sha256").update(r.body.connector_token).digest("hex"));
+  assert.ok(!JSON.stringify(getDb().prepare("SELECT * FROM devices").all()).includes(r.body.connector_token.split(".")[1]));
+
+  // The same name again gets a number.
+  const again = await paired("box");
+  assert.equal(again.name, "box-2");
+
+  // Ten wrong ones cancel the open code, from wherever they come.
+  const open = store.newPairingCode().code;
+  for (let i = 0; i < 10; i++) assert.equal((await pair({ code: "WRONG000", name: "x", os: "linux", arch: "x86_64" })).status, 403);
+  assert.equal((await pair({ code: open, name: "x", os: "linux", arch: "x86_64" })).status, 403, "cancelled");
+});
+
+test("an expired code is refused", () => {
+  const { code, expires } = store.newPairingCode(1_000);
+  assert.equal(store.takePairingCode(code, expires + 1), false);
+});
+
+test("only the device's own token opens the socket, never from a browser, and once at a time", async () => {
+  const { connector_token: token, device_id: id } = await paired("desk");
+  assert.equal((await connect(undefined)).status, 401);
+  assert.equal((await connect(`${id}.${"A".repeat(43)}`)).status, 401);
+  assert.equal((await connect("nodot".repeat(5))).status, 401);
+  assert.equal((await connect(token, { origin: `http://${base}` })).status, 403, "a browser, even from the portal's own page");
+  const first = await connect(token);
+  assert.equal(first.status, 101);
+  await until(() => linkOf(id)?.info, "device.info");
+  assert.equal(linkOf(id).info.mode, "ask");
+  assert.equal(linkOf(id).sameMachine, false);
+  // The probe names a file directly in a temp folder, and nothing else.
+  for (const m of first.device.asked("device.probe")) assert.match(m.params.path, /^\/.+\/pithagoras-probe-[0-9a-f]{32}$/);
+  assert.equal((await connect(token)).status, 409);
+  const { alertOf } = await import("../dist/sync/hub.js");
+  assert.match(alertOf(id).message, /second connection/);
+  first.device.ws.close(1001);
+  await until(() => !linkOf(id), "the link to go");
+  const second = await connect(token);
+  assert.equal(second.status, 101);
+  second.device.ws.close(1001);
+  await until(() => !linkOf(id), "the link to go");
+});
+
+test("a device that reads the portal's probe file as the portal's user is the portal's own machine; the file is gone after", async () => {
+  const me = userInfo();
+  const probed = [];
+  // Reads the file the portal names, as the client does, and says who it runs as.
+  const reading = (who) => ({
+    "device.probe": ({ path: file }) => {
+      probed.push(file);
+      if (!existsSync(file)) return { found: false, sha256: null, ...who };
+      return { found: true, sha256: createHash("sha256").update(readFileSync(file)).digest("hex"), ...who };
+    },
+  });
+  const same = await paired("same");
+  const a = await connect(same.connector_token, { answers: reading({ user: me.username, uid: me.uid }) });
+  await until(() => linkOf(same.device_id)?.sameMachine !== undefined, "the probe");
+  assert.equal(linkOf(same.device_id).sameMachine, true);
+  a.device.ws.close(1001);
+
+  // The same file, but another user: a container or another account, which the portal's own tools do not reach.
+  const other = await paired("other");
+  const b = await connect(other.connector_token, { answers: reading({ user: "someone", uid: me.uid + 1 }) });
+  await until(() => linkOf(other.device_id)?.sameMachine !== undefined, "the probe");
+  assert.equal(linkOf(other.device_id).sameMachine, false);
+  b.device.ws.close(1001);
+  assert.ok(probed.length >= 2);
+  for (const file of probed) assert.equal(existsSync(file), false, `${file} left behind`);
+});
+
+test("a hello for another protocol or another device ends the connection", async () => {
+  const { connector_token: token, device_id: id } = await paired("hello");
+  const newer = await connect(token, { hello: { proto: 2 } });
+  assert.equal((await newer.device.closed).code, CLOSE.unsupported);
+  const other = await connect(token, { hello: { device_id: "dsomebodyelse0000" } });
+  assert.equal((await other.device.closed).code, CLOSE.violation);
+  assert.equal(linkOf(id), undefined);
+});
+
+test("calls are matched by id, whatever order the answers come in", async () => {
+  const { connector_token: token, device_id: id } = await paired("order");
+  const held = [];
+  const { device } = await connect(token, { answers: { "fs.stat": (params, rid) => { held.push({ rid, path: params.path }); } } });
+  await until(() => linkOf(id)?.info, "device.info");
+  const ctx = { chat: "c1", tainted: false, tool: "read" };
+  const a = linkOf(id).call("fs.stat", { path: "/a", ctx });
+  const b = linkOf(id).call("fs.stat", { path: "/b", ctx });
+  await until(() => held.length === 2, "two calls");
+  device.send({ jsonrpc: "2.0", id: held[1].rid, result: { kind: "dir", size: 0, mtime_ms: 0, mode: 493 } });
+  device.send({ jsonrpc: "2.0", id: held[0].rid, error: { code: -32002, message: "no such file" } });
+  assert.deepEqual(await b, { kind: "dir", size: 0, mtime_ms: 0, mode: 493 });
+  await assert.rejects(a, (e) => e.code === -32002 && /no such file/.test(e.message));
+  device.ws.close(1001);
+});
+
+test("a read is put together from its frames and checked against what the device says it sent", async () => {
+  const { connector_token: token, device_id: id } = await paired("reader");
+  const content = Buffer.alloc(150_000, 7);
+  const sha = createHash("sha256").update(content).digest("hex");
+  let lie = false;
+  const { device } = await connect(token, {
+    answers: {
+      "fs.read": (params, rid, d) => {
+        for (let seq = 0, at = 0; at < content.length; seq++, at += 65536) d.ws.send(encodeFrame(FRAME.fileData, params.stream, seq, content.subarray(at, at + 65536)));
+        return { size: content.length, sha256: lie ? "0".repeat(64) : sha, chunks: 3 };
+      },
+    },
+  });
+  await until(() => linkOf(id)?.info, "device.info");
+  const got = await linkOf(id).readFile("/home/alice/src/big.bin", { chat: "c1", tainted: false, tool: "read" });
+  assert.equal(got.sha256, sha);
+  assert.ok(got.data.equals(content));
+  assert.deepEqual(device.asked("fs.read")[0].params.ctx, { chat: "c1", tainted: false, tool: "read" });
+  lie = true;
+  await assert.rejects(linkOf(id).readFile("/home/alice/src/big.bin", { chat: "c1", tainted: false }), /incomplete/);
+  device.ws.close(1001);
+});
+
+test("a write sends its content after the request, in frames of at most 64 KiB", async () => {
+  const { connector_token: token, device_id: id } = await paired("writer");
+  const { device } = await connect(token, {
+    answers: {
+      "fs.write": (params, rid, d) => {
+        // Answered once the whole upload is in, as the device does.
+        const wait = () => {
+          const frames = d.binary.filter((f) => f.stream === params.stream);
+          const size = frames.reduce((n, f) => n + f.payload.length, 0);
+          if (size < params.size) return setTimeout(wait, 5);
+          const all = Buffer.concat(frames.map((f) => f.payload));
+          d.send({ jsonrpc: "2.0", id: rid, result: { size, sha256: createHash("sha256").update(all).digest("hex") } });
+        };
+        wait();
+      },
+    },
+  });
+  await until(() => linkOf(id)?.info, "device.info");
+  const data = Buffer.alloc(200_000, 3);
+  const r = await linkOf(id).writeFile("/home/alice/src/out.bin", data, { ifMatch: "a".repeat(64), createDirs: true }, { chat: "c1", tainted: true, tool: "write" });
+  assert.equal(r.size, data.length);
+  const frames = device.binary.filter((f) => f.kind === FRAME.fileUpload);
+  assert.deepEqual(frames.map((f) => f.seq), [0, 1, 2, 3]);
+  assert.ok(frames.every((f) => f.payload.length <= 65536));
+  const sent = device.asked("fs.write")[0].params;
+  assert.deepEqual({ ...sent, stream: 0 }, { path: "/home/alice/src/out.bin", stream: 0, size: 200_000, if_match: "a".repeat(64), create_dirs: true, ctx: { chat: "c1", tainted: true, tool: "write" } });
+  device.ws.close(1001);
+});
+
+test("a command's output streams as it comes, and its end says how it ended; it carries no environment", async () => {
+  const { connector_token: token, device_id: id } = await paired("runner");
+  const { device } = await connect(token, {
+    answers: {
+      "exec.start": (params, rid, d) => {
+        d.send({ jsonrpc: "2.0", id: rid, result: {} });
+        d.ws.send(encodeFrame(FRAME.execOutput, params.stream, 0, Buffer.from("one\n")));
+        setTimeout(() => {
+          d.ws.send(encodeFrame(FRAME.execOutput, params.stream, 1, Buffer.from("two\n")));
+          d.notify("exec.exit", { stream: params.stream, code: 3, signal: null, timed_out: false, truncated: false });
+        }, 30);
+      },
+    },
+  });
+  await until(() => linkOf(id)?.info, "device.info");
+  const seen = [];
+  const exit = await linkOf(id).exec({ command: "make", cwd: "/home/alice/src", ctx: { chat: "c1", tainted: false, tool: "bash" }, onData: (d) => seen.push(String(d)) });
+  assert.deepEqual(seen, ["one\n", "two\n"]);
+  assert.equal(exit.code, 3);
+  const params = device.asked("exec.start")[0].params;
+  assert.deepEqual(Object.keys(params).sort(), ["command", "ctx", "cwd", "stream"]);
+  device.ws.close(1001);
+});
+
+test("a dropped connection fails what waits on it at once", async () => {
+  const { connector_token: token, device_id: id } = await paired("dropper");
+  const { device } = await connect(token, { answers: { "fs.stat": () => undefined } });
+  await until(() => linkOf(id)?.info, "device.info");
+  const waiting = linkOf(id).call("fs.stat", { path: "/x", ctx: { chat: "c", tainted: false } });
+  await device.waitFor("fs.stat");
+  const started = Date.now();
+  device.ws.terminate();
+  await assert.rejects(waiting, /disconnected/);
+  assert.ok(Date.now() - started < 2000);
+});
+
+test("an approval reaches the call that waits for it; a call given up on denies its approval and kills a late command", async () => {
+  const { connector_token: token, device_id: id } = await paired("asker");
+  let started;
+  const { device } = await connect(token, {
+    answers: {
+      "exec.start": (params, rid, d) => {
+        started = { rid, stream: params.stream };
+        d.notify("approval.requested", { id: 12, call: rid, chat: "c1", tool: "exec", target: "rm -rf build", reasons: ["Ask mode: every call asks"], preview: null, choices: ["once", "chat", "time", "deny"], max_minutes: 480, created_ms: 1, expires_ms: 2 });
+      },
+      "approval.answer": {},
+      "exec.signal": {},
+    },
+  });
+  await until(() => linkOf(id)?.info, "device.info");
+  const asked = [];
+  const listed = [];
+  hub.on("approval", (deviceId, a) => deviceId === id && listed.push(a.id));
+  const stop = new AbortController();
+  const run = linkOf(id).exec({ command: "rm -rf build", cwd: "/w", ctx: { chat: "c1", tainted: false, tool: "bash" }, onData: () => {}, onApproval: (a) => asked.push(a.id), signal: stop.signal });
+  await until(() => asked.length === 1, "the approval");
+  assert.deepEqual(listed, [12]);
+  assert.deepEqual([...linkOf(id).approvals.keys()], [12]);
+  stop.abort();
+  await assert.rejects(run, /stopped/);
+  const answers = await device.waitFor("approval.answer");
+  assert.deepEqual(answers[0].params, { id: 12, answer: "deny" });
+  // The device started it all the same (the owner allowed it on the device): it is killed.
+  device.send({ jsonrpc: "2.0", id: started.rid, result: {} });
+  const signals = await device.waitFor("exec.signal");
+  assert.deepEqual(signals[0].params, { stream: started.stream, signal: "SIGKILL" });
+  device.notify("approval.resolved", { id: 12, chat: "c1", answer: "deny", minutes: null, by: "portal" });
+  await until(() => linkOf(id).approvals.size === 0, "the approval to close");
+  device.ws.close(1001);
+});
+
+test("a device's decisions go to the audit log with its name", async () => {
+  const { connector_token: token, device_id: id } = await paired("auditor");
+  const { device } = await connect(token);
+  await until(() => linkOf(id)?.info, "device.info");
+  device.notify("audit", { time_ms: 1, chat: "c9", tool: "write", target: "/home/alice/.ssh/config", decision: "denied", reason: "protected path" });
+  await until(() => listAudit(5).some((e) => e.kind === "device"), "the audit row");
+  const row = listAudit(5).find((e) => e.kind === "device");
+  assert.deepEqual({ tool: row.tool, subject: row.subject, reason: row.reason, session_id: row.session_id }, { tool: "write", subject: "/home/alice/.ssh/config", reason: "auditor: denied — protected path", session_id: "c9" });
+  device.ws.close(1001);
+});
+
+test("a message over 4 MiB ends the connection", async () => {
+  const { connector_token: token, device_id: id } = await paired("big");
+  const { device } = await connect(token);
+  await until(() => linkOf(id)?.info, "device.info");
+  device.ws.send(Buffer.alloc(4 * 1024 * 1024 + 10, 1), { binary: true });
+  assert.equal((await device.closed).code, 1009);
+  await until(() => !linkOf(id), "the link to go");
+});
+
+test("a removed device is cut off at once, and its token opens nothing after", async () => {
+  const { connector_token: token, device_id: id } = await paired("gone");
+  const { device } = await connect(token, { answers: { "fs.stat": () => undefined } });
+  await until(() => linkOf(id)?.info, "device.info");
+  const waiting = linkOf(id).call("fs.stat", { path: "/x", ctx: { chat: "c", tainted: false } });
+  store.removeDevice(id);
+  dropDevice(id);
+  await assert.rejects(waiting, /disconnected/);
+  assert.equal((await device.closed).code, CLOSE.revoked);
+  assert.equal((await connect(token)).status, 401);
+});
+
+test("with the add-on off nothing connects or pairs", async () => {
+  const { connector_token: token } = await paired("later");
+  store.setDevicesEnabled(false);
+  try {
+    assert.equal((await connect(token)).status, 503);
+    const { code } = store.newPairingCode();
+    assert.equal((await pair({ code, name: "x", os: "linux", arch: "x86_64" })).status, 404);
+  } finally {
+    store.setDevicesEnabled(true);
+  }
+});
