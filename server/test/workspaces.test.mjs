@@ -59,8 +59,8 @@ test("Home is the one place outside the root a chat may work in, and only itself
   const agentHome = agentHomePath();
   mkdirSync(agentHome, { recursive: true });
   assert.deepEqual(checkWorkspace(agentHome), { path: agentHome });
-  // Not what is inside it, or beside it.
-  assert.deepEqual(checkWorkspace(path.join(agentHome, "sub")), { error: refusal });
+  // Not what is inside it, which says why, or beside it.
+  assert.deepEqual(checkWorkspace(path.join(agentHome, "sub")), { error: "only an agent's home itself can be used, not a folder in it" });
   assert.deepEqual(checkWorkspace(path.dirname(agentHome)), { error: refusal });
 });
 
