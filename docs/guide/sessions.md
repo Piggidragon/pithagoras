@@ -424,14 +424,17 @@ conversation, not lost with the process. Send a message to carry on.
 
 A chat's pi is let go after twenty minutes without use: nothing running, no
 command or question waiting, no subagent working in the background, and nothing
-the agent left running in the chat's folder (a dev server, a build, a job an
-extension started; see [Subagents and background jobs](/guide/extensions#subagents-and-background-jobs)).
+this chat started that is still running in its folder (a dev server, a build, a
+job an extension started during one of its tool calls; see
+[Subagents and background jobs](/guide/extensions#subagents-and-background-jobs)).
 Every pi is a whole agent in memory (or a container), and a portal with many
 conversations would otherwise hold them all until it stopped. Nothing is lost —
 the next message starts pi again from the conversation's file, which takes a few
 seconds on a cold start. That is why a chat with a job running is not let go:
 an extension that started the job stops it when its pi goes, and the
-message it would have sent when the job ended would have nobody to receive it. A chat with `EXECUTOR=container` is not let go: pi in a container
+message it would have sent when the job ended would have nobody to receive it. Only the
+chat that started a job is kept for it. The other chats in the same folder, such as the
+conversations of one agent, are let go as usual. A chat with `EXECUTOR=container` is not let go: pi in a container
 does not pick the conversation up again when it is started anew, so the agent
 would have forgotten it, and the container stays until the chat is deleted. Picking a model or opening the command list also starts it. A
 routine that runs in a clean session each time lets its pi go as soon as the run

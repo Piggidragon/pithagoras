@@ -79,6 +79,18 @@ function bootTime(): number {
 const HZ = 100;
 
 /**
+ * When a job began, as `Date.now()` counts: how long after the portal itself did,
+ * both read off the kernel's start times. `startedAt` goes through the boot time
+ * /proc reports, which a container can give one of its own, and can be off by a
+ * second besides; against the portal's own start the two are on one clock.
+ */
+export function startedWhen(job: BackgroundJob): number {
+  const own = Number(statOf(process.pid)?.[19]) * (1000 / HZ);
+  if (!Number.isFinite(own)) return job.startedAt;
+  return Date.now() - process.uptime() * 1000 + (job.startedAt - bootTime()) - own;
+}
+
+/**
  * A workspace as /proc names a process's folder: its real path. As written, a
  * workspace reached through a link never matched, and nothing ever ran there.
  */

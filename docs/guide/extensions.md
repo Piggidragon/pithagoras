@@ -145,7 +145,9 @@ let go regardless.
 That includes the jobs an extension started for the agent, which it ends when it
 is told. So a chat whose agent left a job running in its folder
 ([Background jobs](#subagents-and-background-jobs), below) is not let go for
-being idle until the job is over. Deleting the chat or stopping the portal ends
+being idle until the job is over. That holds for the chat that started the job,
+which is the one whose tool call was running when it began; another chat in the
+same folder is let go as usual. Deleting the chat or stopping the portal ends
 such a job all the same.
 
 ## Switching tools off for one chat

@@ -23,7 +23,7 @@ import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
 import { forgetBrowserSession } from "./browser/tools.js";
-import { BACKGROUND_SUPPORTED, listJobs } from "./background.js";
+import { BACKGROUND_SUPPORTED, listJobs, startedWhen, type BackgroundJob } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
 import { forgetCanvases } from "./canvases.js";
 import { forTranscript } from "./stored-event.js";
@@ -271,6 +271,11 @@ const EPHEMERAL_EVENTS = new Set([
 
 /** How long a chat's pi may go unused before it is let go: see startReaper. */
 const IDLE_STOP_MS = 20 * 60_000;
+
+/** How far apart a job's start and its chat's tool call may be, and still be the call's: see startedBy. */
+const JOB_CLOCK_SLACK_MS = 500;
+/** How many tool calls a chat remembers the time of: a chat that has made more has forgotten its oldest. */
+const CALL_WINDOWS_KEPT = 5000;
 
 export type PreparedPrompt = { message: string; onAccepted?: () => void };
 type AskMessage = string | (() => PreparedPrompt);
@@ -832,6 +837,13 @@ class SessionManager extends EventEmitter {
    */
   private calls = new Map<string, Set<string>>();
 
+  /**
+   * When each chat's tool calls ran, in `Date.now()`'s time, for telling which of
+   * the jobs in a folder a chat started: see startedBy. The calls still going are
+   * `open`, by call id. Dropped with its pi.
+   */
+  private callWindows = new Map<string, { all: { from: number; to?: number }[]; open: Map<string, { from: number; to?: number }> }>();
+
   private noteCall(sessionId: string, msg: any): void {
     const sub = msg.type === "portal_subagent" && msg.op === "event" ? msg.event ?? {} : undefined;
     const event = sub ?? msg;
@@ -847,11 +859,50 @@ class SessionManager extends EventEmitter {
     if (event.type === "tool_execution_start") {
       if (!calls) this.calls.set(sessionId, (calls = new Set()));
       calls.add(id);
+      if (BACKGROUND_SUPPORTED) this.openWindow(sessionId, id);
     }
-    if (event.type === "tool_execution_end") calls?.delete(id);
+    if (event.type === "tool_execution_end") {
+      calls?.delete(id);
+      this.closeWindows(sessionId, (open) => open === id);
+    }
     // A subagent that ended took whatever it was running with it.
-    if (msg.type === "portal_subagent" && msg.op === "end") for (const c of [...(calls ?? [])]) if (c.startsWith(`${msg.id}:`)) calls!.delete(c);
+    if (msg.type === "portal_subagent" && msg.op === "end") {
+      for (const c of [...(calls ?? [])]) if (c.startsWith(`${msg.id}:`)) calls!.delete(c);
+      this.closeWindows(sessionId, (open) => open.startsWith(`${msg.id}:`));
+    }
     if (calls && !calls.size) this.calls.delete(sessionId);
+  }
+
+  private openWindow(sessionId: string, id: string): void {
+    let windows = this.callWindows.get(sessionId);
+    if (!windows) this.callWindows.set(sessionId, (windows = { all: [], open: new Map() }));
+    const window = { from: Date.now() };
+    windows.all.push(window);
+    windows.open.set(id, window);
+    // Dropped a few hundred at a time, not one by one.
+    if (windows.all.length > CALL_WINDOWS_KEPT + 500) windows.all.splice(0, 500);
+  }
+
+  private closeWindows(sessionId: string, ended: (id: string) => boolean): void {
+    const windows = this.callWindows.get(sessionId);
+    const now = Date.now();
+    for (const [id, window] of windows?.open ?? []) {
+      if (!ended(id)) continue;
+      window.to = now;
+      windows!.open.delete(id);
+    }
+  }
+
+  /**
+   * Whether this chat's own tool call was running when the job began, which is
+   * what a job of the chat looks like from here: whatever the agent or an
+   * extension started for a call. Another chat in the same folder shows the same
+   * jobs, and is not held up by them. A little either side, for the two clocks
+   * that are compared, and for an event that came a moment after its call began.
+   */
+  private startedBy(sessionId: string, job: BackgroundJob): boolean {
+    const at = startedWhen(job);
+    return (this.callWindows.get(sessionId)?.all ?? []).some((w) => at >= w.from - JOB_CLOCK_SLACK_MS && at <= (w.to ?? Infinity) + JOB_CLOCK_SLACK_MS);
   }
 
   /** The model a running chat is on now; undefined when it is not running here. */
@@ -1259,12 +1310,16 @@ class SessionManager extends EventEmitter {
     return stopped;
   }
 
-  /** Whether the agent left something running in this chat's folder, whatever started it: see background.ts. */
+  /**
+   * Whether something this chat started is still running in its folder, whatever
+   * ran it: see background.ts. Not the jobs of the other chats that work there:
+   * thirty conversations in an agent's home would be held by one dev server.
+   */
   private async jobsRunning(sessionId: string): Promise<boolean> {
     const workspace = getSession(sessionId)?.workspace;
     if (!BACKGROUND_SUPPORTED || !workspace) return false;
     const jobs = await listJobs(workspace).catch(() => []);
-    return jobs.some((job) => job.state !== "exited");
+    return jobs.some((job) => job.state !== "exited" && this.startedBy(sessionId, job));
   }
 
   /** Whether stopping this chat's pi would take something with it: a run, a command, a dialog, a subagent, an edit. */
@@ -2642,6 +2697,7 @@ class SessionManager extends EventEmitter {
     this.failuresSaid.delete(sessionId);
     this.inRun.delete(sessionId);
     this.calls.delete(sessionId);
+    this.callWindows.delete(sessionId);
     this.fresh.delete(sessionId);
     this.piQueue.delete(sessionId);
     this.dropWaiting(sessionId);

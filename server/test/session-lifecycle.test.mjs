@@ -501,31 +501,70 @@ test("a pi that is let go is told first, so that its extensions stop what they s
   assert.equal(taintSession(id), false, "the guard's hook, which holds the whole pi, is let go");
 });
 
+/** Starts a job as the agent's tool call does: marked as the portal's, in the folder, in a Unix session of its own. */
+const startJob = (folder) => spawn("sleep", ["60"], { cwd: folder, detached: true, stdio: "ignore", env: { ...process.env, PITHAGORAS_AGENT: "1" } });
+const endJob = (job) => {
+  try {
+    process.kill(-job.pid, "SIGKILL");
+  } catch {
+    // Gone already.
+  }
+};
+/** What `run` does while a tool call of this chat is going, as pi reports the call. */
+async function duringCall(pi, run, toolCallId = "call-1") {
+  pi.emit("event", { type: "tool_execution_start", toolCallId, toolName: "bash" });
+  try {
+    return await run();
+  } finally {
+    pi.emit("event", { type: "tool_execution_end", toolCallId, toolName: "bash" });
+  }
+}
+
 test("a chat whose agent left a job running in its folder is not let go, and is once the job is over", { skip: process.platform !== "linux" }, async () => {
   const folder = path.join(home, "jobs");
   mkdirSync(folder, { recursive: true });
   const id = chat({ workspace: folder });
   const pi = await sessions.client(id);
+  // A build, a dev server, or what pi-background-tasks runs for the agent, which kills it when pi is let go.
+  const job = await duringCall(pi, async () => startJob(folder));
   sessions.activity.set(id, Date.now() - 60 * 60_000);
-  // As what the agent starts runs: marked as the portal's, in the chat's folder, in a Unix session of its own. A build, a dev server, or what pi-background-tasks runs for the agent, which kills it when pi is let go.
-  const job = spawn("sleep", ["60"], { cwd: folder, detached: true, stdio: "ignore", env: { ...process.env, PITHAGORAS_AGENT: "1" } });
   try {
     await until(() => job.pid, "the job to start");
     assert.deepEqual(await sessions.reapIdle(), [], "its job would end with it, and the chat looks idle");
     assert.equal(pi.disposed, false);
     assert.equal(pi.calls.includes("shutdown"), false, "the extensions are not told either");
 
-    process.kill(-job.pid, "SIGKILL");
+    endJob(job);
     // The list of what runs is read once a second.
     await new Promise((resolve) => setTimeout(resolve, 1200));
     assert.deepEqual(await sessions.reapIdle(), [id], "and let go once the job is over");
     assert.equal(pi.disposed, true);
   } finally {
-    try {
-      process.kill(-job.pid, "SIGKILL");
-    } catch {
-      // Gone already.
-    }
+    endJob(job);
+  }
+});
+
+test("a job keeps the chat that started it, not the others that work in the same folder", { skip: process.platform !== "linux" }, async () => {
+  // As the conversations of one agent's home do: all in one folder, one of them with a dev server going.
+  const folder = path.join(home, "shared");
+  mkdirSync(folder, { recursive: true });
+  const [starter, bystander, earlier] = await Promise.all([1, 2, 3].map(async () => ({ id: chat({ workspace: folder }) })));
+  for (const c of [starter, bystander, earlier]) c.pi = await sessions.client(c.id);
+  // One that made a call, which was over long before the job began.
+  await duringCall(earlier.pi, async () => {}, "earlier-call");
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  const job = await duringCall(starter.pi, async () => startJob(folder));
+  for (const c of [starter, bystander, earlier]) sessions.activity.set(c.id, Date.now() - 60 * 60_000);
+  try {
+    assert.deepEqual((await sessions.reapIdle()).sort(), [bystander.id, earlier.id].sort(), "the chats that did not start it are let go");
+    assert.equal(starter.pi.disposed, false);
+    assert.equal(bystander.pi.disposed && earlier.pi.disposed, true);
+
+    endJob(job);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.deepEqual(await sessions.reapIdle(), [starter.id], "and it is let go too once the job is over");
+  } finally {
+    endJob(job);
   }
 });
 
