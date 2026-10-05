@@ -2,9 +2,9 @@ import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
-import { browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
+import { PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
-import { browserServers, mcpServerNames, serversAndBrowsers } from "./api/mcp.js";
+import { browserServers, dropMcpCache, mcpServerNames, readMcpFile, serversAndBrowsers } from "./api/mcp.js";
 import { mkdirSync, realpathSync } from "node:fs";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
@@ -2274,6 +2274,61 @@ export function forgetPackageTools(spec: string): void {
 }
 
 /**
+ * An MCP server was removed from the configuration: its tools are not
+ * remembered any more, and the adapter's cache of them goes too, or the tools
+ * would be listed under it for ever.
+ *
+ * `before` is the servers as they were, because a tool is told to a server by
+ * its name (`browser_staging_click` is not the tool of `browser`) and that
+ * needs the longer name to still be there; `after` is what is left. The
+ * portal's own browser tools and the adapter's own are the ones a server's
+ * name can claim without being its, and they stay. The defaults and exceptions
+ * somebody set for the tools are kept, as for any tool that is not loaded: a
+ * server that comes back gets them back.
+ */
+export function mcpServersRemoved(before: string[], after: string[]): void {
+  const removed = before.filter((name) => !after.includes(name));
+  // Remembered, so a chat that still has the server loaded cannot bring its tools back (see `rememberTools`).
+  // A server that is configured again is not one that was removed.
+  setRemovedMcpServers([...removedMcpServers(), ...removed].filter((name) => !after.includes(name)));
+  if (!removed.length) return;
+  const all = knownTools();
+  const kept = all.filter((t) => {
+    // A server's name is also the start of other tools' names: `web` and pi-web-access's `web_search`.
+    if (!adapterTool(t) || noServerOf(t.name)) return true;
+    const server = mcpServerOf(t.name, before);
+    return server === undefined || !removed.includes(server);
+  });
+  if (kept.length !== all.length) putSetting("tools_seen", JSON.stringify(kept));
+  dropMcpCache(removed);
+}
+
+/** The servers the portal has removed and that are not configured again, by name as they were configured. */
+function removedMcpServers(): string[] {
+  try {
+    const parsed = JSON.parse(getSetting("mcp_removed") ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function setRemovedMcpServers(names: string[]): void {
+  const unique = [...new Set(names)].sort();
+  if (JSON.stringify(unique) !== JSON.stringify(removedMcpServers())) putSetting("mcp_removed", JSON.stringify(unique));
+}
+
+const ADAPTER_LABEL = "pi-mcp-adapter";
+
+/** The tools that carry no server's name: the adapter's own and the portal's browser tools, which a server's name can start without them being its. */
+const noServerOf = (name: string): boolean => (PORTAL_BROWSER_TOOLS as readonly string[]).includes(name) || name === "mcp" || name === "mcpScript";
+
+/** Does the MCP adapter register this tool? By its package where it is recorded, by the label it is filed under where it is not. */
+function adapterTool(t: Pick<KnownTool, "source" | "package">): boolean {
+  return typeof t.package === "string" ? packageLabel(t.package) === ADAPTER_LABEL : t.source === ADAPTER_LABEL;
+}
+
+/**
  * What a package that has been uninstalled leaves behind: its tools, and what
  * was kept aside for switching it back on, which has nothing left to go to —
  * dropped in turn with the switches, which read and write it too.
@@ -2301,7 +2356,24 @@ export function rememberTools(reported: KnownTool[]): void {
   // would write its tools straight back; a package no longer listed is not
   // remembered. One switched off still is, for when it comes back.
   const listed = listedPackages();
-  const tools = reported.filter((t) => typeof t.package !== "string" || !listed || listed.has(packageKey(t.package)));
+  // Likewise a chat that is still running with an MCP server that the portal has
+  // since removed: its tools are the adapter's, and would be written straight back.
+  // Only the servers the portal removed count: the adapter also loads some from
+  // a project's own files, which are not in the portal's mcp.json and are no
+  // removed server's. The adapter's own tools and the portal's browser tools
+  // are no server's.
+  const configured = readMcpFile();
+  const gone = removedMcpServers().filter((name) => !Object.hasOwn(configured.config.mcpServers, name));
+  const noServer = (t: KnownTool) =>
+    gone.length > 0 &&
+    !configured.error &&
+    adapterTool(t) &&
+    !noServerOf(t.name) &&
+    // Told apart from the configured servers too: `notes` removed leaves `notes_staging_read` to the server that is still there.
+    gone.includes(mcpServerOf(t.name, [...Object.keys(configured.config.mcpServers), ...gone]) ?? "");
+  const tools = reported.filter(
+    (t) => (typeof t.package !== "string" || !listed || listed.has(packageKey(t.package))) && !noServer(t),
+  );
   if (!tools.length) return;
   const merged = new Map(knownTools().map((t) => [t.name, t]));
   const fresh = tools.map((t) => t.name).filter((name) => !merged.has(name));

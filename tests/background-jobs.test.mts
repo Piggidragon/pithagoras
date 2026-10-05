@@ -99,7 +99,8 @@ test('a tool call pi is running is not a job, whoever runs it and wherever its o
  const ws=realpathSync(scratch('bg-'));
  const opts={cwd:ws,detached:true,env:agentEnv()} as const;
  // This process stands for the portal. Its bash tool: a shell in a session of its own, its output back to it.
- const call=spawn('sh',['-c','sleep 30 > test.log 2>&1'],{...opts,stdio:['ignore','pipe','pipe']});
+ // bash, as pi runs it: a dash (sh on Debian and Ubuntu) applies the redirection to itself, so its own output is the file.
+ const call=spawn('bash',['-c','sleep 30 > test.log 2>&1'],{...opts,stdio:['ignore','pipe','pipe']});
  // A subagent's pi, in the portal's session, runs its own bash tool.
  const child=spawn(process.execPath,['-e',`require('child_process').spawn('sh',['-c','sleep 31'],{detached:true,stdio:['ignore','pipe','pipe']});setTimeout(()=>{},30000)`],{cwd:ws,env:agentEnv(),stdio:['ignore','pipe','pipe']});
  // An extension's server, read through a pipe: a job.
