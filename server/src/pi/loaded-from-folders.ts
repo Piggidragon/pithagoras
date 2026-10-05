@@ -83,6 +83,8 @@ export function loadedPlaces(): LoadedPlace[] {
   const home = os.homedir();
   const places: (LoadedPlace | undefined)[] = [
     { path: piAgentDir(), by: "pi", as: "instructions" },
+    // pi's user skills (`~/.agents/skills`) and the adapter's user-wide config (`~/.agents/mcp.json`), for every conversation.
+    { path: path.join(home, ".agents"), by: "pi", as: "instructions" },
     ...["skills", "extensions"].map((name) => ofBundled(name, "pi", "instructions")),
     ofBundled("channels", "portal", "code"),
     { path: channelsPath(), by: "portal", as: "code" },

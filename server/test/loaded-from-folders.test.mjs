@@ -15,6 +15,7 @@ const { guardExtension } = await import("../dist/pi/guard.js");
 const { LOADED_IN_FOLDERS, loadedAt, loadedPlaces } = await import("../dist/pi/loaded-from-folders.js");
 const { addToolRule, deleteToolRule } = await import("../dist/db.js");
 const { agentsRoot, createAgent, deleteAgent } = await import("../dist/agents.js");
+const { IN_PLACE } = await import("../dist/pi/loaded-links.js");
 
 mock.method(console, "warn", () => {});
 
@@ -175,6 +176,95 @@ test("a link inside a folder that is loaded whole leads to a place that is loade
       assert.equal(refused(guardAs(role, conversation), "write", path.join(project, "foo", "SKILL.md")), true, `${role}: a link inside ${place}`);
       assert.equal(allowed(guardAs(role, conversation), "write", path.join(project, "notes.md")), true, `${role}: beside it`);
     }
+  }
+});
+
+/** `count` empty folders in `dir`: what a package fetched from git, or a folder of runtime files, comes to. */
+const manyFolders = (dir, count) => {
+  for (let i = 0; i < count; i++) mkdirSync(path.join(dir, `d${i}`), { recursive: true });
+};
+
+test("a big package in one place does not hide a link beside it, in that place or in another", () => {
+  let n = 0;
+  const behind = () => path.join(folder, "starve", `${n++}`);
+  const made = [];
+  const agentDir = process.env.PI_CODING_AGENT_DIR;
+  try {
+    // An extension under development, linked into pi's agent folder, and a git package that pi fetched there, as a working tree. It sorts after.
+    const ext = behind();
+    mkdirSync(ext, { recursive: true });
+    mkdirSync(path.join(agentDir, "extensions"), { recursive: true });
+    symlinkSync(ext, path.join(agentDir, "extensions", "my-ext"));
+    manyFolders(path.join(agentDir, "git", "example.test", "big-repo"), IN_PLACE + 100);
+    made.push({ label: "a link in pi's agent folder, beside a big git package", written: path.join(ext, "index.ts"), beside: path.join(path.dirname(ext), "notes.md") });
+
+    // The same in a project, and in a later one: each `.pi` has an allowance of its own.
+    const a = path.join(root, "starve-a");
+    mkdirSync(path.join(a, "tools", "ext"), { recursive: true });
+    mkdirSync(path.join(a, ".pi", "extensions"), { recursive: true });
+    symlinkSync("../../tools/ext", path.join(a, ".pi", "extensions", "ext"));
+    manyFolders(path.join(a, ".pi", "git", "example.test", "big-repo"), IN_PLACE + 100);
+    made.push({ label: "a link in a project's .pi, beside a big git package", written: path.join(a, "tools", "ext", "x.ts"), beside: path.join(a, "tools", "notes.md") });
+    const b = path.join(root, "starve-b");
+    mkdirSync(path.join(b, ".claude", "skills"), { recursive: true });
+    mkdirSync(path.join(b, ".agents"), { recursive: true });
+    symlinkSync("../.claude/skills", path.join(b, ".agents", "skills"));
+    made.push({ label: "a link in the .agents of a later project", written: path.join(b, ".claude", "skills", "release", "SKILL.md"), beside: path.join(b, ".claude", "notes.md") });
+
+    for (const role of ["colleague", "guest"]) {
+      for (const { label, written, beside } of made) {
+        assert.equal(refused(guardAs(role, conversation), "write", written), true, `${role}: ${label}: ${written}`);
+        assert.equal(allowed(guardAs(role, conversation), "write", beside), true, `${role}: ${label}: beside it`);
+      }
+    }
+  } finally {
+    rmSync(path.join(agentDir, "git"), { recursive: true, force: true });
+    rmSync(path.join(agentDir, "extensions", "my-ext"), { force: true });
+    rmSync(path.join(root, "starve-a"), { recursive: true, force: true });
+    rmSync(path.join(root, "starve-b"), { recursive: true, force: true });
+  }
+});
+
+test("a link in ~/.agents, or ~/.agents as a link, is followed: pi and the adapter load it for every conversation", () => {
+  const was = process.env.HOME;
+  try {
+    for (const layout of ["skills", "mcp.json", "the folder itself"]) {
+      const home = scratch("loaded-home-");
+      process.env.HOME = home;
+      assert.ok(loadedPlaces().some((place) => place.path === path.join(home, ".agents") && place.by === "pi"), "the folder is a place");
+      const behind = path.join(folder, "agents-home", layout.replace(/\W/g, "-"));
+      mkdirSync(behind, { recursive: true });
+      let written;
+      if (layout === "the folder itself") {
+        symlinkSync(behind, path.join(home, ".agents"));
+        written = path.join(behind, "skills", "x", "SKILL.md");
+      } else {
+        mkdirSync(path.join(home, ".agents"));
+        symlinkSync(layout === "skills" ? behind : path.join(behind, "mcp.json"), path.join(home, ".agents", layout));
+        written = layout === "skills" ? path.join(behind, "release", "SKILL.md") : path.join(behind, "mcp.json");
+      }
+      for (const role of ["colleague", "guest"]) {
+        assert.equal(refused(guardAs(role, conversation), "write", written), true, `${role}: ${layout}: ${written}`);
+        assert.equal(allowed(guardAs(role, conversation), "write", path.join(path.dirname(behind), "notes.md")), true, `${role}: ${layout}: beside it`);
+      }
+    }
+  } finally {
+    process.env.HOME = was;
+  }
+});
+
+test("pi reads the instructions from every folder above the workspace root, so a link at a name there is followed", () => {
+  const above = path.dirname(root);
+  const behind = path.join(folder, "above", "ai.md");
+  mkdirSync(path.dirname(behind), { recursive: true });
+  symlinkSync(behind, path.join(above, "CLAUDE.md"));
+  try {
+    for (const role of ["colleague", "guest"]) {
+      assert.equal(refused(guardAs(role, conversation), "write", behind), true, `${role}: what a link above the root leads to`);
+      assert.equal(allowed(guardAs(role, conversation), "write", path.join(path.dirname(behind), "notes.md")), true, `${role}: beside it`);
+    }
+  } finally {
+    rmSync(path.join(above, "CLAUDE.md"), { force: true });
   }
 });
 

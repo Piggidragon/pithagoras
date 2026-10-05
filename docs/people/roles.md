@@ -50,34 +50,39 @@ folder of a project. A name in a folder no conversation runs in, such as
 `.agents` is held wherever it is, and so are `AGENTS.md`, `CLAUDE.md` and
 `opencode.json`, which are read from above the folder as well.
 
-Some places are held whole, whatever is in them: pi's own agent folder, the
-folders that come with the portal (the skills every conversation has, the
-extensions it installs, the built-in channels), the folder channel packages are
-installed in, which run in the portal, the files the MCP adapter reads in the
-home of the user the portal runs as, such as `~/.config/mcp/mcp.json`, and the
-`.mcp.json` of the folder the portal itself runs in, which it reads for every
-conversation.
+Some places are held whole, whatever is in them: pi's own agent folder, `~/.agents`
+in the home of the user the portal runs as (the user skills pi loads, and the MCP
+adapter's config there), the folders that come with the portal (the skills every
+conversation has, the extensions it installs, the built-in channels), the folder
+channel packages are installed in, which run in the portal, the other files the MCP
+adapter reads in that home, such as `~/.config/mcp/mcp.json`, and the `.mcp.json` of
+the folder the portal itself runs in, which it reads for every conversation.
 
-A link does not lead round this. What a write really lands on is compared with
+A link is followed, within bounds. What a write really lands on is compared with
 these places as they really are, in whatever case the folder spells them, so a
 file is judged by where it ends up, for a file that is not there yet as for one
 that is. A link at one of these names is followed to what it leads to, in an
-agent's home, in the folder of the conversation, and in the folders of the
-projects, the first few thousand of them, nearest the top. So is a link *inside*
+agent's home, in the folder of the conversation, in every folder above those
+(pi reads `AGENTS.md` and `CLAUDE.md` from there as well), and in the folders of
+the projects, the first 5,000 of them in all, nearest the top. So is a link *inside*
 a place that is held whole, and inside what such a link leads to: where a
 project shares its skills between tools with `.agents/skills` as a link to
 `.claude/skills`, `.claude/skills` is held as well, and so is the folder of a skill
-under development that is linked into pi's agent folder. What a link leads to
-that nothing here loads is not held, and nothing in `node_modules` or `.git` is
-looked into.
+under development that is linked into pi's agent folder. Each of those places is
+looked into for its first 2,000 folders, nearest the top first, with an allowance
+of its own: a big package fetched into one `.pi` does not hide a link in another,
+or one beside it at the top. A link further down than that is not found, and the
+file by the link's own name is still refused. What a link leads to that nothing here
+loads is not held, and nothing in `node_modules` or `.git` is looked into.
 
 What is **not** held, because nothing loads it when a conversation opens: the
 portal's own data (its database), what a project contains and somebody runs (a
-script, a Makefile, `.git/hooks`), a folder that is on `PATH`, a folder a package
-was installed from by its path in pi's settings, and a shell profile. A rule that
-reaches those is what the person who wrote it chose, so give a rule the folder it
-is for. The heartbeat keeps the rules written for *all roles*, as it reads what its
-`WATCH.md` names wherever that is.
+script, a Makefile, `.git/hooks`), a folder that is on `PATH`, a path that pi's
+settings name (a package installed from a folder, or a folder or file of skills,
+extensions, prompts or themes: the settings file is held, not where it points), and
+a shell profile. A rule that reaches those is what the person who wrote it chose,
+so give a rule the folder it is for. The heartbeat keeps the rules written for *all
+roles*, as it reads what its `WATCH.md` names wherever that is.
 
 Four tools are not opened by a rule at all, nor by an approval: `subagent`,
 `routine_create`, `routine_update` and `routine_run`. A subagent is a pi of its own

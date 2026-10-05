@@ -24,17 +24,18 @@ import { LOADED_IN_FOLDERS, loadedPlaces, type LoadedPlace } from "./loaded-from
  * - the same for a place of the list.
  *
  * Bounded: what somebody installed or fetched (`node_modules`, `.git`) is not read,
- * and a place is looked into for its first folders only, nearest first. A link
- * further down a tree that big is not found, which the page on roles says.
+ * and each place is looked into for its first folders only, nearest the top first,
+ * with an allowance of its own (a big package in one place does not use up what
+ * another has). A link further down a tree that big is not found, which the page
+ * on roles says.
  */
 
 /** What is installed or fetched rather than written: a link in it leads where its package put it. */
 const FETCHED = new Set(["node_modules", ".git"]);
 
-/** How many folders are read inside the places that are held whole, inside the folders that are loaded whole in a project or a home, and for the folders of all the projects. */
-const IN_PLACES = 2000;
-const IN_FOLDERS = 2000;
-const IN_PROJECTS = 5000;
+/** How many folders are read inside each place that is held whole (a place of the list, or a `.pi` or `.agents` of a home or a project), and for the folders of all the projects together. */
+export const IN_PLACE = 2000;
+export const IN_PROJECTS = 5000;
 
 const isFolder = (p: string): boolean => {
   try {
@@ -44,11 +45,11 @@ const isFolder = (p: string): boolean => {
   }
 };
 
-/** Reads folders until its allowance is used: a link is looked for in the first folders of a tree, not in all of an enormous one. */
-function reader(allowance: number): (dir: string) => Dirent[] {
+/** Reads folders until its allowance is used, and then says so with undefined: a link is looked for in the first folders of a tree, not in all of an enormous one. */
+function reader(allowance: number): (dir: string) => Dirent[] | undefined {
   let left = allowance;
   return (dir) => {
-    if (left <= 0) return [];
+    if (left <= 0) return undefined;
     left--;
     try {
       return readdirSync(dir, { withFileTypes: true });
@@ -87,41 +88,51 @@ export function loadedByLinks(where: { folders: string[]; trees: string[] }): Lo
   const found: LoadedPlace[] = [];
   const walked = new Set<string>();
 
-  /** A place that is loaded whole: it as it really is, and what each link inside it leads to, link in link. */
-  const hold = (place: LoadedPlace, read: (dir: string) => Dirent[]): void => {
+  /** A place that is loaded whole: it as it really is, and what each link inside it leads to, link in link. Breadth first, with an allowance of its own. */
+  const hold = (place: LoadedPlace): void => {
+    const read = reader(IN_PLACE);
     const start = realPathAhead(place.path);
     found.push({ ...place, path: start });
-    const todo = [start];
-    while (todo.length) {
-      const dir = todo.pop()!;
+    const queue = [start];
+    for (let next = 0; next < queue.length; next++) {
+      const dir = queue[next];
       if (walked.has(dir) || !isFolder(dir)) continue;
+      const entries = read(dir);
+      if (!entries) break;
+      // Only a folder that was read is done: one the allowance did not reach is read for the next place that has it.
       walked.add(dir);
-      for (const entry of read(dir)) {
+      for (const entry of entries) {
         const at = path.join(dir, entry.name);
         if (entry.isSymbolicLink()) {
           const leads = realPathAhead(at);
           found.push({ ...place, path: leads });
-          todo.push(leads);
+          queue.push(leads);
         } else if (entry.isDirectory() && !FETCHED.has(entry.name)) {
-          todo.push(at);
+          queue.push(at);
         }
       }
     }
   };
 
-  const readInFolders = reader(IN_FOLDERS);
   /** A link at a name of the list is loaded as that name is. */
   const look = (dir: string, entries: Dirent[]): void => {
     for (const item of LOADED_IN_FOLDERS) {
-      for (const at of spelled(dir, entries, item.name)) hold({ path: at, by: item.by, as: item.as }, readInFolders);
+      for (const at of spelled(dir, entries, item.name)) hold({ path: at, by: item.by, as: item.as });
     }
   };
 
-  const readInPlaces = reader(IN_PLACES);
-  for (const place of loadedPlaces()) hold(place, readInPlaces);
+  for (const place of loadedPlaces()) hold(place);
 
   const readTop = reader(Infinity);
-  for (const dir of where.folders) look(dir, readTop(dir));
+  for (const dir of where.folders) look(dir, readTop(dir) ?? []);
+  // pi reads the instructions from every folder above the one it runs in as well: `~/CLAUDE.md` as a link, above a workspace root inside the home.
+  const above = new Set<string>();
+  for (const dir of [...where.folders, ...where.trees]) {
+    for (let up = path.dirname(dir); !above.has(up); up = path.dirname(up)) {
+      above.add(up);
+      look(up, readTop(up) ?? []);
+    }
+  }
 
   // Folders that are held whole are read from `hold`, not as the folders of a project: what is inside is not a name to look for.
   const wholeFolders = new Set(LOADED_IN_FOLDERS.filter((e) => e.folder).map((e) => e.name.toLowerCase()));
@@ -133,6 +144,7 @@ export function loadedByLinks(where: { folders: string[]; trees: string[] }): Lo
     if (seen.has(dir)) continue;
     seen.add(dir);
     const entries = readInProjects(dir);
+    if (!entries) break;
     look(dir, entries);
     for (const entry of entries) {
       if (entry.isDirectory() && !FETCHED.has(entry.name) && !wholeFolders.has(entry.name.toLowerCase())) queue.push(path.join(dir, entry.name));
