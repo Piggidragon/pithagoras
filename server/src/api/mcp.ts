@@ -5,6 +5,7 @@ import { writeFileAtomic } from "../atomic-write.js";
 import { isSwitchedOff, sourceOf } from "../extension-switch.js";
 import { piAgentDir, readPiSettings } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
+import { mcpServersRemoved } from "../db.js";
 
 /**
  * MCP servers, as configured for `pi-mcp-adapter`.
@@ -111,6 +112,33 @@ export function mcpServerNames(): string[] {
     return Object.keys(readMcpFile().config.mcpServers ?? {});
   } catch {
     return [];
+  }
+}
+
+/**
+ * The adapter's own file of what each server offered, `servers.<name>`, which
+ * it reads to list tools before a server has been started. A server that is
+ * removed from the configuration leaves its entry there, and its tools with it.
+ */
+export const mcpCachePath = (): string => path.join(piAgentDir(), "mcp-cache.json");
+
+/**
+ * Take the named servers out of the adapter's cache. A cache that is not there
+ * or cannot be read is left alone: it is the adapter's file, it rebuilds it,
+ * and a removal that is done must not fail over it.
+ */
+export function dropMcpCache(names: string[]): void {
+  const file = mcpCachePath();
+  try {
+    const cache = JSON.parse(readFileSync(file, "utf8"));
+    const servers = cache?.servers;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) return;
+    const present = names.filter((name) => Object.prototype.hasOwnProperty.call(servers, name));
+    if (!present.length) return;
+    for (const name of present) delete servers[name];
+    writeFileAtomic(file, JSON.stringify(cache, null, 2) + "\n");
+  } catch {
+    // Missing, unparsable or not writable.
   }
 }
 
@@ -255,10 +283,13 @@ export function mcpRouter(): Router {
     if (name !== from && Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
       return res.status(409).json({ error: `A server called ${name} already exists`, code: "exists" });
     }
+    const before = Object.keys(config.mcpServers);
     if (from && from !== name) delete config.mcpServers[from];
     config.mcpServers[name] = req.body.entry;
     try {
       writeMcpFile(config);
+      // A rename removes the old name; its tools are not the new one's.
+      mcpServersRemoved(before, Object.keys(config.mcpServers));
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -268,9 +299,11 @@ export function mcpRouter(): Router {
   router.delete("/mcp/servers/:name", (req, res) => {
     const { config, error } = readMcpFile();
     if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
+    const before = Object.keys(config.mcpServers);
     delete config.mcpServers[req.params.name];
     try {
       writeMcpFile(config);
+      mcpServersRemoved(before, Object.keys(config.mcpServers));
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -356,13 +389,17 @@ export function mcpRouter(): Router {
   router.put("/mcp/raw", (req, res) => {
     const content = req.body?.content;
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
+    let parsed: unknown;
     try {
-      JSON.parse(stripComments(content));
+      parsed = JSON.parse(stripComments(content));
     } catch (e) {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }
+    const before = mcpServerNames();
     try {
       writeMcpText(content);
+      const kept = (parsed as McpFile | null)?.mcpServers;
+      mcpServersRemoved(before, kept && typeof kept === "object" ? Object.keys(kept) : []);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

@@ -85,6 +85,7 @@ keep a large server from crowding the prompt.
 
 The toggle on each row sets `disabled: true` — the server stays configured and
 visible but is never connected. Better than deleting a server you are debugging.
+Deleting one, or renaming it, also takes its tools out of the Tools list.
 
 ::: tip The adapter has its own commands
 `/mcp` opens its status panel, `/mcp tools` lists what is available, and

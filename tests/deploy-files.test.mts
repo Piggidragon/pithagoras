@@ -30,12 +30,19 @@ test('the Portainer stack passes the same environment as the Compose file', () =
   assert.deepEqual([...environmentOf('docker-compose.portainer.yml')].sort(), [...environmentOf('docker-compose.yml')].sort());
 });
 
-test('the portal runs under an init in both Compose files, which collects the processes its jobs and shells leave behind', () => {
+test('the portal runs under an init in both Compose files, which collects the processes its jobs and shells leave behind', (t) => {
+  const compose = spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status === 0;
+  if (!compose) t.diagnostic('docker compose is not installed: only the files are read, Compose does not read them back');
   for (const file of COMPOSE) {
     assert.match(read(file), /^ {4}init: true$/m, `${file} gives the portal an init`);
-    if (spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status !== 0) continue;
+    if (!compose) continue;
+    // Interpolated, with the one variable the files require: Compose 2.38 cannot read a volume such as
+    // `${PORTAL_TLS_DIR:-/dev/null}:/certs:ro` under --no-interpolate ("too many colons").
     const shown = JSON.parse(
-      execFileSync('docker', ['compose', '-f', path.join(root, file), 'config', '--format', 'json', '--no-interpolate'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString(),
+      execFileSync('docker', ['compose', '-f', path.join(root, file), 'config', '--format', 'json'], {
+        env: { ...process.env, WORKSPACES_DIR: '/workspaces' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).toString(),
     );
     assert.equal(Object.values<any>(shown.services)[0].init, true, `${file}: Compose reads it as the service's init`);
   }
