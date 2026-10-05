@@ -7,6 +7,7 @@ import {json} from '../api';
 import {micError} from '../mic-error';
 import {blobBase64} from '../attachments';
 import {confirmDialog} from './ConfirmDialog';
+import {useUnsavedDraft} from './Modal';
 import { languageName, t } from "../i18n";
 import { KOKORO_VOICES } from "../../../server/src/kokoro-voices";
 export type Preset={id:string;name:string;kind:'design'|'clone';instruction:string;transcript:string};
@@ -55,10 +56,13 @@ export function VoiceLibrary({value,onChange,onError,onPending}:{value:string;on
  </div>;
 }
 
+const FIRST_INSTRUCTION='Speak clearly and naturally.';
 /** A new voice for the library: a clone from a recording, or one designed from a description. */
 export function AddVoiceForm({onAdded,onError}:{onAdded:(voice:Preset)=>void;onError:(message:string)=>void}){
  const [busy,setBusy]=useState(false);
- const [name,setName]=useState(''),[kind,setKind]=useState<'design'|'clone'>('clone'),[instruction,setInstruction]=useState('Speak clearly and naturally.'),[transcript,setTranscript]=useState(''),[file,setFile]=useState<File|null>(null);
+ const [name,setName]=useState(''),[kind,setKind]=useState<'design'|'clone'>('clone'),[instruction,setInstruction]=useState(FIRST_INSTRUCTION),[transcript,setTranscript]=useState(''),[file,setFile]=useState<File|null>(null);
+ // The words of a recording, a name and a chosen file are in no other place: the dialog this is in (Settings, or the avatar's) asks before it closes over them.
+ useUnsavedDraft(!busy&&(!!name.trim()||!!transcript.trim()||!!file||instruction!==FIRST_INSTRUCTION));
  const field=`mt-1 ${inputSmCls}`;
  return <div className="space-y-3">
   <label className="block text-xs">{t("Voice name")}<input className={field} value={name} maxLength={100} onChange={e=>setName(e.target.value)}/></label>

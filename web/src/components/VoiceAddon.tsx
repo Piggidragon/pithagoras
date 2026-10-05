@@ -97,7 +97,9 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   };
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  useUnsavedDraft(edited && !busy);
+  // Descriptions edited in the voice library and not stored: its own button stores them, so they are not part of `edited`.
+  const [describing, setDescribing] = useState(false);
+  useUnsavedDraft((edited || describing) && !busy);
   // A saved voice's description is stored on its own; this saves the edited ones along with the settings.
   const pendingDescriptions = useRef<(() => Promise<void>) | null>(null);
   // Nothing of the page can be drawn without it, so the failure is said where the page would be.
@@ -130,7 +132,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     {kokoro
       ? <><div className="block text-xs text-fg-muted">{t("Speaking voice")}<Select aria-label={t("Speaking voice")} className="mt-1.5 w-full" value={config.kokoroVoice ?? DEFAULT_KOKORO_VOICE} onChange={kokoroVoice => update({ kokoroVoice })} options={kokoroVoiceOptions()} /></div>
         <p className="text-xs text-fg-faint">{t("Kokoro speaks with its own voices and reads the text in the language of the voice. Your voice library is kept for the other engines.")}</p></>
-      : <VoiceLibrary value={config.voice || "design"} onChange={voice=>update({voice})} onError={onError} onPending={save=>{pendingDescriptions.current=save;if(save){setSaved(false);setEdited(true);}}}/>}
+      : <VoiceLibrary value={config.voice || "design"} onChange={voice=>update({voice})} onError={onError} onPending={save=>{pendingDescriptions.current=save;setDescribing(!!save);if(save)setSaved(false);}}/>}
       {!kokoro && (config.voice||"design") === "design" && <label className="block text-xs text-fg-muted">{t("Describe the speaking voice")}<input className={`mt-1.5 ${inputCls}`} value={config.instruction} onChange={e=>update({instruction:e.target.value})}/></label>}
     </section>}
     <section className="rounded-xl border border-line bg-surface/50 p-4 space-y-4">

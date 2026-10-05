@@ -86,12 +86,18 @@ export function Modal({
   }, []);
   const close = async () => {
     if (asking.current) return;
+    // A field that saves when it is left is left first, whichever way the dialog is closed: the
+    // close button and a click beside it move focus out of it, and Escape does not.
+    const at = document.activeElement;
+    const field = at instanceof HTMLElement && at !== dialog.current && dialog.current?.contains(at) ? at : null;
+    field?.blur();
     if (unsavedNow.current || drafts.current.size) {
       asking.current = true;
       const discard = await confirmDialog({ title: t("Discard your changes?"), message: t("What you changed here has not been saved."), confirmLabel: t("Discard"), danger: true });
       asking.current = false;
       // Closed meanwhile by whoever drew it (a save that finished): there is nothing left to close.
-      if (!discard || !alive.current) return;
+      if (!alive.current) return;
+      if (!discard) return field?.isConnected ? field.focus({ preventScroll: true }) : undefined;
     }
     onClose();
   };

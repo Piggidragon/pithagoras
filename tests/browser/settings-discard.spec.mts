@@ -1,5 +1,5 @@
 import { type Locator, type Page } from '@playwright/test';
-import { test, expect, mockPortal, type Ask } from './portal-mock';
+import { test, expect, mockPortal, reply, type Ask } from './portal-mock';
 import { DEFAULT_ORB } from '../../server/src/orb-style';
 
 /**
@@ -242,6 +242,95 @@ test("Escape over the voice settings that were changed asks first, and over ones
   expect(config.responseInstructions).toBe('Answer in one sentence.');
 });
 
+/** Settings → Add-ons → Voice, with the voices a library holds. */
+async function voiceSettings(page: Page, voices: unknown[], live?: (ask: Ask) => unknown) {
+  const config = { enabled: true, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: (voices[0] as { id?: string } | undefined)?.id ?? 'design', runtime: 'breeze', language: 'auto', cfgScale: 4, responseInstructions: 'Be short.', defaultResponseInstructions: 'Be short.' };
+  await portal(page, {
+    '/api/voice': config,
+    '/api/voice/install': { available: true, state: 'absent', busy: false, progress: '', error: '' },
+    '/api/voice/presets': voices,
+    '/api/voice/hardware': { gpus: [], source: 'none', error: '', checked: false, cpuOnly: false, host: { totalMiB: 16384, freeMiB: 12000, threads: 8 }, selected: null, reserveMiB: 0, suggestion: { tts: 'breeze', asr: 'whisper', asrModel: 'base' } },
+  }, live);
+  await page.goto('/settings/add-ons');
+  await settings(page).getByRole('tab', { name: 'Voice' }).click();
+}
+
+test('Escape over a new voice that was named and described asks first, and over the form that was only opened does not', async ({ page }) => {
+  await voiceSettings(page, []);
+  await settings(page).getByRole('button', { name: 'Add voice', exact: true }).click();
+  await expect(settings(page).getByLabel('Voice name', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+
+  await page.goto('/settings/add-ons');
+  await settings(page).getByRole('tab', { name: 'Voice' }).click();
+  await settings(page).getByRole('button', { name: 'Add voice', exact: true }).click();
+  await settings(page).getByLabel('Voice name', { exact: true }).fill('Grandpa');
+  const words = settings(page).getByLabel('Exact words in the recording');
+  await words.fill('Once upon a time.');
+  await asksBeforeClosing(page, words, 'Once upon a time.');
+});
+
+test('Escape over a voice description that its own button saved does not ask, and over one that was not saved does', async ({ page }) => {
+  const voice = { id: 'v1', name: 'Night narrator', kind: 'design', instruction: 'Warm delivery', transcript: '' };
+  const sent: string[] = [];
+  await voiceSettings(page, [voice], ({ path, method, json }) => {
+    if (path !== '/api/voice/presets/v1') return undefined;
+    sent.push(`${method} ${JSON.stringify(json())}`);
+    return { ...voice, instruction: json().instruction.trim() };
+  });
+  const description = settings(page).getByLabel('Voice description');
+  await description.fill('Warm and slow.');
+  await asksBeforeClosing(page, description, 'Warm and slow.');
+
+  await settings(page).getByRole('button', { name: 'Save description', exact: true }).click();
+  await expect(settings(page).getByRole('button', { name: 'Save description', exact: true })).toBeDisabled();
+  expect(sent).toEqual(['PATCH {"instruction":"Warm and slow."}']);
+  // Stored: nothing is left of it to lose.
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+});
+
+test('Escape over a context window that was typed in saves it, as leaving the field any other way does', async ({ page }) => {
+  const sent: unknown[] = [];
+  await portal(page, {}, ({ path, method, json }) => {
+    if (path !== '/api/context-default' || method !== 'PUT') return undefined;
+    sent.push(json());
+    return { ok: true, contextDefault: json().tokens };
+  });
+  await page.goto('/settings/general');
+  const window = settings(page).getByRole('textbox', { name: 'Default context window in tokens' });
+  await window.fill('65536');
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+  expect(sent).toEqual([{ tokens: 65536 }]);
+});
+
+test('Escape over a provider whose only model was added by name asks first', async ({ page }) => {
+  // The server is not up yet: nothing lists a model, so the one the person adds is the first there is.
+  await portal(page, {
+    '/api/providers': { presets: [{ kind: 'llama-cpp', label: 'llama.cpp', id: 'llama-cpp', baseUrl: 'http://127.0.0.1:8080/v1', endpoint: true, key: 'none' }], apis: ['openai-completions'], hosted: [], providers: [] },
+    '/api/providers/status': { status: {} },
+  }, ({ path }) => (path === '/api/providers/probe' ? reply(502, { error: 'Could not reach http://127.0.0.1:8080/v1' }) : undefined));
+  await page.goto('/settings/models');
+  await settings(page).getByRole('button', { name: 'Add a provider' }).click();
+  await expect(settings(page).getByText('Could not reach http://127.0.0.1:8080/v1')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+
+  await page.goto('/settings/models');
+  await settings(page).getByRole('button', { name: 'Add a provider' }).click();
+  await expect(settings(page).getByText('Could not reach http://127.0.0.1:8080/v1')).toBeVisible();
+  await settings(page).getByRole('textbox', { name: 'Model id to add' }).fill('coder-model');
+  await page.keyboard.press('Enter');
+  await expect(settings(page).getByRole('checkbox', { name: 'Use coder-model' })).toBeChecked();
+  await page.keyboard.press('Escape');
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(settings(page)).toBeVisible();
+});
+
 test('Escape over the avatar dialog with a change in it asks first, and over one that was only opened does not', async ({ page }) => {
   const orb = { personality: 'balanced', palette: 'aurora', colors: { idle: '#82bcff', input: '#7fe0b4', output: '#c9a2ff', muted: '#8a91a0' }, speed: 1, reactivity: 1, glow: 1, pattern: 'ribbons', finish: 'glossy', eyes: 'none', eyeColor: '#111111', hat: 'none', hatColor: 'auto', prop: 'none', propColor: 'auto' };
   await portal(page, {
@@ -267,4 +356,35 @@ test('Escape over the avatar dialog with a change in it asks first, and over one
   await ask.getByRole('button', { name: 'Cancel' }).click();
   await expect(avatar).toBeVisible();
   await expect(lively).toHaveAttribute('aria-pressed', 'true');
+});
+
+test("Escape over a voice being added in the avatar dialog asks first", async ({ page }) => {
+  const orb = { personality: 'balanced', palette: 'aurora', colors: { idle: '#82bcff', input: '#7fe0b4', output: '#c9a2ff', muted: '#8a91a0' }, speed: 1, reactivity: 1, glow: 1, pattern: 'ribbons', finish: 'glossy', eyes: 'none', eyeColor: '#111111', hat: 'none', hatColor: 'auto', prop: 'none', propColor: 'auto' };
+  await portal(page, {
+    '/api/agents': { agents: [{ id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb, voice: '', heartbeat: { minutes: 0, quietStart: '', quietEnd: '', timeZone: 'UTC', last: null, status: null, running: false, watching: false, available: true }, unread: 0 }] },
+    '/api/agent/sessions': { sessions: [], agentHome: '/a' },
+    '/api/agents/home/setup': { home: '/a', initialised: true, files: [{ name: 'SOUL.md', exists: true, content: 'Kind.', mtime: 1 }] },
+    '/api/voice/presets': [],
+    '/api/voice': { enabled: true, voice: 'design', runtime: 'breeze' },
+  });
+  const avatar = page.getByRole('dialog', { name: 'Avatar' });
+  await page.goto('/agents?agent=home');
+  await page.getByRole('button', { name: 'Customize the avatar' }).click();
+  await avatar.getByRole('combobox', { name: 'Voice' }).click();
+  await page.getByRole('option', { name: 'Add voice' }).click();
+  const name = avatar.getByLabel('Voice name', { exact: true });
+  // Only opened: nothing typed, nothing to lose.
+  await page.keyboard.press('Escape');
+  await expect(avatar).toBeHidden();
+
+  await page.getByRole('button', { name: 'Customize the avatar' }).click();
+  await avatar.getByRole('combobox', { name: 'Voice' }).click();
+  await page.getByRole('option', { name: 'Add voice' }).click();
+  await name.fill('Grandpa');
+  await page.keyboard.press('Escape');
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(avatar).toBeVisible();
+  await expect(name).toHaveValue('Grandpa');
 });

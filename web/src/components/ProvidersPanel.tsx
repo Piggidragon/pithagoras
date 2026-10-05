@@ -288,13 +288,16 @@ function ModelChip({ model: m, loaded, missing }: { model: ProviderModel; loaded
  * A model row in the editor: whether it is kept, and what is known about it.
  * `own` is one saved before or added by name — not only found at an address.
  */
-type Row = ProviderModel & { keep: boolean; found: boolean; own: boolean; ctxText: string };
+type Row = ProviderModel & { keep: boolean; found: boolean; own: boolean; ctxText: string; named: boolean };
 
-/** What a person decides about the models: which are used, each with its window and abilities. A probe adds rows, and none of those used. */
+/**
+ * What a person decides about the models: which are used, each with its window and abilities. A probe adds rows, and none of those used.
+ * A model added by name is a decision in itself, counted apart (`named`): the models the server lists are what it is measured against.
+ */
 const chosenOf = (rows: Row[]) =>
-  JSON.stringify(rows.filter((r) => r.keep).map((r) => [r.id, r.ctxText, !!r.input?.includes("image"), !!r.reasoning]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  JSON.stringify(rows.filter((r) => r.keep && !r.named).map((r) => [r.id, r.ctxText, !!r.input?.includes("image"), !!r.reasoning]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 
-const toRow = (m: ProviderModel, keep: boolean, found: boolean, own = false): Row => ({ ...m, keep, found, own, ctxText: m.contextWindow ? m.contextWindow.toLocaleString("en-US") : "" });
+const toRow = (m: ProviderModel, keep: boolean, found: boolean, own = false, named = false): Row => ({ ...m, keep, found, own, named, ctxText: m.contextWindow ? m.contextWindow.toLocaleString("en-US") : "" });
 
 /**
  * The names in use in pi's files. One keyed only from the environment is not:
@@ -341,12 +344,13 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   // What was there when the editor opened: a key, a manual model, or another name or address is a draft.
   const first = useRef({ choice, id, baseUrl, apiType });
   // The models as they first were there, saved ones or what the server first answered: one used or left, or a window set, is a draft too.
+  // Not a model the person added by name: with no server answering, that is the first row there is, and the change itself.
   const firstChosen = useRef<string | null>(null);
   const chosen = chosenOf(rows);
-  if (firstChosen.current === null && rows.length) firstChosen.current = chosen;
+  if (firstChosen.current === null && rows.some((r) => !r.named)) firstChosen.current = chosen;
   useUnsavedDraft(
     !saving &&
-      (!!key || !!manual.trim() || choice !== first.current.choice || id !== first.current.id || baseUrl !== first.current.baseUrl || apiType !== first.current.apiType || (firstChosen.current !== null && chosen !== firstChosen.current)),
+      (!!key || !!manual.trim() || rows.some((r) => r.named && r.keep) || choice !== first.current.choice || id !== first.current.id || baseUrl !== first.current.baseUrl || apiType !== first.current.apiType || (firstChosen.current !== null && chosen !== firstChosen.current)),
   );
   const probeSeq = useRef(0);
   /** The address the server last answered at, as it said it: put in the field, it is not asked again. */
@@ -414,7 +418,7 @@ export function ProviderEditor({ view, provider, taken, onCancel, onSaved, onErr
   const addManual = () => {
     const name = manual.trim();
     if (!name || rows.some((r) => r.id === name)) return;
-    setRows([...rows, toRow({ id: name }, true, false, true)]);
+    setRows([...rows, toRow({ id: name }, true, false, true, true)]);
     setManual("");
   };
 
