@@ -99,6 +99,30 @@ async function withJob(folder, run) {
   }
 }
 
+test("an agent made in a folder that already holds its own files says which, with the wizard and without it", async () => {
+  // Kept from an agent of that name, or put there before the name was taken.
+  for (const name of ["finance", "legal"]) {
+    mkdirSync(path.join(home, "agents", name), { recursive: true });
+    writeFileSync(path.join(home, "agents", name, "SOUL.md"), "# What was there\n");
+  }
+  writeFileSync(path.join(home, "agents", "legal", "MEMORY.md"), "Remembered.\n");
+
+  const plain = await call("POST", "/api/agents", { name: "Finance" });
+  assert.equal(plain.status, 200, JSON.stringify(plain.body));
+  assert.equal(plain.body.home, path.join(home, "agents", "finance"));
+  assert.deepEqual(plain.body.kept, ["SOUL.md"], "it was not silently taken up");
+  assert.equal(plain.body.initialised, false);
+
+  const wizard = await call("POST", "/api/agents", { name: "Legal", setup: { userName: "Sam", vibe: "Brisk." } });
+  assert.equal(wizard.status, 200, JSON.stringify(wizard.body));
+  assert.deepEqual(wizard.body.kept, ["SOUL.md", "MEMORY.md"], "the answers did not replace them");
+  assert.equal(readFileSync(path.join(wizard.body.home, "SOUL.md"), "utf8"), "# What was there\n");
+  assert.ok(existsSync(path.join(wizard.body.home, "PrimaryUser.md")), "the one that was not there is written");
+
+  const fresh = await call("POST", "/api/agents", { name: "Fresh" });
+  assert.deepEqual(fresh.body.kept, []);
+});
+
 test("deleting an agent stops the jobs its chats started, in a folder that is kept as well", async () => {
   const made = (await call("POST", "/api/agents", { name: "Jobber" })).body;
   await withJob(made.home, async () => {

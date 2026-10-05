@@ -403,7 +403,7 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 | Route | Purpose |
 | --- | --- |
 | `GET /api/agents` | `{ agents }`, each `{ id, name, home, first, initialised, chats, channels, orb, voice, heartbeat, unread }` |
-| `POST /api/agents` | `{ name, setup? }` — a new agent and its folder; `setup` takes the wizard's answers. A folder kept from a deleted agent of the same name is taken up again, and the files in it are not rewritten: `kept` in the answer names the ones that were left as they were. |
+| `POST /api/agents` | `{ name, setup? }` — a new agent and its folder; `setup` takes the wizard's answers. A folder kept from a deleted agent of the same name is taken up again, and the files in it are not rewritten: `kept` in the answer names the agent's own files (`SOUL.md`, `PrimaryUser.md`, `MEMORY.md`) that the folder already had, with `setup` or without it, and the wizard's answers did not replace them. |
 | `PATCH /api/agents/:id` | `{ name }` — its folder stays where it is, and records the new name in `.agent-name`, which is what makes an agent of that name take the folder up again once this one is deleted with it kept |
 | `DELETE /api/agents/:id` | Deletes it and its chats, and its folder with `?folder=delete`. Refused for the first agent, for one a channel talks as, and while one of its chats or routines is working. The jobs its chats started in its folder are stopped (`jobsStopped`). Its routines are switched off (`routinesSwitchedOff`), or with `?folder=delete` deleted (`routinesDeleted`); their runs are kept either way. |
 | `GET /api/agents/:id/setup` | Setup status and its editable files, each `{ name, exists, content, mtime }` |

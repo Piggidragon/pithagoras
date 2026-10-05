@@ -1,3 +1,5 @@
+import { lstatSync } from "node:fs";
+import path from "node:path";
 import express, { type Router } from "express";
 import { AgentError, DEFAULT_AGENT, agentOf, channelsOf, createAgent, defaultAgent, getAgent, listAgents, orbOf, renameAgent, setOrb, setVoice, type Agent } from "../agents.js";
 import { agentFileStatus, isInitialised, runWizard, writeAgentFile, type WizardInput } from "../agent-setup.js";
@@ -7,6 +9,7 @@ import { heartbeat, setHeartbeat, watchList } from "../heartbeat.js";
 import { serverTimeZone } from "../time-zone.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
 import { FileError } from "../workspace-files.js";
+import { CONTEXT_FILES } from "../pi/context-files.js";
 import { fail } from "./files.js";
 
 /**
@@ -65,9 +68,12 @@ export function agentsRouter(): Router {
   router.post("/agents", (req, res) => {
     try {
       const agent = createAgent({ name: req.body?.name });
+      // `kept`: the agent's own files that its folder had already, as a folder kept from an agent of the same
+      // name does. The new agent takes them up as its own, with or without the wizard, which does not replace them.
+      // lstat, as the wizard does: a link that leads nowhere is something there.
+      const kept = CONTEXT_FILES.filter((name) => lstatSync(path.join(agent.home, name), { throwIfNoEntry: false }));
       const wizard = req.body?.setup as WizardInput | undefined;
-      // `kept`: the files a folder kept from an agent of the same name already had, which the answers did not replace.
-      const kept = wizard && typeof wizard === "object" ? runWizard({ ...wizard, agentName: wizard.agentName || agent.name }, agent.home).kept : [];
+      if (wizard && typeof wizard === "object") runWizard({ ...wizard, agentName: wizard.agentName || agent.name }, agent.home);
       res.json({ ...agentToApi(agent), kept });
     } catch (e) {
       failed(res, e);
