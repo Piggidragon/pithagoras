@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { nanoid } from "nanoid";
-import { countChannelSessions, deleteSession, getDb } from "../db.js";
+import { BROWSER_CHANNEL, countChannelSessions, deleteSession, getDb } from "../db.js";
 import { sessions } from "../session-manager.js";
 import { agentHome } from "../agent-home.js";
 import { DEFAULT_AGENT, getAgent } from "../agents.js";
@@ -128,7 +128,9 @@ export function channelsRouter(): Router {
     // it was deleted; without one it is derived from the name.
     const wanted = typeof req.body?.slug === "string" && req.body.slug.trim() ? req.body.slug : label;
     // Agent sessions are keyed on the slug, so two channels sharing one would merge their conversations.
+    // The Agent page's own slug is not for a channel: its conversations are the owner's.
     const taken = (getDb().prepare("SELECT slug FROM channels").all() as { slug: string }[]).map((c) => c.slug);
+    taken.push(BROWSER_CHANNEL);
     const slug = freeSlug(wanted, taken, "channel");
 
     const agentId = req.body?.agentId === undefined ? "" : storedAgent(req.body.agentId);
@@ -165,6 +167,7 @@ export function channelsRouter(): Router {
       const clash = getDb()
         .prepare("SELECT id FROM channels WHERE slug = ? AND id != ?")
         .get(next, row.id);
+      if (next === BROWSER_CHANNEL) return res.status(409).json({ error: `"${next}" is the name of the portal's own chats, not of a channel` });
       if (clash) return res.status(409).json({ error: `Another channel already uses "${next}"` });
       sets.push("slug = ?");
       values.push(next);

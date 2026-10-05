@@ -232,11 +232,15 @@ test("a channel keeps its secret to itself, takes a free slug, and is changed on
   assert.equal(JSON.stringify(one).includes("hunter2"), false, "the token does not leave the portal");
   const two = await make("Hooks");
   assert.equal(two.slug, "hooks-2", "a second channel is not merged into the first one's conversations");
+  // The Agent page's chats carry the slug "browser", and are the owner's: no channel's conversations may be taken for them.
+  const browser = await make("Browser");
+  assert.equal(browser.slug, "browser-2");
 
   const patch = (id, body) => send(`/api/channels/${id}`, "PATCH", body);
   refused(await patch("nope", { name: "x" }), 404, /Not found/);
   refused(await patch(two.id, { slug: "hooks" }), 409, /already uses/);
   refused(await patch(two.id, { slug: "!!!" }), 400, /not a usable slug/);
+  refused(await patch(two.id, { slug: "Browser" }), 409, /portal's own chats/);
   refused(await patch(two.id, { agentId: "nobody" }), 400, /No such agent/);
   refused(await patch(two.id, { config: { secret: null } }), 400, /Missing: Shared secret/);
   assert.deepEqual((await channels()).find((c) => c.id === two.id).secretsSet, ["secret"]);
@@ -249,6 +253,7 @@ test("a channel keeps its secret to itself, takes a free slug, and is changed on
 
   assert.deepEqual((await send(`/api/channels/${one.id}`, "DELETE")).body.deleted, 0);
   assert.deepEqual((await send(`/api/channels/${two.id}`, "DELETE")).body.deleted, 0);
+  assert.deepEqual((await send(`/api/channels/${browser.id}`, "DELETE")).body.deleted, 0);
   assert.deepEqual(await channels(), []);
 });
 

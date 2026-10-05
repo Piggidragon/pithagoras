@@ -29,7 +29,9 @@ A message that names **nobody** is not the owner's either. Once a primary user i
 named, a channel message without a sender id is turned away like a stranger's
 (and recorded in the audit log), and a conversation begun that way is read as a
 guest's. A channel package has to say who sent each message; see
-[writing a channel](/channels/writing-a-channel#identity).
+[writing a channel](/channels/writing-a-channel#identity). Conversations you
+start in the portal itself, on the Agent page or in a chat, are yours: nobody is
+named in them, because you are signed in.
 
 ## What the guard covers
 

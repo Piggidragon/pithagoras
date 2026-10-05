@@ -78,16 +78,39 @@ function bootTime(): number {
 /** Clock ticks per second; 100 on every Linux the portal runs on. */
 const HZ = 100;
 
+/** /proc/uptime in ms: the time since boot, on the clock that counts the time the host slept. */
+function uptimeMs(): number | undefined {
+  try {
+    const ms = Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1000;
+    return Number.isFinite(ms) ? ms : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * When a job began, as `Date.now()` counts: how long after the portal itself did,
- * both read off the kernel's start times. `startedAt` goes through the boot time
- * /proc reports, which a container can give one of its own, and can be off by a
- * second besides; against the portal's own start the two are on one clock.
+ * How far /proc/uptime is from the clock the start times are on. Nothing on a
+ * host, but a container that is given an uptime of its own is off by how long its
+ * host ran before it began. Read once, as the portal starts, before a sleep can
+ * come between the two clocks.
+ */
+const UPTIME_OFFSET_MS = (() => {
+  const started = Number(statOf(process.pid)?.[19]) * (1000 / HZ);
+  const up = uptimeMs();
+  return Number.isFinite(started) && up !== undefined ? started + process.uptime() * 1000 - up : undefined;
+})();
+
+/**
+ * When a job began, as `Date.now()` counts: how long ago it did, read off the
+ * kernel's clock that the start times are on. That one counts the time the host
+ * slept, and `process.uptime()` does not: after a night's sleep every job lay that
+ * much after the call that started it. `startedAt` goes through the boot time
+ * /proc reports, which cancels out here.
  */
 export function startedWhen(job: BackgroundJob): number {
-  const own = Number(statOf(process.pid)?.[19]) * (1000 / HZ);
-  if (!Number.isFinite(own)) return job.startedAt;
-  return Date.now() - process.uptime() * 1000 + (job.startedAt - bootTime()) - own;
+  const now = uptimeMs();
+  if (now === undefined || UPTIME_OFFSET_MS === undefined) return job.startedAt;
+  return Date.now() - (now + UPTIME_OFFSET_MS - (job.startedAt - bootTime()));
 }
 
 /**

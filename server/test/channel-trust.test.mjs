@@ -12,6 +12,7 @@ import { inProcessHome } from "./server-harness.mjs";
 
 const home = inProcessHome("pithagoras-trust-");
 
+const { resolveChannelSession } = await import("../dist/agent.js");
 const { addNote, createSession, eventsSince, findChannelSession, getDb, getSession, listAudit, listToolRules, pendingNotes, setDefaultReportTo, useGrant } = await import("../dist/db.js");
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
 const { CommandFailed, sessions } = await import("../dist/session-manager.js");
@@ -309,6 +310,40 @@ test("a conversation whose speaker is not in memory is read as its row and last 
   const nobody = findChannelSession("tg:anon");
   assert.equal(nobody.last_person_key, null);
   assert.equal(sessions.speakerRole(nobody.id), "guest", "a channel conversation nobody has been identified in is a stranger's");
+});
+
+test("a conversation begun on the Agent page is the owner's however many people are named: its tools and commands are not refused, a channel conversation nobody spoke in still is", async () => {
+  const handled = [];
+  class FakePi extends EventEmitter {
+    running = true;
+    async abort() {}
+    dispose() {}
+    isIdle() { return true; }
+    async getCommands() { return [{ name: "bg", source: "extension" }]; }
+    async prompt(text) { handled.push(text); }
+  }
+  SdkPiClient.create = async () => new FakePi();
+  // Begun as the route does it, in the portal: no sender is ever named in it, and its slug is the portal's own.
+  const { session: page } = resolveChannelSession({ channelSlug: "browser", key: "page-1", title: "Chat", executor: "host" });
+  const { session: stranger } = resolveChannelSession({ channelSlug: "tg", key: "nobody", title: "Chat", executor: "host" });
+  assert.equal(page.channel_slug, "browser");
+  roster();
+
+  assert.equal(sessions.speakerRole(page.id), "primary", "the owner, signed in to the portal, is not a stranger in their own chat");
+  assert.equal(sessions.speakerRole(stranger.id), "guest", "a channel conversation nobody was identified in still is");
+  // The guard, as pi has it running in each of them.
+  const guarded = (id) => {
+    const guard = {};
+    guardExtension("t", () => ({ role: sessions.speakerRole(id), key: sessions.speakerKey(id) }), id, true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
+    return guard.tool_call({ toolName: "bash", input: { command: "ls" } });
+  };
+  assert.equal(guarded(page.id), undefined, "a command runs in the owner's own chat");
+  assert.match((await guarded(stranger.id)).reason, /not your primary user/);
+
+  // A command typed there is theirs to run, as it is in a chat of the Home page.
+  await sessions.prompt(page.id, "/bg echo x");
+  assert.deepEqual(handled, ["/bg echo x"]);
+  await assert.rejects(sessions.prompt(stranger.id, "/bg echo x"), /only be run by the primary user/);
 });
 
 test("only the primary user's word approves anything: a colleague's \"always\" is a message, the owner's is a permission", async () => {

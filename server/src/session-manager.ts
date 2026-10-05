@@ -74,6 +74,7 @@ import {
   type EventRow,
   sessionSubagentModel,
   anySessionRunning,
+  onChannel,
 } from "./db.js";
 
 /**
@@ -2338,8 +2339,9 @@ class SessionManager extends EventEmitter {
     // A conversation on a channel that nobody is known to have spoken in since a
     // primary user was named — begun before that, by a sender who named nobody —
     // is a stranger's: its row says primary only because that is where every
-    // row starts.
-    if (row?.channel_slug && !row.last_person_key && hasPrimary()) return "guest";
+    // row starts. Not one begun on the Agent page: nobody is named there, it is
+    // the owner who is signed in.
+    if (onChannel(row) && !row?.last_person_key && hasPrimary()) return "guest";
     return (row?.role as Role) ?? "guest";
   }
 

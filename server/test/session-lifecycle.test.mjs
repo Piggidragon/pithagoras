@@ -568,6 +568,27 @@ test("a job keeps the chat that started it, not the others that work in the same
   }
 });
 
+test("a job still belongs to the chat that started it after the host has slept", { skip: process.platform !== "linux" }, async () => {
+  const folder = path.join(home, "slept");
+  mkdirSync(folder, { recursive: true });
+  const id = chat({ workspace: folder });
+  const pi = await sessions.client(id);
+  // The clock `process.uptime()` reads does not run while the host sleeps, and the one the kernel dates a process by does:
+  // a night's sleep is that much that the first is behind.
+  const uptime = process.uptime;
+  process.uptime = () => uptime.call(process) - 3600;
+  const job = await duringCall(pi, async () => startJob(folder));
+  sessions.activity.set(id, Date.now() - 60 * 60_000);
+  try {
+    await until(() => job.pid, "the job to start");
+    assert.deepEqual(await sessions.reapIdle(), [], "its job would end with it, and it began in the call");
+    assert.equal(pi.disposed, false);
+  } finally {
+    process.uptime = uptime;
+    endJob(job);
+  }
+});
+
 test("a chat used while its jobs were being looked for is not let go", { skip: process.platform !== "linux" }, async () => {
   const { id, pi } = await idleFor(60);
   const was = sessions.jobsRunning;

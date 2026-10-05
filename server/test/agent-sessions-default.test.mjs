@@ -27,3 +27,17 @@ test("the Agent tab without ?agent= answers for the first agent, whatever its id
   // An agent that is named and not there is still not found.
   assert.equal((await fetch(`${base}/api/agent/sessions?agent=nobody`)).status, 404);
 });
+
+test("a conversation begun on the Agent page is the owner's, whoever is named primary: a command typed there is not refused", async () => {
+  getDb().prepare("INSERT INTO people (key, name, role) VALUES ('tg:owner', 'Sam', 'primary')").run();
+  const post = async (url, body) => (await fetch(`${base}${url}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+  const page = await post("/api/agent/sessions", { title: "From the page" });
+  const refusal = /only be run by the primary user/;
+  const sent = await post(`/api/sessions/${page.id}/prompt`, { message: "/compact" });
+  assert.doesNotMatch(String(sent.failed ?? ""), refusal, "the owner, signed in, is not a stranger in their own chat");
+  // What a channel's own conversation, in which nobody was named, still is.
+  getDb()
+    .prepare("INSERT INTO sessions (id, title, workspace, executor, kind, channel_slug, channel_key) VALUES ('strangers', 'x', ?, 'host', 'agent', 'tg', 'tg:nobody')")
+    .run(home);
+  assert.match((await post("/api/sessions/strangers/prompt", { message: "/compact" })).failed, refusal);
+});

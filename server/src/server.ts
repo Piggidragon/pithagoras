@@ -13,6 +13,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import { nanoid } from "nanoid";
 import {
+  BROWSER_CHANNEL,
   clearProjectTools,
   chatModel,
   contextLimitProblem,
@@ -671,7 +672,7 @@ app.post("/api/agent/sessions", (req, res) => {
   if (agentId !== undefined && (typeof agentId !== "string" || !getAgent(agentId))) return res.status(404).json({ error: "No such agent" });
   try {
     const { session } = resolveChannelSession({
-      channelSlug: "browser",
+      channelSlug: BROWSER_CHANNEL,
       key: nanoid(8),
       title: title || `Chat ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
       executor: EXECUTOR_KIND,

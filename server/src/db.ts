@@ -72,6 +72,19 @@ export interface SessionRow {
   tools_on: string;
 }
 
+/**
+ * The slug of the conversations started on the Agent page: the portal's own,
+ * not a channel's. No channel can take it (see the channel routes).
+ */
+export const BROWSER_CHANNEL = "browser";
+
+/**
+ * Whether the conversation came in through a channel, where somebody else may
+ * be speaking, and not from the portal's own pages, where the owner is signed in.
+ */
+export const onChannel = (row: Pick<SessionRow, "channel_slug"> | undefined): boolean =>
+  Boolean(row?.channel_slug) && row?.channel_slug !== BROWSER_CHANNEL;
+
 export interface EventRow {
   seq: number;
   session_id: string;
@@ -699,8 +712,8 @@ export function listSessions(): SessionRow[] {
  */
 export function listChatSessions(): SessionRow[] {
   return getDb()
-    .prepare("SELECT * FROM sessions WHERE kind = 'task' OR (kind = 'agent' AND channel_slug = 'browser') ORDER BY pinned DESC, updated_at DESC")
-    .all() as SessionRow[];
+    .prepare("SELECT * FROM sessions WHERE kind = 'task' OR (kind = 'agent' AND channel_slug = ?) ORDER BY pinned DESC, updated_at DESC")
+    .all(BROWSER_CHANNEL) as SessionRow[];
 }
 
 /** Whether any session has a turn running. */
