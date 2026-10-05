@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
 
-async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string; /** A change to the routine that is made on the server, as the agent's routine_update does: the next list has it. */ server?: { next?: Record<string, unknown> } } = {}) {
+async function portal(page: Page, opts: { routine?: Record<string, unknown>; renameFails?: boolean; listFailsAfterRename?: boolean; /** What a save of the routine is answered with, as a 400. */ refuses?: string; /** A change to the routine that is made on the server, as the agent's routine_update does: the next list has it. */ server?: { next?: Record<string, unknown> }; /** What the saves are stamped with, one for each, where the server's clock counts seconds and two saves can be in the same one. */ stamps?: string[] } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
@@ -24,8 +24,10 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
       return { routines: [routine] };
     }
     if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
-    if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: String(Date.now()) }); return routine; }
+    if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: opts.stamps?.shift() ?? String(Date.now()) }); return routine; }
     if (p === '/api/routines/r1/sessions') return { sessions: [] };
+    // The schedule's preview asks after a short pause, so a slow run would find it unanswered and its error beside the one a test waits for.
+    if (p === '/api/routines/preview') return { runs: [] };
     if (p === '/api/routines/report-targets') return { targets: [], default: null };
     // The routines page offers the agents' homes beside the projects; the first one is Home.
     if (p === '/api/agents') return { agents: [{ id: 'home', name: 'Home', home: '/a', first: true, initialised: true, chats: 0, channels: [], orb: {}, voice: '' }] };
@@ -239,6 +241,28 @@ test('switching a routine on or off does not take back what was typed in it and 
   await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeDisabled();
 });
 
+test('a routine saved in the same second as the switch before it still keeps what is typed after the save through the next switch', async ({ page }) => {
+  // Two saves that the server stamps with the same time: the list that follows the second has nothing new to show.
+  const sent = await portal(page, { stamps: ['2', '2', '3'] });
+  await page.goto('/routines');
+  await page.getByRole('button', { name: /Nightly build/ }).click();
+  const instructions = page.locator('textarea').first();
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  await instructions.fill('Build it, then test it');
+  await page.getByRole('switch', { name: 'Nightly build' }).click();
+  await expect(page.getByRole('switch', { name: 'Nightly build' })).toHaveAttribute('aria-checked', 'false');
+  await save.click();
+  await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
+  expect(sent.filter((s) => s.method === 'PATCH').length).toBe(2);
+
+  await instructions.fill('Build it, then deploy it');
+  await page.getByRole('switch', { name: 'Nightly build' }).click();
+  await expect(page.getByRole('switch', { name: 'Nightly build' })).toHaveAttribute('aria-checked', 'true');
+  expect(sent.filter((s) => s.method === 'PATCH').length).toBe(3);
+  await expect(instructions).toHaveValue('Build it, then deploy it');
+  await expect(save).toBeEnabled();
+});
+
 test('a routine that the server changed while its form was open is shown as it is now, unless something was typed in it', async ({ page }) => {
   const server: { next?: Record<string, unknown> } = {};
   const sent = await portal(page, { server });
@@ -291,7 +315,7 @@ test('a one-off routine with no time picked cannot be created or saved, and says
   await when.fill('2030-01-02T03:04');
   await expect(page.getByText('Pick a time to run it at.')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Create' })).toBeEnabled();
-  expect(sent.filter((s) => s.method === 'POST')).toEqual([]);
+  expect(sent.filter((s) => s.method === 'POST' && s.path !== '/api/routines/preview')).toEqual([]);
 });
 
 test('a routine changed to a one-off cannot be saved while its time is empty', async ({ page }) => {

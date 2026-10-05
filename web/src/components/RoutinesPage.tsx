@@ -617,27 +617,34 @@ function RoutineDetail({
     report !== reportValue(from);
   const dirty = differs(r);
 
+  const fill = (from: Routine) => {
+    setName(from.name);
+    setMode(from.mode);
+    setSchedule(from.schedule || "0 9 * * *");
+    setRunAt(toLocalInput(from.runAt));
+    setInstructions(from.instructions);
+    setFresh(from.freshSession);
+    setGuard(from.guard);
+    setBrowser(from.browser);
+    setWorkspace(from.workspace ?? "");
+    setReport(reportValue(from));
+  };
+  // The fields as they are now, for a save that finishes after more was typed.
+  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, guard, browser, workspace, report });
+  live.current = { name, mode, schedule, runAt, instructions, fresh, guard, browser, workspace, report };
+
   // What the form was last filled from: the fields are filled again from the routine
-  // for another routine, after this form's own save, or when nothing typed would be lost,
-  // that is, when they still say what the routine said before. A change of the routine's
-  // `updatedAt` that is no save of this form (the enable switch saves at once, and the
-  // agent can change a routine) must not take a draft away, and must not be missed
-  // by a form that has none.
-  const filled = useRef({ id: r.id, own: false, from: r });
+  // for another routine, after this form's own save (see the Save button), or when
+  // nothing typed would be lost, that is, when they still say what the routine said
+  // before. A change of the routine's `updatedAt` that is no save of this form (the
+  // enable switch saves at once, and the agent can change a routine) must not take a
+  // draft away, and must not be missed by a form that has none.
+  const filled = useRef({ id: r.id, from: r });
   useEffect(() => {
     const was = filled.current;
-    if (r.id === was.id && !was.own && differs(was.from) && dirty) return;
-    filled.current = { id: r.id, own: false, from: r };
-    setName(r.name);
-    setMode(r.mode);
-    setSchedule(r.schedule || "0 9 * * *");
-    setRunAt(toLocalInput(r.runAt));
-    setInstructions(r.instructions);
-    setFresh(r.freshSession);
-    setGuard(r.guard);
-    setBrowser(r.browser);
-    setWorkspace(r.workspace ?? "");
-    setReport(reportValue(r));
+    if (r.id === was.id && differs(was.from) && dirty) return;
+    filled.current = { id: r.id, from: r };
+    fill(r);
   }, [r.id, r.updatedAt]);
 
   useEffect(() => {
@@ -865,7 +872,8 @@ function RoutineDetail({
         <button
           onClick={() =>
             act("save", async () => {
-              await api.updateRoutine(r.id, {
+              const sent = JSON.stringify(live.current);
+              const stored = await api.updateRoutine(r.id, {
                 name,
                 ...(mode === "repeats"
                   ? { schedule, runAt: "" }
@@ -878,7 +886,15 @@ function RoutineDetail({
                 ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),
               });
-              filled.current.own = true;
+              // What the server kept is what the form is filled from now: the server's clock
+              // counts seconds, so the reload that follows may carry the stamp it already had
+              // and have nothing new in it for the effect to see. Not for a routine the form
+              // has moved on from while this was on its way. The server trims, so unless more
+              // was typed since, the fields show what it kept.
+              if (filled.current.id === stored.id) {
+                filled.current = { id: stored.id, from: stored };
+                if (JSON.stringify(live.current) === sent) fill(stored);
+              }
               flashSaved();
             })
           }

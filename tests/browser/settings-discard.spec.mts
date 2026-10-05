@@ -170,6 +170,58 @@ test("a channel that the server changed while its page was open is shown as it i
   await asksBeforeClosing(page, instructions, 'Answer in French.');
 });
 
+/** A channel whose row is written at once and whose answer comes only when the poll has been served after it, as when saving restarts it. */
+async function channelSavedDuringAPoll(page: Page, instructions: string) {
+  let live = CHANNEL;
+  let served: () => void = () => {};
+  const polled = new Promise<void>((resolve) => (served = resolve));
+  let written = false;
+  let answered = false;
+  await portal(page, CHANNELS, async (ask) => {
+    if (ask.path === '/api/channels' && ask.method === 'GET') {
+      if (written) served();
+      return { ...CHANNELS['/api/channels'], channels: [live] };
+    }
+    if (ask.path === '/api/channels/c1' && ask.method === 'PATCH') {
+      const body = ask.json();
+      // What the server keeps: the instructions trimmed, and the row stamped.
+      live = { ...live, ...(typeof body.instructions === 'string' ? { instructions: body.instructions.trim() } : {}), ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}), updated_at: String(Number(live.updated_at) + 1) };
+      if (typeof body.instructions === 'string') {
+        written = true;
+        await polled;
+        // The poll's own answer is on its way to the page first.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        answered = true;
+      }
+      return live;
+    }
+  });
+  await page.goto('/settings/channels');
+  await settings(page).getByRole('button', { name: /Ops bot/ }).click();
+  const field = settings(page).getByRole('textbox', { name: 'Instructions' });
+  await field.fill(instructions);
+  await settings(page).getByRole('button', { name: 'Save', exact: true }).click();
+  // The page's own poll, which comes every four seconds, brings the saved row first.
+  await expect.poll(() => answered, { timeout: 15_000 }).toBe(true);
+  return field;
+}
+
+test("a channel saved while the poll brought the saved row first still keeps what is typed after it through the enable switch", async ({ page }) => {
+  const field = await channelSavedDuringAPoll(page, 'Answer in German.');
+  await field.fill('Answer in French.');
+  await settings(page).getByRole('switch', { name: 'Ops bot' }).click();
+  await expect(settings(page).getByRole('switch', { name: 'Ops bot' })).toHaveAttribute('aria-checked', 'false');
+  await expect(field).toHaveValue('Answer in French.');
+});
+
+test("a channel saved with a trailing newline in its instructions shows what the server kept, and has nothing left to discard", async ({ page }) => {
+  const field = await channelSavedDuringAPoll(page, 'Answer in German.\n');
+  await expect(field).toHaveValue('Answer in German.');
+  await expect(settings(page).getByRole('button', { name: /^Save/ })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(settings(page)).toBeHidden();
+});
+
 test('Escape over a new skill that was begun asks first', async ({ page }) => {
   await portal(page, { '/api/skills': { root: '/agent/skills', skills: [], diagnostics: [] } });
   await page.goto('/settings/skills');

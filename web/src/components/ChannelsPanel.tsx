@@ -433,24 +433,31 @@ function ChannelDetail({
   const dirty = differs(ch);
   useUnsavedDraft(!!dirty);
 
+  const fill = (from: Channel) => {
+    setName(from.name);
+    setValues({ ...from.config });
+    setInstructions(from.instructions ?? "");
+    setSlug(from.slug);
+    setRelayProgress(from.relayProgress);
+    setRelayTools(from.relayTools);
+    setAgentId(from.agentId);
+  };
+  // The fields as they are now, for a save that finishes after more was typed.
+  const live = useRef({ name, values, instructions, slug, relayProgress, relayTools, agentId });
+  live.current = { name, values, instructions, slug, relayProgress, relayTools, agentId };
+
   // What the form was last filled from: the fields are filled again from the channel
-  // for another channel, after this form's own save, or when nothing typed would be lost,
-  // that is, when they still say what the channel said before. A change of `updated_at`
-  // that is no save of this form (the enable switch saves at once, and another admin or
-  // tab can change a channel) must not take a draft away, and must not be missed by a
-  // form that has none.
-  const filled = useRef({ id: ch.id, own: false, from: ch });
+  // for another channel, after this form's own save (see `save`), or when nothing typed
+  // would be lost, that is, when they still say what the channel said before. A change
+  // of `updated_at` that is no save of this form (the enable switch saves at once, and
+  // another admin or tab can change a channel) must not take a draft away, and must not
+  // be missed by a form that has none.
+  const filled = useRef({ id: ch.id, from: ch });
   useEffect(() => {
     const was = filled.current;
-    if (ch.id === was.id && !was.own && differs(was.from) && dirty) return;
-    filled.current = { id: ch.id, own: false, from: ch };
-    setName(ch.name);
-    setValues({ ...ch.config });
-    setInstructions(ch.instructions ?? "");
-    setSlug(ch.slug);
-    setRelayProgress(ch.relayProgress);
-    setRelayTools(ch.relayTools);
-    setAgentId(ch.agentId);
+    if (ch.id === was.id && differs(was.from) && dirty) return;
+    filled.current = { id: ch.id, from: ch };
+    fill(ch);
   }, [ch.id, ch.updated_at]);
 
   useEffect(() => {
@@ -471,7 +478,8 @@ function ChannelDetail({
 
   const save = () =>
     act(async () => {
-      await api.updateChannel(ch.id, {
+      const sent = JSON.stringify(live.current);
+      const stored = await api.updateChannel(ch.id, {
         name,
         slug,
         config: values,
@@ -480,7 +488,15 @@ function ChannelDetail({
         relayTools,
         ...(agentId !== ch.agentId ? { agentId } : {}),
       });
-      filled.current.own = true;
+      // What the server kept is what the form is filled from now, as the channel's
+      // own poll may have brought it before this answer, and the reload that follows
+      // may then have nothing new in it for the effect to see. Not for a channel the
+      // form has moved on from while this was on its way. The server trims, so unless
+      // more was typed since, the fields show what it kept.
+      if (filled.current.id === stored.id) {
+        filled.current = { id: stored.id, from: stored };
+        if (JSON.stringify(live.current) === sent) fill(stored);
+      }
       flashSaved();
     });
 
