@@ -587,9 +587,12 @@ class ChannelSupervisor {
             ? `Approved — passed to ${question.person_name}, and ${scope}`
             : `Approved. ${question.person_name} will see it the next time they write.`;
         }
+        // An answer to a question about an action that is neither of the words that approve it nor a no: said, so that
+        // they do not think it ran. The question is answered, so the agent has to ask again.
+        const unclear = question.action && !/^no\b/i.test(answer) ? ` It was not an approval (only "approve" and "always" are), so nothing will run.` : "";
         return how === "sent"
-          ? `Passed on to ${question.person_name}.`
-          : `Saved for ${question.person_name} — they will see it the next time they write.`;
+          ? `Passed on to ${question.person_name}.${unclear}`
+          : `Saved for ${question.person_name} — they will see it the next time they write.${unclear}`;
       }
     }
 

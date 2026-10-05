@@ -62,10 +62,16 @@ Three answers. On a channel that draws buttons you get **Approve once**,
 | `#abcd always` | Writes a [standing rule](/people/rules) for that person |
 | `#abcd no` | Refused, and they are told |
 
-Anything else is relayed to them as an ordinary answer and **authorises
-nothing**. Only the literal word `always` creates a standing permission —
-something that outlives the conversation should never come from a reply that
-merely sounded enthusiastic.
+The words are exactly `approve` and `always`, in any case, with a full stop or
+an exclamation mark after them if your phone puts one there. Anything else is
+relayed to them as an ordinary answer and **authorises nothing**, including
+`yes`, `ok`, `do it`, `approved`, and an answer that merely begins with one of
+those or with `approve` (`#abcd ok, but not before Friday`, `#abcd always check
+with me first`). When your answer to a question about an action was neither, the
+reply you get says so: *It was not an approval (only "approve" and "always"
+are), so nothing will run.* Only the word `always` creates a standing
+permission — something that outlives the conversation should never come from a
+reply that merely sounded enthusiastic.
 
 The `#abcd` prefix is what makes it an answer rather than a remark. It is
 matched only at the start of a message and only against a question still

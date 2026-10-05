@@ -107,19 +107,22 @@ export function recordAnswer(id: string, answer: string): void {
 /**
  * Approval has to be a word, not a mood.
  *
- * "sounds fine to me" is an opinion; only these grant anything. Anything else
- * is relayed as an ordinary answer and authorises nothing, so an ambiguous
- * reply can never be read as a yes.
+ * Exactly the words the question and its buttons offer, and nothing that merely
+ * begins with one: "ok, but not before Friday", "yes, after the release" and "do
+ * it yourself, Priya" are answers, relayed as such, and authorise nothing, so an
+ * ambiguous reply can never be read as a yes. A full stop or an exclamation mark
+ * after the word does not change it.
  */
-const APPROVES = /^(approve|approved|allow|allowed|yes|ok|okay|go ahead|do it|always)\b/i;
+const APPROVES = /^(approve|always)[.!]*$/i;
 
 /**
- * Standing permission, which is a different promise from "yes".
+ * Standing permission, which is a different promise from "approve".
  *
  * Kept to one unmistakable word: a rule that outlives the conversation should
- * never be created by a reply that merely sounded enthusiastic.
+ * never be created by a reply that merely sounded enthusiastic, and "always check
+ * with me first" is the opposite of it.
  */
-const ALWAYS = /^(always)\b/i;
+const ALWAYS = /^always[.!]*$/i;
 
 /**
  * Is this message from the primary user an answer to a waiting question?

@@ -497,6 +497,42 @@ test("only the primary user's word approves anything: a colleague's \"always\" i
   await new Promise((resolve) => setImmediate(resolve));
 });
 
+test("only the words the question offers approve: an answer that merely begins with another is an answer, and nothing runs or is allowed", async () => {
+  useStubAsk();
+  roster();
+  await say("kim", "hi", "kim");
+  const asking = findChannelSession("tg:kim");
+  const action = "git push origin release";
+  const ask = () =>
+    askQuestion({ sessionId: asking.id, personKey: "tg:kim", personName: "Kim", channelSlug: "tg", channelKey: "kim", question: "May I publish?", actionTool: "bash", action });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const rules = listToolRules().length;
+  for (const answer of ["ok", "yes", "okay so what is this for?", "ok, but not before Friday", "yes, after the release", "do it yourself, Priya", "allow me to look at it first", "go ahead", "approved", "approve it if she asks nicely", "always check with me first", "always, but only on Fridays"]) {
+    const question = ask();
+    const reply = await say("owner", `#${question.id} ${answer}`, "owner");
+    await settle();
+    assert.match(reply, /^(Passed on to|Saved for) Kim/, answer);
+    assert.match(reply, /It was not an approval/, `${answer}: the primary user is told it did not approve`);
+    assert.equal(useGrant(asking.id, "bash", action), false, `${answer}: no grant`);
+    assert.equal(listToolRules().length, rules, `${answer}: no rule`);
+    assert.ok(getQuestion(question.id).answered_at, `${answer}: relayed as an answer`);
+  }
+  // A no is a no, and says nothing more.
+  const no = ask();
+  assert.match(await say("owner", `#${no.id} no`, "owner"), /^(Passed on to|Saved for) Kim[^]*$/);
+  assert.doesNotMatch(await say("owner", `#${ask().id} No.`, "owner"), /not an approval/);
+  // The words themselves, in any case, with the stop a phone puts after them.
+  for (const answer of ["approve", "Approve", "approve.", "APPROVE!"]) {
+    const question = ask();
+    assert.match(await say("owner", `#${question.id} ${answer}`, "owner"), /^Approved/, answer);
+    assert.equal(useGrant(asking.id, "bash", action), true, `${answer}: one use`);
+  }
+  const standing = ask();
+  await say("owner", `#${standing.id}: Always.`, "owner");
+  assert.equal(listToolRules().filter((r) => r.person_key === "tg:kim" && r.pattern === action).length, 1);
+  await settle();
+});
+
 test("an approval makes the action run in the conversation that asked: neither the relay of the answer nor the resumed reply taints it", async () => {
   useStubAsk();
   roster();

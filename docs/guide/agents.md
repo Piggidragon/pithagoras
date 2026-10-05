@@ -81,7 +81,10 @@ rules for every agent's heartbeat. A rule for all roles applies to it too.
 
 What it notices lands in **Activity** as notes; the tab and the agent's card
 show how many are unread. A note marked urgent also goes to the
-channel routines report to, when there is one. Most looks find nothing, and say
+channel routines report to, when there is one. It comes into that chat as a
+routine's report does, so the chat counts as having read untrusted content (the
+look read whatever `WATCH.md` names) until you start a new one with `/new`: it
+will not push or set up a routine there before. Most looks find nothing, and say
 nothing.
 
 A look never gets in the way: it waits while any chat or routine is working,
