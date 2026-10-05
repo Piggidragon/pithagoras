@@ -114,7 +114,12 @@ export function Modal({
     <div
       ref={leaving}
       className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-2 backdrop-blur-sm sm:p-4"
-      onMouseDown={(e) => e.target === e.currentTarget && void close()}
+      onMouseDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        // The press would otherwise clear focus once the question has taken it, or once it was given back.
+        e.preventDefault();
+        void close();
+      }}
     >
       {/* The rail layout gets a floor as well as a ceiling: its panels fetch
           before they render anything, so without one the dialog opened as a

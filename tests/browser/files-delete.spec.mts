@@ -188,9 +188,11 @@ test('two questions that came one after the other keep focus in the second, and 
   await page.getByRole('button', { name: 'Delete notes.md' }).focus();
   await page.keyboard.press('Enter');
   await expect(dialog(page)).toContainText('Delete "notes.md"?');
+  // Until the folder's check has answered, and the page has had its frames to put the question behind the file's.
+  const answered = page.waitForEvent('requestfinished', (r) => r.url().includes('/unsaved?'));
   release();
-  // Until the folder's question is waiting behind the file's.
-  await page.waitForTimeout(250);
+  await answered;
+  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toContainText('Delete "api"?');
   // Not sent back behind the backdrop to the row the first question came from.
@@ -198,4 +200,16 @@ test('two questions that came one after the other keep focus in the second, and 
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Delete notes.md' })).toBeFocused();
+});
+
+test('clicking beside a delete question answers no and gives focus back to the row, like Escape', async ({ page }) => {
+  await files(page, { unsaved: null });
+  const button = page.getByRole('button', { name: 'Delete notes.md' });
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog(page)).toContainText('Delete "notes.md"?');
+  // The backdrop, as the press that follows would otherwise clear the focus that was just given back.
+  await page.mouse.click(3, 3);
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(button).toBeFocused();
 });

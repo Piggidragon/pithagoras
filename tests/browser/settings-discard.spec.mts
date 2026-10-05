@@ -39,6 +39,22 @@ test('Escape over an MCP server form that was filled in asks first; one that was
   await asksBeforeClosing(page, command, 'notes-mcp --token abc');
 });
 
+test('a click beside Settings over a form that was filled in asks first, with the keyboard in the question', async ({ page }) => {
+  await portal(page, { '/api/mcp': MCP });
+  await page.goto('/settings/mcp');
+  await settings(page).getByRole('button', { name: 'Add server' }).click();
+  const command = settings(page).getByRole('textbox', { name: 'Command' });
+  await command.fill('notes-mcp --token abc');
+  // The backdrop: the press that follows must not take the focus out of the question it opened.
+  await page.mouse.click(3, 3);
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await expect(ask.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(ask).toBeHidden();
+  await expect(command).toHaveValue('notes-mcp --token abc');
+});
+
 test('Escape over a pasted config and over the raw file that were typed in asks first', async ({ page }) => {
   await portal(page, { '/api/mcp': MCP });
   await page.goto('/settings/mcp');
