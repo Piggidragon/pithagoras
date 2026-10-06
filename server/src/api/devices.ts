@@ -1,7 +1,6 @@
 import { X509Certificate, createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import express, { type Router } from "express";
-import { authEnabled } from "../auth.js";
 import { tlsFiles } from "../http-security.js";
 import { getSession } from "../db.js";
 import { sessions } from "../session-manager.js";
@@ -14,9 +13,13 @@ import {
   NameTaken,
   cancelPairingCode,
   devicesEnabled,
+  devicesOffBecause,
+  devicesSwitchedOn,
   getDevice,
+  hasPassword,
   listDevices,
   newPairingCode,
+  NO_PASSWORD,
   pairingOpen,
   removeDevice,
   renameDevice,
@@ -45,8 +48,10 @@ function spkiPin(): string | null {
  * Why the add-on cannot be switched on here, or undefined when it can. A portal
  * without a password would hand every paired computer to whoever reaches it.
  */
-const devicesRefused = (): string | undefined =>
-  authEnabled ? undefined : "The portal runs without a password (PORTAL_ALLOW_NO_PASSWORD), and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.";
+const devicesRefused = (): string | undefined => (hasPassword() ? undefined : NO_PASSWORD);
+
+/** The switch as Settings shows it: whether the add-on answers, whether it was switched on, and why it cannot answer. */
+const feature = () => ({ enabled: devicesEnabled(), switchedOn: devicesSwitchedOn(), refused: devicesRefused() ?? null });
 
 /** A device as the page shows it: the row, and what its live connection says. */
 function shown(device: DeviceRecord) {
@@ -83,7 +88,7 @@ export function devicesRouter(): Router {
   const router = express.Router();
 
   router.get("/features/devices", (_req, res) => {
-    res.json({ enabled: devicesEnabled(), refused: devicesRefused() ?? null });
+    res.json(feature());
   });
 
   router.put("/features/devices", async (req, res) => {
@@ -100,7 +105,7 @@ export function devicesRouter(): Router {
       }
       // Whether a chat has the device tools is settled when it loads.
       const { reloaded, waiting } = was !== enabled ? await sessions.reloadIdle() : { reloaded: 0, waiting: 0 };
-      res.json({ enabled: devicesEnabled(), refused: devicesRefused() ?? null, reloaded, waiting });
+      res.json({ ...feature(), reloaded, waiting });
     } catch (e) {
       res.status(409).json({ error: (e as Error).message });
     }
@@ -108,7 +113,7 @@ export function devicesRouter(): Router {
 
   // Everything below only while the add-on is on.
   router.use("/devices", (_req, res, next) => {
-    if (!devicesEnabled()) return res.status(404).json({ error: "Devices are switched off. Switch them on in Settings → Add-ons." });
+    if (!devicesEnabled()) return res.status(404).json({ error: devicesOffBecause() });
     next();
   });
 
@@ -213,7 +218,7 @@ export function devicesRouter(): Router {
   // --- a chat's devices ---
 
   router.use("/sessions/:id/devices", (req, res, next) => {
-    if (!devicesEnabled()) return res.status(404).json({ error: "Devices are switched off. Switch them on in Settings → Add-ons." });
+    if (!devicesEnabled()) return res.status(404).json({ error: devicesOffBecause() });
     const session = getSession(req.params.id);
     if (!session) return res.status(404).json({ error: "No such chat" });
     // Only a chat in the portal: the device's approvals are answered there, which a channel cannot do.

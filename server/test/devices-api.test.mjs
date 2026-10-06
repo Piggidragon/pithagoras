@@ -1,5 +1,6 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import WebSocket from "ws";
 import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
@@ -155,4 +156,45 @@ test("switching the add-on off drops connected devices and the open code", async
   const back = await device(token);
   assert.equal(back.status, 101);
   back.sock.close(1000);
+});
+
+test("a switch left on does not outlast the password: without one the add-on answers nothing, and with it again the paired devices are still there", async () => {
+  const home = testHome("pithagoras-devices-restart-");
+  const env = (overrides) => serverEnv(home, 0, overrides);
+  const withPassword = { PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "" };
+  const signIn = async (at) => (await fetch(`${at}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: PASSWORD }) })).headers.getSetCookie()[0].split(";")[0];
+
+  // With a password: switched on, and one device paired.
+  const first = await startServer({ ...env(withPassword), PORT: String(await freePort()) });
+  const as = await signIn(first.base);
+  assert.equal((await api("/api/features/devices", { at: first.base, as, method: "PUT", body: { enabled: true } })).body.enabled, true);
+  const code = (await api("/api/devices/pair", { at: first.base, as, method: "POST" })).body.code;
+  const paired = await api("/sync/v1/pair", { at: first.base, as: null, method: "POST", body: { code, name: "desk", os: "linux", arch: "x86_64" } });
+  assert.equal(paired.status, 200);
+  first.child.kill();
+  await once(first.child, "exit");
+
+  // Restarted without one (PORTAL_ALLOW_NO_PASSWORD): the switch is still on, and nothing answers.
+  const open = await startServer({ ...env({}), PORT: String(await freePort()) });
+  const feature = (await api("/api/features/devices", { at: open.base, as: null })).body;
+  assert.deepEqual({ enabled: feature.enabled, switchedOn: feature.switchedOn }, { enabled: false, switchedOn: true });
+  assert.match(feature.refused, /PORTAL_PASSWORD/);
+  assert.equal((await api("/api/features/flags", { at: open.base, as: null })).body.devices.enabled, false);
+  const list = await api("/api/devices", { at: open.base, as: null });
+  assert.equal(list.status, 404);
+  assert.match(list.body.error, /without a password/);
+  assert.equal((await api("/api/devices/pair", { at: open.base, as: null, method: "POST" })).status, 404);
+  assert.equal((await api("/sync/v1/pair", { at: open.base, as: null, method: "POST", body: { code: "ABCDEFGH", name: "x", os: "linux", arch: "x86_64" } })).status, 404);
+  const sock = new WebSocket(open.base.replace("http", "ws") + "/sync/v1/connect", { headers: { Authorization: `Bearer ${paired.body.connector_token}` } });
+  sock.on("error", () => {});
+  assert.equal(await new Promise((r) => sock.on("unexpected-response", (_req, res) => r(res.statusCode))), 503);
+  assert.equal((await api("/api/features/devices", { at: open.base, as: null, method: "PUT", body: { enabled: true } })).status, 409);
+  open.child.kill();
+  await once(open.child, "exit");
+
+  // With a password again: on without anybody switching it, and the device is paired as before.
+  const back = await startServer({ ...env(withPassword), PORT: String(await freePort()) });
+  const again = await signIn(back.base);
+  assert.equal((await api("/api/features/devices", { at: back.base, as: again })).body.enabled, true);
+  assert.deepEqual((await api("/api/devices", { at: back.base, as: again })).body.devices.map((d) => d.name), ["desk"]);
 });

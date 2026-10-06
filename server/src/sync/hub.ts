@@ -34,7 +34,7 @@ import {
   type Hello,
   type PolicyDocument,
 } from "./protocol.js";
-import { deviceOfToken, devicesEnabled, getDevice, touchDevice } from "./store.js";
+import { deviceOfToken, devicesEnabled, devicesOffBecause, getDevice, touchDevice } from "./store.js";
 
 /**
  * The portal's end of Pithagoras Sync: one WebSocket per paired device, which
@@ -459,7 +459,7 @@ export const isSyncUpgrade = (url: string | undefined): boolean => url === CONNE
  * WebSocket.
  */
 export function admit(headers: http.IncomingHttpHeaders): { deviceId: string } | { status: number; message: string } {
-  if (!devicesEnabled()) return { status: 503, message: "Devices are switched off in this portal" };
+  if (!devicesEnabled()) return { status: 503, message: devicesOffBecause() };
   // A browser always names the page it opens a socket from; the device client never does.
   if (headers.origin !== undefined) return { status: 403, message: "Not from a browser" };
   const auth = headers.authorization ?? "";

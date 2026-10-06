@@ -1321,7 +1321,10 @@ export interface AuditEntry {
 
 /** The agent's browser, and who may drive it. */
 export interface DevicesFeature {
+  /** Whether the add-on answers: it is switched on, and the portal has the password it needs. */
   enabled: boolean;
+  /** What the switch was set to: on, but not answering, in a portal that now runs without a password. */
+  switchedOn: boolean;
   refused: string | null;
 }
 

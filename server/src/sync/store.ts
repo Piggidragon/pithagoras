@@ -27,10 +27,34 @@ export type DeviceRecord = Omit<DeviceRow, "token_hash">;
 
 const SWITCH = "devices_enabled";
 
-/** Whether the Devices add-on is on. Off in a fresh install. */
-export const devicesEnabled = (): boolean => getSetting(SWITCH) === "1";
+/**
+ * Whether the portal runs with a login (PORTAL_PASSWORD), read the way auth.ts
+ * reads it. Not imported from there: that module ends the process when there is
+ * none, which a module the agent's tools import must not do.
+ */
+export const hasPassword = (): boolean => (process.env.PORTAL_PASSWORD ?? "") !== "";
 
-/** Switches the add-on. Whether it may be switched on is the route's to say (api/devices.ts): this module stays clear of the login, which the agent's tools import it beside. */
+/** What the switch was last set to, whatever the portal is running with now. */
+export const devicesSwitchedOn = (): boolean => getSetting(SWITCH) === "1";
+
+/**
+ * Whether the Devices add-on is on, and answers. Off in a fresh install. It
+ * also needs the portal's password, each time the portal starts: a paired
+ * computer would be open to anyone who reaches a portal without one, and the
+ * switch is a stored setting that outlives the start it was made in.
+ */
+export const devicesEnabled = (): boolean => hasPassword() && devicesSwitchedOn();
+
+/** Why the add-on cannot be on in a portal without a password: said on the switch, and where a device or the page asks. */
+export const NO_PASSWORD = "The portal runs without a password (PORTAL_ALLOW_NO_PASSWORD), and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.";
+
+/** What a refusal says while the add-on does not answer: it is off, or it is on in a portal that has lost its password. */
+export const devicesOffBecause = (): string =>
+  devicesSwitchedOn()
+    ? "Devices are switched on, but this portal runs without a password, so nothing about them answers. Set PORTAL_PASSWORD, or switch them off in Settings → Add-ons."
+    : "Devices are switched off. Switch them on in Settings → Add-ons.";
+
+/** Switches the add-on. Whether it may be switched on is the route's to say (api/devices.ts). */
 export function setDevicesEnabled(on: boolean): void {
   putSetting(SWITCH, on ? "1" : "");
 }

@@ -1048,7 +1048,7 @@ export function DevicesAddon({ onError }: { onError: (e: string) => void }) {
     setNote(null);
     try {
       const { waiting, ...saved } = await api.setDevicesFeature(enabled);
-      setDevices({ enabled: saved.enabled, refused: saved.refused });
+      setDevices({ enabled: saved.enabled, switchedOn: saved.switchedOn, refused: saved.refused });
       setNote(() => () => reloadNote(waiting));
       // The sidebar has the Devices page while the add-on is on.
       window.dispatchEvent(new Event("features-changed"));
@@ -1068,10 +1068,16 @@ export function DevicesAddon({ onError }: { onError: (e: string) => void }) {
       </div>
       <SwitchRow
         title={t("Devices")}
-        detail={devices.enabled ? t("On: devices can pair and connect.") : t("Off: no device can pair or connect, and paired ones wait until it is on again.")}
-        on={devices.enabled}
+        detail={
+          devices.enabled
+            ? t("On: devices can pair and connect.")
+            : devices.switchedOn
+              ? t("Switched on, but nothing answers while the portal runs without a password. Paired devices wait.")
+              : t("Off: no device can pair or connect, and paired ones wait until it is on again.")
+        }
+        on={devices.enabled || devices.switchedOn}
         onChange={(enabled) => void change(enabled)}
-        disabled={busy || (!devices.enabled && devices.refused !== null)}
+        disabled={busy || (!devices.switchedOn && devices.refused !== null)}
         note={!devices.enabled && devices.refused !== null ? t("The portal runs without a password, and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.") : undefined}
       />
       {devices.enabled && (

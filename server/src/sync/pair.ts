@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { PAIR_PATH, isDeviceName } from "./protocol.js";
-import { addDevice, devicesEnabled, takePairingCode } from "./store.js";
+import { addDevice, devicesEnabled, devicesOffBecause, takePairingCode } from "./store.js";
 
 /**
  * `POST /sync/v1/pair`: a one-time code from the Devices page, traded for a
@@ -17,7 +17,7 @@ export function pairRouter(): Router {
   // Its own small parser: the body is four short fields.
   router.post(PAIR_PATH, express.json({ limit: "4kb" }), (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    if (!devicesEnabled()) return res.status(404).json({ error: "Devices are switched off in this portal" });
+    if (!devicesEnabled()) return res.status(404).json({ error: devicesOffBecause() });
     if (req.headers.origin !== undefined) return res.status(403).json({ error: "Pairing is done by the device, not a browser" });
     const { code, name, os, arch } = req.body ?? {};
     if (typeof code !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(code)) return res.status(400).json({ error: "A code is 1 to 64 letters and digits" });

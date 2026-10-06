@@ -2412,6 +2412,7 @@ const de: Locale = {
     "Your own computers, paired with the portal through the Pithagoras Sync client. A chat you give a device to can read, change and run things there, as far as the device's own settings let it.": "Deine eigenen Computer, mit dem Portal gekoppelt über den Pithagoras-Sync-Client. Ein Chat, dem du ein Gerät gibst, kann dort lesen, ändern und ausführen, so weit die Einstellungen des Geräts selbst es zulassen.",
     "On: devices can pair and connect.": "An: Geräte können sich koppeln und verbinden.",
     "Off: no device can pair or connect, and paired ones wait until it is on again.": "Aus: Kein Gerät kann sich koppeln oder verbinden; gekoppelte warten, bis es wieder an ist.",
+    "Switched on, but nothing answers while the portal runs without a password. Paired devices wait.": "Eingeschaltet, aber nichts antwortet, solange das Portal ohne Passwort läuft. Gekoppelte Geräte warten.",
     "The portal runs without a password, and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.": "Das Portal läuft ohne Passwort, und ein gekoppelter Computer stünde jedem offen, der es erreicht. Setze zuerst PORTAL_PASSWORD.",
     "Pair and manage devices": "Geräte koppeln und verwalten",
     "Pair a device": "Gerät koppeln",

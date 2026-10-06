@@ -13,10 +13,14 @@ until it is on again.
 
 ## Switching it on
 
-**Settings → Add-ons → Devices.** The switch needs a portal password: a portal
+**Settings → Add-ons → Devices.** The add-on needs a portal password: a portal
 that runs without one (`PORTAL_ALLOW_NO_PASSWORD`) cannot switch it on, as a
-paired computer would be open to anyone who reaches the portal. Once it is on,
-**Devices** is in the sidebar.
+paired computer would be open to anyone who reaches the portal. The password is
+checked each time the portal starts, not only when the switch is turned: a
+portal that is restarted without its password treats Devices as off, whatever
+the switch says. Nothing pairs or connects, and Settings and the Devices page
+say why. The devices stay paired, and the add-on is on again once the password
+is. Once it is on, **Devices** is in the sidebar.
 
 A reverse proxy that asks for its own login in front of the portal stops a
 computer from pairing: its requests to `/sync/v1/pair` and `/sync/v1/connect`
