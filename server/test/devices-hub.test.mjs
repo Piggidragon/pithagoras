@@ -17,7 +17,7 @@ const { pairRouter } = await import("../dist/sync/pair.js");
 const { attachSyncUpgrade, linkOf, dropDevice, hub, AUDIT_BURST, TIMING } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
 const { getDb, listAudit, recordAudit, AUDIT_DEVICE_KEEP } = await import("../dist/db.js");
-const { encodeFrame, decodeFrame, FRAME, CLOSE, MAX_APPROVALS } = await import("../dist/sync/protocol.js");
+const { encodeFrame, decodeFrame, FRAME, CLOSE, MAX_APPROVALS, MAX_CALLS } = await import("../dist/sync/protocol.js");
 const { connect: connectTo, until } = await import("./fake-device.mjs");
 
 let server;
@@ -445,6 +445,29 @@ test("a command's output past what the portal takes kills it; one that never end
   await assert.rejects(stopped, /stopped/);
   const sent = (await device.waitFor("exec.signal", signals + 2)).slice(signals).map((m) => m.params.signal);
   assert.deepEqual(sent, ["SIGTERM", "SIGKILL"]);
+  device.ws.close(1001);
+});
+
+test("a stop still goes out when the device's table of calls is full", async () => {
+  const { connector_token: token, device_id: id } = await paired("stopper");
+  const { device } = await connect(token, { answers: { "exec.start": {}, "exec.signal": {}, "fs.stat": () => undefined } });
+  await until(() => linkOf(id)?.info, "device.info");
+  const link = linkOf(id);
+  const ctx = { chat: "c1", tainted: false, tool: "bash" };
+  const stop = new AbortController();
+  const run = link.exec({ command: "sleep 1d", cwd: "/w", ctx, onData: () => {}, signal: stop.signal, limits: { killMs: 100 } });
+  run.catch(() => {});
+  await device.waitFor("exec.start");
+  await sleep(30);
+  // As many calls as it takes at once, none answered: one more is refused, but the stop is not.
+  const held = Array.from({ length: MAX_CALLS }, () => link.call("fs.stat", { path: "/x", ctx }, { timeoutMs: 2000 }));
+  held.forEach((call) => call.catch(() => {}));
+  await device.waitFor("fs.stat", MAX_CALLS);
+  await assert.rejects(link.call("fs.stat", { path: "/y", ctx }), /too many calls/);
+  stop.abort();
+  const signals = await device.waitFor("exec.signal", 2);
+  assert.deepEqual(signals.map((m) => m.params.signal), ["SIGTERM", "SIGKILL"]);
+  await assert.rejects(run, /stopped/);
   device.ws.close(1001);
 });
 

@@ -21,6 +21,12 @@ export const MAX_CHUNK = 64 * 1024;
 export const MAX_FILE = 64 * 1024 * 1024;
 /** Calls the device handles at once; more are refused here before they are sent. */
 export const MAX_CALLS = 64;
+/**
+ * Answers to its questions and stops of its commands in flight at once, counted
+ * apart from MAX_CALLS: they end what the device is doing rather than add to
+ * it, so they must still go out when its table of calls is full.
+ */
+export const MAX_STOPS = 256;
 /** Approvals one device may have open at once. A person answers them; a device that asks for more than this is not asking one. */
 export const MAX_APPROVALS = 128;
 

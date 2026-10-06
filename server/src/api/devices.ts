@@ -4,7 +4,7 @@ import express, { type Router } from "express";
 import { tlsFiles } from "../http-security.js";
 import { getSession } from "../db.js";
 import { sessions } from "../session-manager.js";
-import { defaultCwd, devicePath, endGrant, grantDevice, grantRefused, grantsOf } from "../sync/grants.js";
+import { defaultCwd, devicePath, endGrant, grantDevice, grantOf, grantRefused, grantsOf } from "../sync/grants.js";
 import { deviceToolConflicts } from "../sync/tools.js";
 import { CLOSE, CODE, DeviceError, readPolicy, type Choice } from "../sync/protocol.js";
 import { alertOf, clearAlert, dropAll, dropDevice, linkOf } from "../sync/hub.js";
@@ -172,6 +172,13 @@ export function devicesRouter(): Router {
     const { answer, minutes } = req.body ?? {};
     if (!Number.isInteger(id) || !CHOICES.includes(answer)) return res.status(400).json({ error: "answer must be once, chat, time or deny" });
     if (answer === "time" && !(Number.isInteger(minutes) && minutes >= 1)) return res.status(400).json({ error: "minutes must be a whole number of at least 1" });
+    // A question of a chat that no longer has the device (or that was denied for it) is only ever denied: a late Allow, from a page
+    // that was open when the grant ended, would let the device run what the chat has no right to any more.
+    const asked = link.approvals.get(id);
+    if (answer !== "deny" && asked && (link.isDenied(id) || (getSession(asked.chat) && !grantOf(asked.chat, req.params.id)))) {
+      link.deny(id);
+      return res.status(409).json({ error: "That chat no longer has this device, so the question is denied" });
+    }
     try {
       await link.answerApproval(id, answer, minutes);
       res.json({ ok: true });

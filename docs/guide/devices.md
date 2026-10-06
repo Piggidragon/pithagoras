@@ -149,8 +149,11 @@ Ending a grant also stops what the chat is doing on the device. A command that
 is running is told to stop (and killed ten seconds later if it does not), the
 chat's call ends with an error that says the device was taken back, a question
 it waits on is withdrawn, and any other question the device still holds for that
-chat is denied, so an **Allow** after the switch cannot run anything. The
-device is told as well, and forgets what it allowed the chat. This is the
+chat is denied, however many calls the device has open (denials and stops are
+not held back by that limit). An **Allow** on the Devices page for a chat that
+no longer has the device is refused and denies the question instead, so a page
+that was open when the grant ended cannot run anything. The device is told as
+well, and forgets what it allowed the chat. This is the
 portal's side: a command the device has already started may still do what it was
 doing until the device stops it. A portal that does not do this at all is the
 "compromised portal" under [What is trusted](#what-is-trusted).

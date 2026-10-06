@@ -18,6 +18,7 @@ import {
   MAX_CHUNK,
   MAX_FILE,
   MAX_MESSAGE,
+  MAX_STOPS,
   PROTO_VERSION,
   decodeFrame,
   encodeFrame,
@@ -112,6 +113,8 @@ interface Pending {
   abandoned: boolean;
   /** The stream a read, a write or a command uses. */
   stream?: number;
+  /** Counted against MAX_STOPS, not MAX_CALLS (see Waiting.apart). */
+  apart: boolean;
 }
 
 /** What a stream's binary frames go to. */
@@ -127,6 +130,8 @@ export interface Waiting {
   onApproval?: (approval: ApprovalInfo) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Answers a question of the device or stops a command: counted apart from the calls, so that it goes out when they are many. */
+  apart?: boolean;
 }
 
 const offline = () => new DeviceError(CODE.IO, "the device disconnected");
@@ -150,6 +155,10 @@ export class DeviceLink extends EventEmitter {
   readonly approvals = new Map<number, ApprovalInfo>();
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
+  /** How many of `pending` are counted apart (MAX_STOPS). */
+  private apart = 0;
+  /** Approvals a deny was sent for, until they are resolved: none is denied twice, and none is allowed after. */
+  private readonly denying = new Set<number>();
   private nextStream = 1;
   private readonly sinks = new Map<number, Sink>();
   private readonly exits = new Map<number, (exit: ExecExit) => void>();
@@ -218,7 +227,10 @@ export class DeviceLink extends EventEmitter {
   /** A request, answered by the device; the result as it sent it. */
   call(method: string, params: Record<string, unknown>, waiting: Waiting = {}): Promise<unknown> {
     if (this.closed) return Promise.reject(offline());
-    if (this.pending.size >= MAX_CALLS) return Promise.reject(new DeviceError(CODE.BUSY, "too many calls to the device at once"));
+    const apart = waiting.apart === true;
+    if (apart ? this.apart >= MAX_STOPS : this.pending.size - this.apart >= MAX_CALLS) {
+      return Promise.reject(new DeviceError(CODE.BUSY, "too many calls to the device at once"));
+    }
     if (waiting.signal?.aborted) return Promise.reject(new DeviceError(CODE.INTERNAL, "stopped"));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -234,11 +246,13 @@ export class DeviceLink extends EventEmitter {
         timer: setTimeout(() => this.abandon(id, new DeviceError(CODE.IO, `the device did not answer ${method} in time`)), waiting.timeoutMs ?? CALL_TIMEOUT_MS),
         abandoned: false,
         stream: typeof params.stream === "number" ? params.stream : undefined,
+        apart,
       };
       const stop = () => this.abandon(id, new DeviceError(CODE.INTERNAL, "stopped"));
       waiting.signal?.addEventListener("abort", stop, { once: true });
       if (waiting.onApproval) this.on(`approval:${id}`, waiting.onApproval);
       this.pending.set(id, entry);
+      if (apart) this.apart++;
       this.send({ jsonrpc: "2.0", id, method, params });
     });
   }
@@ -258,24 +272,46 @@ export class DeviceLink extends EventEmitter {
     if (!entry || entry.abandoned) return;
     entry.abandoned = true;
     entry.reject(why);
+    if (entry.apart) return void this.take(id);
     for (const approval of this.approvals.values()) {
-      if (approval.call === id) this.answerApproval(approval.id, "deny").catch(() => {});
+      if (approval.call === id) this.deny(approval.id);
     }
     // Kept until the device answers, so that a late answer is known as this call's.
   }
 
-  /** Denies what the device still asks for a chat that no longer has it. Those of a call already given up on were denied with it. */
+  /** A call's entry, no longer pending: answered, or one that needs no late answer matched. */
+  private take(id: number): Pending | undefined {
+    const entry = this.pending.get(id);
+    if (!entry) return undefined;
+    this.pending.delete(id);
+    if (entry.apart) this.apart--;
+    return entry;
+  }
+
+  /**
+   * Denies what the device still asks for a chat that no longer has it, each
+   * question once: the ones of a call already given up on were denied with it,
+   * and one whose deny could not go out is tried again here.
+   */
   withdrawApprovals(chat: string): void {
-    for (const approval of this.approvals.values()) {
-      if (approval.chat !== chat) continue;
-      if (typeof approval.call === "number" && this.pending.get(approval.call)?.abandoned) continue;
-      this.answerApproval(approval.id, "deny").catch(() => {});
-    }
+    for (const approval of this.approvals.values()) if (approval.chat === chat) this.deny(approval.id);
+  }
+
+  /** Denies an approval, once: not again while the first is on its way or answered, and the owner cannot allow it after. */
+  deny(id: number): void {
+    if (this.denying.has(id)) return;
+    this.denying.add(id);
+    this.answerApproval(id, "deny").catch(() => this.denying.delete(id));
+  }
+
+  /** Whether a deny was sent for the approval, which then is not allowed any more. */
+  isDenied(id: number): boolean {
+    return this.denying.has(id);
   }
 
   /** The owner's answer to an approval, sent to the device. */
   answerApproval(id: number, answer: Choice, minutes?: number): Promise<unknown> {
-    return this.call("approval.answer", { id, answer, ...(answer === "time" ? { minutes } : {}) }, { timeoutMs: QUICK_TIMEOUT_MS });
+    return this.call("approval.answer", { id, answer, ...(answer === "time" ? { minutes } : {}) }, { timeoutMs: QUICK_TIMEOUT_MS, apart: true });
   }
 
   /** A file's content, from FileData frames and the result that follows them. */
@@ -398,7 +434,7 @@ export class DeviceLink extends EventEmitter {
   }
 
   private notifySignal(stream: number, signal: "SIGINT" | "SIGTERM" | "SIGKILL"): void {
-    this.call("exec.signal", { stream, signal }, { timeoutMs: QUICK_TIMEOUT_MS }).catch(() => {});
+    this.call("exec.signal", { stream, signal }, { timeoutMs: QUICK_TIMEOUT_MS, apart: true }).catch(() => {});
   }
 
   /** A stream id no open read, write or command of this connection uses. */
@@ -445,9 +481,8 @@ export class DeviceLink extends EventEmitter {
       if (message.error) logRefused(this.deviceId, message.error?.message);
       return;
     }
-    const entry = this.pending.get(message.id);
+    const entry = this.take(message.id);
     if (!entry) return;
-    this.pending.delete(message.id);
     if (entry.abandoned) {
       // Started after all, for a call nobody waits for any more: it is stopped at once.
       if (entry.method === "exec.start" && !message.error && entry.stream !== undefined) this.notifySignal(entry.stream, "SIGKILL");
@@ -498,7 +533,7 @@ export class DeviceLink extends EventEmitter {
         // Asked for a call the portal has stopped waiting for: nobody is there to answer it.
         const waiting = typeof approval.call === "number" ? this.pending.get(approval.call) : undefined;
         if (waiting?.abandoned) {
-          this.answerApproval(approval.id, "deny").catch(() => {});
+          this.deny(approval.id);
           return;
         }
         if (typeof approval.call === "number") this.emit(`approval:${approval.call}`, approval);
@@ -510,6 +545,7 @@ export class DeviceLink extends EventEmitter {
         if (id === undefined) return;
         const was = this.approvals.get(id);
         this.approvals.delete(id);
+        this.denying.delete(id);
         if (was) hub.emit("approval-resolved", this.deviceId, was);
         return;
       }
@@ -549,8 +585,10 @@ export class DeviceLink extends EventEmitter {
     clearInterval(this.pinger);
     for (const [, entry] of this.pending) if (!entry.abandoned) entry.reject(offline());
     this.pending.clear();
+    this.apart = 0;
     for (const sink of this.sinks.values()) sink.fail(offline());
     this.approvals.clear();
+    this.denying.clear();
     this.emit("closed");
   }
 }

@@ -26,7 +26,7 @@ const { devicesRouter } = await import("../dist/api/devices.js");
 const { createSession, deleteSession } = await import("../dist/db.js");
 const { guardExtension, taintSession } = await import("../dist/pi/guard.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
-const { FRAME, readDeviceInfo } = await import("../dist/sync/protocol.js");
+const { FRAME, MAX_CALLS, readDeviceInfo } = await import("../dist/sync/protocol.js");
 const { connect: connectTo, until, INFO, sha256 } = await import("./fake-device.mjs");
 
 let server;
@@ -494,6 +494,49 @@ test("the questions a device holds for a chat are denied when the chat no longer
   await until(() => linkOf(id).approvals.has(73), "the third");
   deleteSession(gone);
   await until(() => device.asked("approval.answer").some((m) => m.params.id === 73), "the deny after the delete");
+});
+
+test("ending a grant denies every question the chat has open, however many calls the device holds, and a late Allow is not sent", async () => {
+  let approvals = 0;
+  const { id, device } = await online("crowd", {
+    // Every call waits for the owner, and nothing ever answers it.
+    "fs.list": (params, rid, d) => {
+      d.notify("approval.requested", { id: ++approvals, call: rid, chat: params.ctx.chat, tool: "ls", target: params.path, reasons: [], preview: null, choices: ["once", "deny"], max_minutes: 0, created_ms: Date.now(), expires_ms: Date.now() + 120_000 });
+      return new Promise(() => {});
+    },
+    "approval.answer": {},
+  });
+  const mine = chat();
+  grants.grantDevice(mine, id, "/home/alice");
+  const ext = extensionApi();
+  deviceTools({ sessionId: mine, cwd: home, pi, serverTool: () => undefined })(ext);
+  // As many as the device takes at once: its table is full.
+  const calls = Array.from({ length: MAX_CALLS }, (_, i) => {
+    const call = ext.tools.get("ls").execute(`c${i}`, { device: "crowd" }, undefined, undefined, {});
+    call.catch(() => {});
+    return call;
+  });
+  await until(() => linkOf(id).approvals.size === MAX_CALLS, "a question for each call");
+  grants.endGrant(mine, id);
+  await until(() => device.asked("approval.answer").length === MAX_CALLS, "a deny for each question");
+  assert.deepEqual(device.asked("approval.answer").map((m) => m.params.id).sort((a, b) => a - b), Array.from({ length: MAX_CALLS }, (_, i) => i + 1));
+  assert.ok(device.asked("approval.answer").every((m) => m.params.answer === "deny"));
+  for (const call of calls) await assert.rejects(within(call), /taken back/);
+
+  // The device has not closed the questions: the page still lists them, and an Allow from it, after the grant ended, goes nowhere.
+  const still = [...linkOf(id).approvals.keys()][0];
+  const late = await api("POST", `/devices/${id}/approvals/${still}`, { answer: "once" });
+  assert.equal(late.status, 409);
+  assert.match(late.body.error, /no longer has this device/);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(device.asked("approval.answer").every((m) => m.params.answer === "deny"), "no Allow reached the device");
+  assert.equal(device.asked("approval.answer").length, MAX_CALLS, "and each question was denied once");
+
+  // The question of a chat the portal does not know is the device's own, and the owner may answer it from here.
+  device.notify("approval.requested", { id: 9001, call: null, chat: "the-devices-own-chat", tool: "exec", target: "make", reasons: [], preview: null, choices: ["once", "deny"], max_minutes: 0, created_ms: Date.now(), expires_ms: Date.now() + 120_000 });
+  await until(() => linkOf(id).approvals.has(9001), "the device's own question");
+  assert.equal((await api("POST", `/devices/${id}/approvals/9001`, { answer: "once" })).status, 200);
+  assert.deepEqual(device.asked("approval.answer").at(-1).params, { id: 9001, answer: "once" });
 });
 
 test("a dialog its asker takes back goes from the chat as well", async () => {
