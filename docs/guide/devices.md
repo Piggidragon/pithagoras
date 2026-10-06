@@ -214,8 +214,8 @@ each device's own settings. In particular:
   switched off, and the settings only it may change. A device that must not be
   reachable from a compromised portal should not be paired.
 - **An agent's own shell on the server can reach the portal.** A chat's agent
-  runs as the portal's user, with the portal's login password and secret in the
-  environment of its server `bash`, and it can read and write the portal's own
+  runs as the portal's user, with the portal's login password (and its secret,
+  where one is set) in the environment of its server `bash`, and it can read and write the portal's own
   files and database. So a chat whose agent may run commands on the server can,
   in principle, log in to the portal's API, grant itself a device and answer the
   approvals that device sends, or change the device's settings where it lets the
