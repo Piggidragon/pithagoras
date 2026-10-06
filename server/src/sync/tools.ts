@@ -113,8 +113,9 @@ function askInChat(link: DeviceLink, deviceName: string, approval: ApprovalInfo,
   ended.addEventListener("abort", callEnded, { once: true });
   const target = approval.target.length > 300 ? `${approval.target.slice(0, 300)}…` : approval.target;
   const title = `${deviceName} asks before ${approval.tool}: ${target}${approval.reasons.length ? `\n${approval.reasons.join("; ")}` : ""}${approval.preview ? `\n\n${approval.preview.slice(0, 1000)}` : ""}`;
-  // As long as the device waits, within reason: its own clock says when it stops.
-  const timeout = Math.min(65 * 60_000, Math.max(5_000, approval.expires_ms - Date.now()));
+  // As long as the device waits, within reason. Its clock is not the portal's (a laptop with the wrong time zone is hours off),
+  // so its own span is used, from now: the question arrived just now.
+  const timeout = Math.min(65 * 60_000, Math.max(5_000, approval.expires_ms - approval.created_ms));
   Promise.resolve(ui.select(title, options.map((o) => o.label), { signal: stop.signal, timeout }))
     .then((label: unknown) => {
       const picked = options.find((o) => o.label === label);

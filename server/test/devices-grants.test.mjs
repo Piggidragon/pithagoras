@@ -365,7 +365,9 @@ test("an approval the device asks for is asked in the chat and answered from the
   let approvals = 0;
   const { id, device } = await online("tower", {
     "fs.list": (params, rid, d) => {
-      const approval = { id: ++approvals, call: rid, chat: params.ctx.chat, tool: "ls", target: params.path, reasons: ["Ask mode: every call asks"], preview: null, choices: ["once", "chat", "time", "deny"], max_minutes: 30, created_ms: Date.now(), expires_ms: Date.now() + 120_000 };
+      // The device's clock is ten minutes behind the portal's: its question still lasts its two minutes.
+      const behind = Date.now() - 10 * 60_000;
+      const approval = { id: ++approvals, call: rid, chat: params.ctx.chat, tool: "ls", target: params.path, reasons: ["Ask mode: every call asks"], preview: null, choices: ["once", "chat", "time", "deny"], max_minutes: 30, created_ms: behind, expires_ms: behind + 120_000 };
       d.notify("approval.requested", approval);
       return new Promise((resolve) => (d.release = () => {
         d.notify("approval.resolved", { id: approval.id, chat: approval.chat, answer: "once", minutes: null, by: "device" });
@@ -389,7 +391,7 @@ test("an approval the device asks for is asked in the chat and answered from the
   await until(() => asked.length === 1, "the question in the chat");
   assert.match(asked[0].title, /^tower asks before ls: \/home\/alice\nAsk mode: every call asks$/);
   assert.deepEqual(asked[0].options, ["Allow once", "Allow for this chat", "Allow for 15 minutes", "Allow for 30 minutes", "Deny"]);
-  assert.ok(asked[0].opts.timeout > 100_000 && asked[0].opts.timeout <= 120_000);
+  assert.equal(asked[0].opts.timeout, 120_000);
   assert.match(textOf(updates[0]), /Waiting for approval on tower/);
   asked[0].resolve("Allow for 30 minutes");
   assert.equal(textOf(await listing), "(empty directory)");
