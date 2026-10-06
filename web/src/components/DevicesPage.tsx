@@ -21,7 +21,11 @@ import { ErrorBanner, LoadFailed, Segments, codeAreaCls, ghostCls, inputSmCls, p
 export function DevicesPage() {
   const [list, setList] = useState<DevicesList | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  /** The list was shown, and the last refresh failed: what is on the page is from before. */
+  const [stale, setStale] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether a list was ever read: `list` in `load` is the first render's, which is null for as long as the page polls.
+  const loaded = useRef(false);
   /** The code made here, which the portal says only once. */
   const [code, setCode] = useState<PairingCode | null>(null);
   const [pairing, setPairing] = useState(false);
@@ -29,12 +33,14 @@ export function DevicesPage() {
   const load = () =>
     api.devices().then(
       (l) => {
+        loaded.current = true;
         setFailed(null);
+        setStale(null);
         setList(l);
         // Used or cancelled elsewhere, or run out: no longer a code to show.
         if (!l.pairing) setCode(null);
       },
-      (e: Error) => (list ? setError(e.message) : setFailed(e.message)),
+      (e: Error) => (loaded.current ? setStale(e.message) : setFailed(e.message)),
     );
 
   useEffect(() => {
@@ -83,6 +89,12 @@ export function DevicesPage() {
     <div className="h-full overflow-y-auto px-4 py-6">
       <div className="mx-auto w-full max-w-3xl space-y-4">
         {error && <ErrorBanner onClose={() => setError(null)}>{error}</ErrorBanner>}
+        {stale && (
+          <div role="alert" className="flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
+            <LuTriangleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1 break-words">{t("Could not refresh the list: {error}. What is shown may be out of date.", { error: stale })}</span>
+          </div>
+        )}
         <PageHeader
           icon={<LuLaptop />}
           title={t("Devices")}

@@ -24,9 +24,9 @@ function device(over: Record<string, unknown> = {}) {
   };
 }
 
-async function portal(page: Page, { enabled = true, switchedOn = enabled, refused = null as string | null, devices = [device()] as any[] } = {}) {
+async function portal(page: Page, { enabled = true, switchedOn = enabled, refused = null as string | null, devices = [device()] as any[], listError = null as string | null } = {}) {
   const sent: { method: string; path: string; body: any }[] = [];
-  const state = { enabled, switchedOn, devices, pairing: null as null | { expires: string } };
+  const state = { enabled, switchedOn, devices, pairing: null as null | { expires: string }, listError };
   await mockPortal(page, ({ path, method, json }) => {
     if (method !== 'GET') sent.push({ method, path, body: method === 'DELETE' ? null : json() });
     if (path === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: false }, devices: { enabled: state.enabled } };
@@ -36,7 +36,10 @@ async function portal(page: Page, { enabled = true, switchedOn = enabled, refuse
       state.switchedOn = state.enabled;
       return { enabled: state.enabled, switchedOn: state.switchedOn, refused, reloaded: 0, waiting: 0 };
     }
-    if (path === '/api/devices' && method === 'GET') return { devices: state.devices, pairing: state.pairing, spki: 'pin-of-the-portal' };
+    if (path === '/api/devices' && method === 'GET') {
+      if (state.listError) return reply(404, { error: state.listError });
+      return { devices: state.devices, pairing: state.pairing, spki: 'pin-of-the-portal' };
+    }
     if (path === '/api/devices/pair' && method === 'POST') {
       state.pairing = { expires: new Date(Date.now() + 600_000).toISOString() };
       return { code: 'K7Q2M9XZ', expires: state.pairing.expires, attempts: 10, spki: 'pin-of-the-portal' };
@@ -103,6 +106,28 @@ test('a switch left on in a portal that lost its password says nothing answers, 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
   expect(sent).toEqual([{ method: 'PUT', path: '/api/features/devices', body: { enabled: false } }]);
+});
+
+test('the page says why when the add-on does not answer', async ({ page }) => {
+  await portal(page, { listError: 'Devices are switched on, but this portal runs without a password, so nothing about them answers. Set PORTAL_PASSWORD, or switch them off in Settings → Add-ons.' });
+  await page.goto('/devices');
+  await expect(page.getByRole('alert')).toContainText('this portal runs without a password');
+});
+
+test('a refresh that fails after the list was shown says that what is shown may be out of date, and goes when it works again', async ({ page }) => {
+  const { state } = await portal(page);
+  await page.goto('/devices');
+  await expect(page.getByRole('listitem', { name: 'laptop' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  // Switched off in another tab: the next poll is refused.
+  state.listError = 'Devices are switched off. Switch them on in Settings → Add-ons.';
+  const stale = page.getByRole('alert').filter({ hasText: 'Could not refresh the list' });
+  await expect(stale).toContainText('Devices are switched off', { timeout: 10_000 });
+  await expect(stale).toContainText('may be out of date');
+  // What was there stays on the page, and it comes back by itself.
+  await expect(page.getByRole('listitem', { name: 'laptop' })).toBeVisible();
+  state.listError = null;
+  await expect(stale).toHaveCount(0, { timeout: 10_000 });
 });
 
 test('the page links to the newest client release, one program per system', async ({ page }) => {

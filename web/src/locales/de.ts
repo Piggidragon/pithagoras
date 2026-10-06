@@ -2421,6 +2421,7 @@ const de: Locale = {
     "waiting for you": "warten auf dich",
     "A pairing code is open until {time}. It is shown only where it was made; make a new one to see one here.": "Ein Kopplungscode ist bis {time} offen. Er wird nur dort angezeigt, wo er erzeugt wurde; erzeuge einen neuen, um hier einen zu sehen.",
     "Cancel the code": "Code verwerfen",
+    "Could not refresh the list: {error}. What is shown may be out of date.": "Die Liste konnte nicht aktualisiert werden: {error}. Was angezeigt wird, kann veraltet sein.",
     "No device is paired yet. Install the Pithagoras Sync client on a computer, then press Pair a device.": "Noch kein Gerät gekoppelt. Installiere den Pithagoras-Sync-Client auf einem Computer und drücke dann „Gerät koppeln“.",
     "Pairing code": "Kopplungscode",
     "Runs out in {time}": "Läuft ab in {time}",
