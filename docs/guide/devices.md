@@ -212,7 +212,11 @@ client's `portal_policy` allows:
 `portal_policy` itself, the pairing, the shell, sudo's path and the elevation
 password are never in the document, and only the device's owner changes them,
 on the device. The client's settings are described in its
-`docs/permissions.md`.
+`docs/permissions.md`. The portal keeps a device's settings only when they nest
+at most 32 levels deep and take at most 256 KiB as text, which the client's own
+never come near: a document past that is left out, and the portal goes on with
+the ones it had. A device that does not share its settings (`policy` is not in
+the capabilities it names) cannot change them either.
 
 What a device decided about a call (allowed, asked, denied) is in the portal's
 [audit log](/guide/sessions#audit) as **Device**, with the device's name. These

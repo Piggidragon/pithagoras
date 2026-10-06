@@ -141,6 +141,24 @@ test("pairing, the list, rename, approvals, settings, and removal that cuts the 
   assert.deepEqual((await api("/api/devices")).body.devices, []);
 });
 
+test("a device's settings that are too deep to be written out are not kept, and the device list answers", async () => {
+  const code = (await api("/api/devices/pair", { method: "POST" })).body.code;
+  const { device_id: id, connector_token: token } = (await api("/sync/v1/pair", { as: null, method: "POST", body: { code, name: "deep", os: "linux", arch: "x86_64" } })).body;
+  const dev = await device(token);
+  await until(async () => (await api("/api/devices")).body.devices[0]?.policy, "the device's settings");
+  // 5,000 levels in 10 KB: JSON.stringify cannot write that on Node 22, which is what the image runs. As text, as the test could not write it either.
+  const deep = (version) => `{"jsonrpc":"2.0","method":"policy.changed","params":{"portal_policy":"read","version":"${version}","settings":{"x":${"[".repeat(5000)}${"]".repeat(5000)}},"device_only":[]}}`;
+  dev.sock.send(deep("deep"));
+  // The portal has read it once it has the device's answer to a call that comes after it (not one that asks for the settings anew).
+  assert.equal((await api(`/api/devices/${id}/approvals/3`, { method: "POST", body: { answer: "deny" } })).status, 200);
+  const list = await api("/api/devices");
+  assert.equal(list.status, 200);
+  assert.equal(list.body.devices[0].policy.version, "v1", "the settings it had before");
+  dev.sock.close(1000);
+  await dev.closed;
+  assert.equal((await api(`/api/devices/${id}`, { method: "DELETE" })).status, 200);
+});
+
 test("switching the add-on off drops connected devices and the open code", async () => {
   const code = (await api("/api/devices/pair", { method: "POST" })).body.code;
   const { connector_token: token } = (await api("/sync/v1/pair", { as: null, method: "POST", body: { code, name: "box", os: "linux", arch: "x86_64" } })).body;

@@ -17,7 +17,7 @@ const { pairRouter } = await import("../dist/sync/pair.js");
 const { attachSyncUpgrade, linkOf, dropDevice, hub, AUDIT_BURST, TIMING } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
 const { getDb, listAudit, recordAudit, AUDIT_DEVICE_KEEP } = await import("../dist/db.js");
-const { encodeFrame, decodeFrame, FRAME, CLOSE, MAX_APPROVALS, MAX_CALLS } = await import("../dist/sync/protocol.js");
+const { encodeFrame, decodeFrame, FRAME, CLOSE, MAX_APPROVALS, MAX_CALLS, MAX_SETTINGS_DEPTH, MAX_SETTINGS_CHARS } = await import("../dist/sync/protocol.js");
 const { connect: connectTo, until } = await import("./fake-device.mjs");
 
 let server;
@@ -696,6 +696,73 @@ test("a frame that makes the portal throw ends that link only, with a protocol v
   assert.equal(linkOf(otherId).closed, false, "the other device is not touched");
   assert.equal((await linkOf(otherId).call("device.info", {})).name, "laptop");
   other.device.ws.close(1001);
+});
+
+// The settings as a policy.get answers them, and a frame as text: JSON.stringify on Node 22 cannot write a document 5,000 levels deep, not even in a test.
+const policyOf = (version, settings = {}) => ({ portal_policy: "read", version, settings: { policy: { mode: "ask" }, ...settings }, device_only: [] });
+const nested = (levels) => {
+  let v = {};
+  for (let i = 1; i < levels; i++) v = { a: v };
+  return v;
+};
+const deepSettings = `{"x":${"[".repeat(5000)}${"]".repeat(5000)}}`;
+const SHARES = { hello: { capabilities: ["fs", "exec", "approvals", "policy"] } };
+
+test("a device's settings are kept only as deep and as large as the page can carry", async () => {
+  const { connector_token: token, device_id: id } = await paired("settler");
+  const { device } = await connect(token, { ...SHARES, answers: { "policy.get": policyOf("v1") } });
+  await until(() => linkOf(id)?.policy, "the settings");
+  const link = linkOf(id);
+  // What the device said, once the portal has read all of it: the answer to a call comes after what was sent before.
+  const read = () => link.call("device.info", {});
+
+  // What a page can carry is taken, up to the limits.
+  device.notify("policy.changed", policyOf("v2", { deep: nested(MAX_SETTINGS_DEPTH - 1), wide: "x".repeat(MAX_SETTINGS_CHARS - 1000) }));
+  await until(() => link.policy.version === "v2", "settings within the limits");
+  // Past them, not: the earlier settings stay, and the link goes on.
+  for (const [what, frame] of [
+    ["5,000 levels deep", `{"jsonrpc":"2.0","method":"policy.changed","params":{"portal_policy":"read","version":"deep","settings":${deepSettings},"device_only":[]}}`],
+    ["one level too deep", JSON.stringify({ jsonrpc: "2.0", method: "policy.changed", params: policyOf("levels", { deep: nested(MAX_SETTINGS_DEPTH) }) })],
+    ["too large", JSON.stringify({ jsonrpc: "2.0", method: "policy.changed", params: policyOf("large", { wide: "x".repeat(MAX_SETTINGS_CHARS) }) })],
+  ]) {
+    device.ws.send(frame);
+    await read();
+    assert.equal(link.policy.version, "v2", `${what}: not taken`);
+  }
+  assert.doesNotThrow(() => JSON.stringify(link.policy), "what the device list carries");
+  assert.equal(link.closed, false);
+  device.ws.close(1001);
+});
+
+test("a device's answer to policy.get is kept only as deep as the page can carry", async () => {
+  const { connector_token: token, device_id: id } = await paired("settler-get");
+  let sent = "";
+  const { device } = await connect(token, {
+    ...SHARES,
+    answers: {
+      "policy.get": (_params, rid, d) => {
+        sent = `{"jsonrpc":"2.0","id":${rid},"result":{"portal_policy":"read","version":"deep","settings":${deepSettings},"device_only":[]}}`;
+        d.ws.send(sent);
+      },
+    },
+  });
+  await until(() => linkOf(id)?.info && device.asked("policy.get").length > 0, "the connect");
+  await linkOf(id).call("device.info", {});
+  assert.ok(sent.length > 10_000, "the answer went out before the call above");
+  assert.equal(linkOf(id).policy, undefined);
+  assert.equal(linkOf(id).closed, false);
+  device.ws.close(1001);
+});
+
+test("a device that does not say it shares its settings cannot change them", async () => {
+  const { connector_token: token, device_id: id } = await paired("settler-quiet");
+  const { device } = await connect(token);
+  await until(() => linkOf(id)?.info, "device.info");
+  device.notify("policy.changed", policyOf("v9"));
+  await linkOf(id).call("device.info", {});
+  assert.equal(linkOf(id).policy, undefined);
+  assert.equal(device.asked("device.info").length, 2, "its own connect and the call above: none for the change");
+  device.ws.close(1001);
 });
 
 test("a device that sends refusals as fast as it can writes one log line and a count, not a line each", async () => {

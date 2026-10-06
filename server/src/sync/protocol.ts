@@ -299,11 +299,37 @@ export interface PolicyDocument {
   device_only: string[];
 }
 
+/**
+ * What the portal keeps of a device's settings: they are the device's own words,
+ * held while it is connected and sent to the page on every poll. A real document
+ * nests a few levels and weighs a few KiB. Deeper than this, a document is one
+ * that JSON.stringify (recursive on Node 22) cannot write, and the device list
+ * would answer 500; larger, it is memory and bandwidth for nothing.
+ */
+export const MAX_SETTINGS_DEPTH = 32;
+export const MAX_SETTINGS_CHARS = 256 * 1024;
+
+/** Whether a parsed JSON value nests no deeper than `limit`. Walks without recursion, as it is asked of documents deeper than the stack. */
+function nestsWithin(value: unknown, limit: number): boolean {
+  const open: [object, number][] = [[value as object, 1]];
+  while (open.length) {
+    const [node, depth] = open.pop()!;
+    if (depth > limit) return false;
+    for (const child of Array.isArray(node) ? node : Object.values(node)) {
+      if (typeof child === "object" && child !== null) open.push([child, depth + 1]);
+    }
+  }
+  return true;
+}
+
+/** `policy.get`'s result (or `policy.changed`'s params), or undefined when it is not a settings document or it is too deep or too large to keep. */
 export function readPolicy(v: unknown): PolicyDocument | undefined {
   if (!isObject(v) || !isObject(v.settings)) return undefined;
   const portal_policy = v.portal_policy === "read" || v.portal_policy === "write" ? v.portal_policy : undefined;
   const version = text(v.version, 128);
   const device_only = textList(v.device_only, 256, 256);
   if (!portal_policy || version === undefined || !device_only) return undefined;
+  // The depth first: only a document that is not too deep can be written out to measure it.
+  if (!nestsWithin(v.settings, MAX_SETTINGS_DEPTH) || JSON.stringify(v.settings).length > MAX_SETTINGS_CHARS) return undefined;
   return { portal_policy, version, settings: v.settings, device_only };
 }

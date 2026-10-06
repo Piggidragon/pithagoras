@@ -514,7 +514,7 @@ export class DeviceLink extends EventEmitter {
       const code = Number.isInteger(message.error.code) ? message.error.code : CODE.INTERNAL;
       // The message is the device's word and any JSON: it is text only when it is, as String() of some objects throws.
       const said = typeof message.error.message === "string" ? message.error.message.slice(0, 2000) : "the device refused";
-      entry.reject(new DeviceError(code, said, message.error.data));
+      entry.reject(new DeviceError(code, said));
     } else entry.resolve(message.result);
   }
 
@@ -586,6 +586,8 @@ export class DeviceLink extends EventEmitter {
         return;
       }
       case "policy.changed": {
+        // Only from a device that says it shares its settings.
+        if (!this.can("policy")) return;
         const policy = readPolicy(params);
         if (!policy) return;
         this.policy = policy;
