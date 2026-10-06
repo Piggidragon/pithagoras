@@ -559,6 +559,33 @@ test("what a device says in a refusal is logged as one quoted line", async () =>
   device.ws.close(1001);
 });
 
+test("a device that sends refusals as fast as it can writes one log line and a count, not a line each", async () => {
+  const { connector_token: token, device_id: id } = await paired("chatty");
+  const { device } = await connect(token);
+  await until(() => linkOf(id)?.info, "device.info");
+  const lines = [];
+  const warn = console.warn;
+  console.warn = (...args) => lines.push(args.join(" "));
+  Object.assign(TIMING, { refusedLogMs: 200 });
+  try {
+    for (let n = 0; n < 500; n++) device.send({ jsonrpc: "2.0", error: { code: -32700, message: `bad ${n}` } });
+    // Everything the device sent first has been read once its answer to a call is in.
+    await linkOf(id).call("device.info", {});
+    assert.equal(lines.length, 1, "the first of the interval");
+    assert.match(lines[0], /refused a frame: "bad 0"/);
+    await until(() => lines.length === 2, "the summary");
+    assert.match(lines[1], /^\[devices\] \S+ refused 499 more frames in the last 0 seconds$/);
+    // The next interval starts with a line of its own again.
+    device.send({ jsonrpc: "2.0", error: { code: -32700, message: "again" } });
+    await until(() => lines.length === 3, "the next first line");
+    assert.match(lines[2], /refused a frame: "again"/);
+  } finally {
+    console.warn = warn;
+    Object.assign(TIMING, { refusedLogMs: 60_000 });
+  }
+  device.ws.close(1001);
+});
+
 test("a device cannot push the portal's own entries out of the audit log, nor write it faster than a few a second", async () => {
   const { connector_token: token, device_id: id } = await paired("flooder");
   const { device } = await connect(token);

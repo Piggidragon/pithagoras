@@ -67,12 +67,14 @@ const QUICK_TIMEOUT_MS = 30_000;
  * change of network. A first that was heard from within `recentMs` before the
  * second came, as long as the regular pinger would still have kept it, is said
  * on the Devices page when it is replaced. A connection that is closed has
- * `closeGraceMs` to answer the close.
+ * `closeGraceMs` to answer the close, and what a device says in a frame it
+ * refuses is logged once per `refusedLogMs`, with a count of the rest.
  */
 export const TIMING = {
   replaceProbeMs: 3_000,
   recentMs: DEAD_AFTER_MS,
   closeGraceMs: 2_000,
+  refusedLogMs: 60_000,
 };
 /**
  * What the portal puts up with from a command on a device. The device has its
@@ -437,8 +439,7 @@ export class DeviceLink extends EventEmitter {
     if (typeof message.method === "string") return this.receiveNotification(message.method, message.params);
     if (typeof message.id !== "number") {
       // The device says the portal sent something it could not read: a bug here, worth a line in the log (never the frame).
-      // Quoted, as it is the device's own text: a line break in it could otherwise write a line of the log.
-      if (message.error) console.warn(`[devices] ${this.deviceId} refused a frame: ${JSON.stringify(String(message.error?.message ?? "").slice(0, 200))}`);
+      if (message.error) logRefused(this.deviceId, message.error?.message);
       return;
     }
     const entry = this.pending.get(message.id);
@@ -572,6 +573,31 @@ export class DeviceLink extends EventEmitter {
     this.approvals.clear();
     this.emit("closed");
   }
+}
+
+/** Devices that have had a refusal logged within the interval, with how many more it sent since. */
+const refusedLogs = new Map<string, { skipped: number }>();
+
+/**
+ * What a device says about a frame it refused goes to the portal's log, but not
+ * as often as it can send it, or the log would grow as fast as the device
+ * uploads: the first of an interval is written (quoted, as it is the device's
+ * own text and a line break in it could write a line of the log), the rest are
+ * counted, and one line at the end of the interval says how many.
+ */
+function logRefused(deviceId: string, said: unknown): void {
+  const open = refusedLogs.get(deviceId);
+  if (open) {
+    open.skipped++;
+    return;
+  }
+  const gate = { skipped: 0 };
+  refusedLogs.set(deviceId, gate);
+  console.warn(`[devices] ${deviceId} refused a frame: ${JSON.stringify(String(said ?? "").slice(0, 200))}`);
+  setTimeout(() => {
+    refusedLogs.delete(deviceId);
+    if (gate.skipped) console.warn(`[devices] ${deviceId} refused ${gate.skipped} more frames in the last ${Math.round(TIMING.refusedLogMs / 1000)} seconds`);
+  }, TIMING.refusedLogMs).unref();
 }
 
 // --- the registry ---

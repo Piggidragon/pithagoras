@@ -266,4 +266,6 @@ each device's own settings. In particular:
   ended within its timeout (at most four hours) and half a minute is killed and
   given up on. Nothing in a call carries environment variables to the device.
 - The portal logs pairing and removal by device name only; tokens and codes
-  never reach a log.
+  never reach a log. When a device says it refused something the portal sent,
+  the portal writes the first such message of a minute (quoted, cut at 200
+  characters) and one line with how many more there were, however many it sends.
