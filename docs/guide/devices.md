@@ -152,7 +152,8 @@ doing until the device stops it, and a portal that does not act on this is
 the "compromised portal" below.
 
 If another installed extension brings a tool of one of these names, that chat
-cannot be given a device, and the button says why.
+cannot be given a device, and the button says why, also under a device the chat
+was given before the chat was loaded.
 
 ## Approvals
 

@@ -39,6 +39,14 @@ test('a chat is granted a paired device from the chip, in a folder there, and gi
   await expect(chip).toBeFocused();
 });
 
+test('a device the chat has, in a chat whose tools another extension owns, says why it will not work', async ({ page }) => {
+  await page.goto('/tests/chat.html?phase=devices-blocked');
+  await page.getByRole('button', { name: 'Devices', exact: true }).click();
+  const tower = page.getByRole('dialog', { name: 'Devices for this chat' }).getByRole('listitem', { name: 'tower' });
+  await expect(tower.getByRole('switch', { name: 'Let this chat use tower' })).toHaveAttribute('aria-checked', 'true');
+  await expect(tower.getByText('Another extension owns bash in this chat, so they cannot take a device')).toBeVisible();
+});
+
 test('a call made on a device names it on its card', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=devices');
   const card = page.locator('.chat-tool').filter({ hasText: 'cargo test' });

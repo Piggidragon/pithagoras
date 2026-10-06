@@ -1421,6 +1421,8 @@ export interface ChatDevice {
   /** Whether it can be granted now; `why` says why not. */
   offered: boolean;
   why: string | null;
+  /** Another extension owns the tools in this chat, so a device cannot be used in it, granted or not. */
+  blocked: string | null;
 }
 
 /** When a chat takes a grant up: at once, after its current run, or when it next starts. */

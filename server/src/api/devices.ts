@@ -231,12 +231,14 @@ export function devicesRouter(): Router {
   router.get("/sessions/:id/devices", (req, res) => {
     const grants = new Map(grantsOf(req.params.id).map((g) => [g.deviceId, g]));
     const conflicts = deviceToolConflicts(req.params.id);
+    // Said for a device the chat has as well: a grant given before the chat was loaded cannot be refused, and its calls are.
+    const blocked = conflicts.length ? `Another extension owns ${conflicts.join(", ")} in this chat, so they cannot take a device` : null;
     res.json({
       devices: listDevices().map((device) => {
         const link = linkOf(device.id);
         const grant = grants.get(device.id);
-        const why = conflicts.length
-          ? `Another extension owns ${conflicts.join(", ")} in this chat, so they cannot take a device`
+        const why = blocked
+          ? blocked
           : link?.info
             ? grantRefused(device, defaultCwd(link.info))
             : `${device.name} is not connected`;
@@ -252,6 +254,7 @@ export function devicesRouter(): Router {
           folders: link?.info?.folders.map((f) => ({ ...f, path: devicePath(f.path, link.info!, "/") })) ?? [],
           offered: !why,
           why: why ?? null,
+          blocked,
         };
       }),
     });

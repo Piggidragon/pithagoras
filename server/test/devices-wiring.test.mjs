@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import express from "express";
@@ -45,6 +45,7 @@ const { pairRouter } = await import("../dist/sync/pair.js");
 const { attachSyncUpgrade, linkOf, dropDevice } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
 const grants = await import("../dist/sync/grants.js");
+const { deviceToolConflicts } = await import("../dist/sync/tools.js");
 const { createSession } = await import("../dist/db.js");
 const { connect, until } = await import("./fake-device.mjs");
 
@@ -144,5 +145,32 @@ test("a chat never granted a device keeps pi's own tools", async () => {
     assert.deepEqual(client.session.getActiveToolNames().filter((n) => ["grep", "find", "ls"].includes(n)), []);
   } finally {
     client.dispose();
+  }
+});
+
+test("a tool of one of the device tools' names that another extension owns is known before the chat's first grant", async () => {
+  // A package that brings its own `ls`: pi keeps the first registration of a name, and extensions load before the devices' tools.
+  const file = path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "own-ls.ts");
+  writeFileSync(file, `
+export default function (pi) {
+  pi.registerTool({ name: "ls", label: "ls", description: "Its own ls", parameters: { type: "object", properties: {} }, async execute() { return { content: [{ type: "text", text: "x" }], details: {} }; } });
+}
+`);
+  try {
+    const cwd = mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "chat-"));
+    createSession({ id: "owned", title: "owned", workspace: cwd, executor: "host", kind: "task" });
+    const client = await SdkPiClient.create({ cwd, sessionDir: mkdtempSync(path.join(home, "pi-")), provider: "fake", modelId: "m", sessionId: "owned", devices: true });
+    try {
+      // Never granted, and nothing registered: the conflict is there all the same.
+      assert.equal(client.session.getAllTools().find((t) => t.name === "read").sourceInfo.path, "<builtin:read>");
+      await until(() => deviceToolConflicts("owned").length > 0, "the conflict to be known");
+      assert.deepEqual(deviceToolConflicts("owned"), ["ls"]);
+      // A chat without it has none: pi's own tools are not a conflict.
+      assert.deepEqual(deviceToolConflicts("plain"), []);
+    } finally {
+      client.dispose();
+    }
+  } finally {
+    rmSync(file, { force: true });
   }
 });

@@ -191,7 +191,7 @@ function DeviceRow({ device: d, busy, onSwitch, onFolder }: { device: ChatDevice
           </button>
         </form>
       )}
-      {!d.granted && !d.offered && d.why && <p className="mt-1 text-xs text-fg-muted">{d.why}</p>}
+      {d.blocked ? <p className="mt-1 text-xs text-warn">{d.blocked}</p> : !d.granted && !d.offered && d.why && <p className="mt-1 text-xs text-fg-muted">{d.why}</p>}
     </li>
   );
 }

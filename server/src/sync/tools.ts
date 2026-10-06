@@ -134,15 +134,18 @@ export function deviceTools(opts: DeviceToolsOptions) {
   // Once the tools are registered in this chat's pi they stay, through every reload: see the top.
   let registered = false;
   return (api: any): void => {
-    const grants = devicesEnabled() ? grantsOf(opts.sessionId) : [];
-    if (!grants.length && !registered) return;
-    registered = true;
+    const on = devicesEnabled();
+    const grants = on ? grantsOf(opts.sessionId) : [];
+    const registering = grants.length > 0 || registered;
+    // Which tools another extension owns is known from the chat's start, grant or not: the first grant is refused for it, and not only the next.
+    if (!registering && !on) return;
+    registered = registering;
     const granted = grants.flatMap((g) => {
       const device = getDevice(g.deviceId);
       return device ? [{ device, grant: g }] : [];
     });
     const names = granted.map((g) => g.device.name);
-    for (const name of PI_TOOLS) api.registerTool(definition(name, names, granted));
+    if (registering) for (const name of PI_TOOLS) api.registerTool(definition(name, names, granted));
 
     api.on("session_start", () => {
       let all: any[] = [];
@@ -151,15 +154,17 @@ export function deviceTools(opts: DeviceToolsOptions) {
       } catch {
         // No tools to read: nothing to say about them.
       }
+      // pi's own tools are what a grant replaces; any other source of these names keeps them, and the device tools are not registered.
       conflicts.set(
         opts.sessionId,
         PI_TOOLS.filter((n) => {
           const tool = all.find((t) => t?.name === n);
-          return tool && tool.sourceInfo?.path !== `<inline:${DEVICE_TOOLS_SOURCE}>`;
+          const source = String(tool?.sourceInfo?.path ?? "");
+          return tool && source !== `<inline:${DEVICE_TOOLS_SOURCE}>` && !source.startsWith("<builtin:");
         }),
       );
       // Left from an earlier grant: grep, find and ls take only a device, and there is none.
-      if (!granted.length) {
+      if (registering && !granted.length) {
         const active: string[] = (api.getActiveTools?.() ?? []).map((t: any) => (typeof t === "string" ? t : t?.name));
         const left = active.filter((n) => !DEVICE_ONLY.has(n as PiTool));
         if (left.length !== active.length) api.setActiveTools(left);

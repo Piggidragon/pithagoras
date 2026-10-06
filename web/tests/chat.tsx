@@ -1,5 +1,5 @@
 // Development-only fixture: the chat's activity, thinking, tools and compaction, without a server.
-// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns|devices to see each state,
+// Open /tests/chat.html?phase=model|prefill|thinking|reasoning|compacting|tools|agents|interrupted|turns|devices|devices-blocked to see each state,
 // and add &loading=1 for the conversation still arriving.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -231,16 +231,21 @@ if (phase === 'git') {
 }
 
 // A chat with paired devices, one granted from the chip and a call made on it: `?phase=devices`. What the page sent is in window.sentDevices.
-if (phase === 'devices') {
+if (phase === 'devices' || phase === 'devices-blocked') {
   events.push(
     ev('tool_execution_start', { toolCallId: 'd1', toolName: 'bash', args: { command: 'cargo test', device: 'laptop' } }, 10),
     ev('tool_execution_end', { toolCallId: 'd1', toolName: 'bash', result: { content: [{ type: 'text', text: 'test result: ok' }] } }, 9),
   );
   const sent: unknown[] = ((window as any).sentDevices = []);
-  let devices = [
-    { id: 'd1', name: 'laptop', os: 'linux', online: true, granted: false, cwd: null as string | null, home: '/home/alice', mode: 'ask', folders: [{ path: '/home/alice/src', access: 'rw', execute: true }], offered: true, why: null },
-    { id: 'd2', name: 'desk', os: 'windows', online: false, granted: false, cwd: null, home: null, mode: null, folders: [], offered: false, why: 'desk is not connected' },
-  ];
+  const owned = 'Another extension owns bash in this chat, so they cannot take a device';
+  type Shown = { id: string; name: string; os: string; online: boolean; granted: boolean; cwd: string | null; home: string | null; mode: string | null; folders: { path: string; access: string; execute: boolean }[]; offered: boolean; why: string | null; blocked: string | null };
+  let devices: Shown[] = phase === 'devices-blocked'
+    // Granted before the chat's pi was loaded, in a chat whose bash another extension owns.
+    ? [{ id: 'd3', name: 'tower', os: 'linux', online: true, granted: true, cwd: '/home/alice', home: '/home/alice', mode: 'ask', folders: [], offered: false, why: owned, blocked: owned }]
+    : [
+        { id: 'd1', name: 'laptop', os: 'linux', online: true, granted: false, cwd: null, home: '/home/alice', mode: 'ask', folders: [{ path: '/home/alice/src', access: 'rw', execute: true }], offered: true, why: null, blocked: null },
+        { id: 'd2', name: 'desk', os: 'windows', online: false, granted: false, cwd: null, home: null, mode: null, folders: [], offered: false, why: 'desk is not connected', blocked: null },
+      ];
   mockFetch((u, init) => {
     if (!u.includes('/api/sessions/preview/devices')) return undefined;
     const method = init?.method ?? 'GET';

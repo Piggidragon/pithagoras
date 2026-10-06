@@ -21,7 +21,7 @@ const { pairRouter } = await import("../dist/sync/pair.js");
 const { attachSyncUpgrade, linkOf, dropDevice } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
 const grants = await import("../dist/sync/grants.js");
-const { deviceTools, approvalOptions } = await import("../dist/sync/tools.js");
+const { deviceTools, approvalOptions, deviceToolConflicts } = await import("../dist/sync/tools.js");
 const { devicesRouter } = await import("../dist/api/devices.js");
 const { createSession, deleteSession } = await import("../dist/db.js");
 const { guardExtension, taintSession } = await import("../dist/pi/guard.js");
@@ -118,7 +118,7 @@ test("a chat is granted a connected device in a folder it offers; ending the gra
   const listed = await api("GET", `/sessions/${mine}/devices`);
   assert.equal(listed.status, 200);
   const shown = listed.body.devices.find((d) => d.id === id);
-  assert.deepEqual({ ...shown, folders: shown.folders.length }, { id, name: "desk", os: "linux", online: true, granted: false, cwd: null, home: "/home/alice", mode: "folders", folders: 1, offered: true, why: null });
+  assert.deepEqual({ ...shown, folders: shown.folders.length }, { id, name: "desk", os: "linux", online: true, granted: false, cwd: null, home: "/home/alice", mode: "folders", folders: 1, offered: true, why: null, blocked: null });
 
   // In Folders mode only inside its folders, and always an absolute path.
   assert.match((await api("PUT", `/sessions/${mine}/devices/${id}`, { cwd: "/etc" })).body.error, /offers only its folders: \/home\/alice\/src/);
@@ -325,6 +325,40 @@ test("a command that never stops printing is cut at what the portal takes, and p
   } finally {
     rmSync(log, { force: true });
   }
+});
+
+test("a chat whose tools another extension owns is refused a device, and says so for one it has", async () => {
+  const { id } = await online("blocked");
+  const mine = chat();
+  // Never granted: nothing is registered, but session_start still tells what is owned: pi's own tools are not that.
+  const ext = extensionApi();
+  ext.getAllTools = () => [
+    { name: "read", sourceInfo: { path: "<builtin:read>" } },
+    { name: "bash", sourceInfo: { path: "/packages/background/index.ts" } },
+  ];
+  deviceTools({ sessionId: mine, cwd: home, pi, serverTool: () => undefined })(ext);
+  assert.equal(ext.tools.size, 0);
+  for (const fn of ext.handlers.session_start) fn({ reason: "startup" }, {});
+  assert.deepEqual(deviceToolConflicts(mine), ["bash"]);
+  const offered = (await api("GET", `/sessions/${mine}/devices`)).body.devices.find((d) => d.id === id);
+  assert.deepEqual({ offered: offered.offered, granted: offered.granted }, { offered: false, granted: false });
+  assert.match(offered.blocked, /Another extension owns bash in this chat/);
+  assert.match((await api("PUT", `/sessions/${mine}/devices/${id}`, {})).body.error, /Another extension owns bash/);
+  assert.deepEqual(grants.grantsOf(mine), []);
+
+  // A grant that was made before the chat's pi was loaded: the chip says why it does not work.
+  grants.grantDevice(mine, id, "/home/alice");
+  const granted = (await api("GET", `/sessions/${mine}/devices`)).body.devices.find((d) => d.id === id);
+  assert.equal(granted.granted, true);
+  assert.match(granted.blocked, /Another extension owns bash/);
+  // And a chat whose tools are all pi's own has no conflict.
+  const plain = chat();
+  const clean = extensionApi();
+  clean.getAllTools = () => [{ name: "bash", sourceInfo: { path: "<builtin:bash>" } }];
+  deviceTools({ sessionId: plain, cwd: home, pi, serverTool: () => undefined })(clean);
+  for (const fn of clean.handlers.session_start) fn({ reason: "startup" }, {});
+  assert.deepEqual(deviceToolConflicts(plain), []);
+  assert.equal((await api("GET", `/sessions/${plain}/devices`)).body.devices.find((d) => d.id === id).blocked, null);
 });
 
 test("an approval the device asks for is asked in the chat and answered from there, and taken back when it is answered elsewhere", async () => {
