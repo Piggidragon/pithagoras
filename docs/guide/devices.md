@@ -128,7 +128,9 @@ name on its card in the chat.
   there. On Windows, `C:\Users\x` is written `/c/Users/x`; the agent may use
   either.
 - `bash` runs the device's own shell, in the device's own environment: nothing
-  of the portal's environment goes along.
+  of the portal's environment goes along. The agent sees the end of a long
+  output (the last 2000 lines or 50 KB, as on the server); the full output is
+  not kept, so to see more it runs the command again, narrowed.
 - `edit` writes back only if the file did not change on the device since it
   was read; otherwise the agent is told to read it again.
 - Nothing falls back to the server: a device the chat does not have, one that
@@ -267,8 +269,9 @@ each device's own settings. In particular:
   to 64 MiB. A command's output is limited by the device (16 MiB by default)
   and, whatever the device does, by the portal: past 32 MiB the portal stops
   taking it and has the command killed, as the output also goes into a log file
-  in the portal's temp folder. A command that the device does not report as
-  ended within its timeout (at most four hours) and half a minute is killed and
+  in the portal's temp folder while the command runs (the file is removed when
+  it is over). A command that the device does not report as ended within its
+  timeout (at most four hours) and half a minute is killed and
   given up on. Nothing in a call carries environment variables to the device.
 - The portal logs pairing and removal by device name only; tokens and codes
   never reach a log. When a device says it refused something the portal sent,

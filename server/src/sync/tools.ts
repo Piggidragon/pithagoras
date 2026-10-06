@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Type } from "typebox";
 import { taintedNow } from "../pi/guard.js";
@@ -342,10 +344,24 @@ export function deviceTools(opts: DeviceToolsOptions) {
             },
           },
         });
+        // pi keeps the whole output of a long command in a file of the portal's temp folder and points the model at it. For a command
+        // on a device that is a file per command, up to the cap, which nothing ever removes (and on a tmpfs it is memory): it goes
+        // when the command is over, and the model is told that the full output is not kept.
+        const logs = new Set<string>();
+        const noted = (r: any) => {
+          const log = r?.details?.fullOutputPath;
+          if (isPiLog(log)) logs.add(log);
+        };
         try {
-          return await tool.execute("", params, signal, onUpdate, ctx);
+          const result = await tool.execute("", params, signal, (update: any) => (noted(update), onUpdate?.(withoutLog(update, logs))), ctx);
+          noted(result);
+          return withoutLog(result, logs);
+        } catch (e) {
+          if (e instanceof Error) e.message = withoutPath(e.message, logs);
+          throw e;
         } finally {
           ended.abort();
+          for (const log of logs) rmSync(log, { force: true });
         }
       }
       case "ls":
@@ -420,6 +436,24 @@ export function deviceTools(opts: DeviceToolsOptions) {
       return truncation.content + (notices.length ? `\n\n[${notices.join(". ")}]` : "");
     }
   }
+}
+
+/** The file pi writes a command's full output to: in the temp folder, by this name, and no other path is removed. */
+const isPiLog = (p: unknown): p is string => typeof p === "string" && path.dirname(p) === os.tmpdir() && /^pi-bash-[0-9a-f]{16}\.log$/.test(path.basename(p));
+
+const NOT_KEPT = "The full output is not kept";
+
+/** pi's text with the pointer to a log that is removed replaced by saying so. */
+const withoutPath = (text: string, logs: Set<string>): string => [...logs].reduce((t, log) => t.replaceAll(`Full output: ${log}`, NOT_KEPT), text);
+
+/** A tool result or update of pi's bash as the model and the chat see it: nothing points at a log that is removed. */
+function withoutLog(result: any, logs: Set<string>): any {
+  if (!result || typeof result !== "object") return result;
+  return {
+    ...result,
+    content: Array.isArray(result.content) ? result.content.map((part: any) => (part?.type === "text" && typeof part.text === "string" ? { ...part, text: withoutPath(part.text, logs) } : part)) : result.content,
+    details: result.details && typeof result.details === "object" ? { ...result.details, fullOutputPath: undefined } : result.details,
+  };
 }
 
 const SIGNALS: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGTERM: 15 };

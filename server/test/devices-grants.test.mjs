@@ -1,7 +1,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { rmSync, statSync, writeFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import http from "node:http";
 import path from "node:path";
 import express from "express";
@@ -299,7 +300,10 @@ test("the tools take a device once the chat has one; without one, nothing of the
   assert.match(textOf(await later.tools.get("read").execute("x", { path: serverFile }, undefined, undefined, {})), /on the server/);
 });
 
-test("a command that never stops printing is cut at what the portal takes, and pi's log of it stays within that", async () => {
+/** The files pi has written a command's full output to, in the folder this test run uses for them. */
+const piLogs = () => readdirSync(tmpdir()).filter((f) => /^pi-bash-[0-9a-f]{16}\.log$/.test(f)).sort();
+
+test("a command that never stops printing is cut at what the portal takes, and pi's log of it stays within that, and goes when it is over", async () => {
   const line = "abcdefghi\n".repeat(6553);
   const { id } = await online("printer", {
     "exec.start": (params, rid, d) => {
@@ -313,18 +317,40 @@ test("a command that never stops printing is cut at what the portal takes, and p
   grants.grantDevice(mine, id, "/home/alice");
   const ext = extensionApi();
   deviceTools({ sessionId: mine, cwd: home, pi, serverTool: () => undefined })(ext);
+  const logs = piLogs();
   let message = "";
-  await ext.tools.get("bash").execute("p1", { command: "yes", device: "printer" }, undefined, undefined, {}).catch((e) => (message = e.message));
+  let written = 0;
+  const updates = [];
+  await ext.tools.get("bash").execute("p1", { command: "yes", device: "printer" }, undefined, (u) => (updates.push(u), (written = Math.max(written, u.details?.truncation?.totalBytes ?? 0))), {}).catch((e) => (message = e.message));
   assert.match(message, /sent more output than the portal takes, so the command was stopped/);
   assert.match(message, /Command exited with code 137/);
-  const log = /Full output: (\S+\.log)/.exec(message)?.[1];
-  assert.ok(log, message.slice(-300));
-  try {
-    const size = statSync(log).size;
-    assert.ok(size > 31 * 1024 * 1024 && size < 32 * 1024 * 1024 + 4096, `${size} bytes in pi's log`);
-  } finally {
-    rmSync(log, { force: true });
-  }
+  // What pi kept is what the portal passed on, and no more.
+  assert.ok(written > 31 * 1024 * 1024 && written < 32 * 1024 * 1024 + 4096, `${written} bytes in pi's log`);
+  // The model is told that the log is not kept, and nothing points at it; the file is gone.
+  assert.match(message, /The full output is not kept/);
+  assert.doesNotMatch(message, /Full output:|pi-bash-/);
+  assert.ok(updates.every((u) => !JSON.stringify(u).includes("pi-bash-")));
+  assert.deepEqual(piLogs(), logs, "no log left behind");
+});
+
+test("the full output of a command that ended is not kept either; its text says so", async () => {
+  const { id } = await online("verbose", {
+    "exec.start": (params, rid, d) => {
+      d.send({ jsonrpc: "2.0", id: rid, result: {} });
+      for (let seq = 0; seq < 4; seq++) d.frame(FRAME.execOutput, params.stream, seq, "0123456789abcdef\n".repeat(3500));
+      d.notify("exec.exit", { stream: params.stream, code: 0, signal: null, timed_out: false, truncated: false });
+    },
+  });
+  const mine = chat();
+  grants.grantDevice(mine, id, "/home/alice");
+  const ext = extensionApi();
+  deviceTools({ sessionId: mine, cwd: home, pi, serverTool: () => undefined })(ext);
+  const logs = piLogs();
+  const result = await ext.tools.get("bash").execute("v1", { command: "cat big", device: "verbose" }, undefined, undefined, {});
+  assert.match(textOf(result), /\[Showing lines 12001-14000 of 14000\. The full output is not kept\]$/);
+  assert.equal(result.details.truncation.truncated, true);
+  assert.equal(result.details.fullOutputPath, undefined);
+  assert.deepEqual(piLogs(), logs, "no log left behind");
 });
 
 test("a chat whose tools another extension owns is refused a device, and says so for one it has", async () => {
