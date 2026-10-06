@@ -14,7 +14,7 @@ inProcessHome("pithagoras-devices-");
 process.env.PORTAL_PASSWORD = "a-long-enough-password";
 
 const { pairRouter } = await import("../dist/sync/pair.js");
-const { attachSyncUpgrade, linkOf, dropDevice, hub, AUDIT_BURST } = await import("../dist/sync/hub.js");
+const { attachSyncUpgrade, linkOf, dropDevice, hub, AUDIT_BURST, TIMING } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
 const { getDb, listAudit, recordAudit, AUDIT_DEVICE_KEEP } = await import("../dist/db.js");
 const { encodeFrame, decodeFrame, FRAME, CLOSE, MAX_APPROVALS } = await import("../dist/sync/protocol.js");
@@ -49,6 +49,8 @@ async function paired(name = "laptop") {
 }
 
 const connect = (token, opts) => connectTo(base, token, opts);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const HELLO = (id) => ({ proto: 1, device_id: id, client_version: "0.1.0", os: "linux", user: "alice", shell: "bash", capabilities: ["fs", "exec", "approvals"] });
 
 test("a code pairs once, a wrong one counts against it, and the token is kept only as its hash", async () => {
   assert.equal((await pair({ code: "ABCDEFGH", name: "laptop", os: "linux", arch: "x86_64" })).status, 403, "no code open");
@@ -137,6 +139,37 @@ test("a device that comes back after its connection went quiet takes over at onc
   assert.ok(alertOf(id));
   clearAlert(id);
   second.device.ws.close(1001);
+  await until(() => !linkOf(id), "the link to go");
+});
+
+test("a connection that ends does not free the place of the attempt that replaced it; a third is not let in unasked", async () => {
+  const { connector_token: token, device_id: id } = await paired("crowded");
+  const { alertOf, clearAlert } = await import("../dist/sync/hub.js");
+  Object.assign(TIMING, { replaceProbeMs: 150, closeGraceMs: 250 });
+  const open = [];
+  try {
+    const first = await connect(token);
+    open.push(first.device.ws);
+    await until(() => linkOf(id)?.info, "device.info");
+    first.device.ws.pause();
+    // A copy of the token takes the quiet link's place, and holds its hello back.
+    const copy = await connect(token, { sayHello: false });
+    assert.equal(copy.status, 101);
+    open.push(copy.device.ws);
+    // The replaced link's socket is gone a moment after, and its end frees nobody else's place.
+    await sleep(TIMING.closeGraceMs + 250);
+    const third = await connect(token);
+    if (third.device) open.push(third.device.ws);
+    assert.equal(third.status, 409, "the copy's attempt still holds the place");
+    assert.ok(alertOf(id));
+    // Its hello comes: its link is the device's, and nothing else is.
+    copy.device.notify("hello", HELLO(id));
+    await until(() => linkOf(id)?.info, "the copy's link");
+    clearAlert(id);
+  } finally {
+    Object.assign(TIMING, { replaceProbeMs: 3_000, closeGraceMs: 2_000 });
+    for (const ws of open) ws.terminate();
+  }
   await until(() => !linkOf(id), "the link to go");
 });
 

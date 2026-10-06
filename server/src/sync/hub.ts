@@ -60,8 +60,16 @@ const DEAD_AFTER_MS = 45_000;
 /** Most calls answer at once; one may wait for the owner's approval, which the device gives up on after at most an hour. */
 const CALL_TIMEOUT_MS = 65 * 60_000;
 const QUICK_TIMEOUT_MS = 30_000;
-/** A second connection with a device's token waits this long for the first to answer a ping, before it is taken for the device's own, back after a sleep or a change of network. */
-const REPLACE_PROBE_MS = 3_000;
+/**
+ * Waits that a test shortens. A second connection with a device's token gives
+ * the first `replaceProbeMs` to show a sign of life before it is taken for the
+ * device's own, back after a sleep or a change of network, and a connection
+ * that is closed has `closeGraceMs` to answer the close.
+ */
+export const TIMING = {
+  replaceProbeMs: 3_000,
+  closeGraceMs: 2_000,
+};
 /**
  * What the portal puts up with from a command on a device. The device has its
  * own limits (16 MiB of output by default, four hours at most), but they are
@@ -382,7 +390,7 @@ export class DeviceLink extends EventEmitter {
   close(code: number, reason: string): void {
     if (this.ws.readyState === this.ws.OPEN || this.ws.readyState === this.ws.CONNECTING) this.ws.close(code, reason);
     // A device that does not answer the close is not waited for.
-    setTimeout(() => this.ws.terminate(), 2000).unref();
+    setTimeout(() => this.ws.terminate(), TIMING.closeGraceMs).unref();
     this.ended();
   }
 
@@ -555,8 +563,14 @@ export const hub = new EventEmitter();
 hub.setMaxListeners(0);
 
 const links = new Map<string, DeviceLink>();
-/** Devices whose upgrade is under way, so that two at once cannot both get through the one-connection check. */
-const arriving = new Set<string>();
+/**
+ * Devices whose upgrade is under way, by the attempt that holds the place, so
+ * that two at once cannot both get through the one-connection check. Each
+ * attempt gives up its own place and nobody else's: a connection that ends
+ * (the one that was just replaced, say, up to a moment after) must not free
+ * the place of the one that is still waiting for its hello.
+ */
+const arriving = new Map<string, symbol>();
 /** A connection refused because the device already had one that answered, by device: said on the Devices page, with where each came from. */
 const alerts = new Map<string, { at: number; message: string; existing: Remote | null; refused: Remote }>();
 
@@ -607,7 +621,10 @@ function conflict(deviceId: string, existing: Remote | null | undefined, refused
  * WebSocket. A device that is connected already is not refused here: the
  * connection may be a dead one (see attachSyncUpgrade), so the answer says which.
  */
-export function admit(headers: http.IncomingHttpHeaders, remote: Remote): { deviceId: string; existing?: DeviceLink } | { status: number; message: string } {
+export function admit(
+  headers: http.IncomingHttpHeaders,
+  remote: Remote,
+): { deviceId: string; existing?: DeviceLink; release: () => void } | { status: number; message: string } {
   if (!devicesEnabled()) return { status: 503, message: devicesOffBecause() };
   // A browser always names the page it opens a socket from; the device client never does.
   if (headers.origin !== undefined) return { status: 403, message: "Not from a browser" };
@@ -617,8 +634,16 @@ export function admit(headers: http.IncomingHttpHeaders, remote: Remote): { devi
   if (!device) return { status: 401, message: "Unknown or revoked token" };
   // Two connections at once, and the first not up yet: nothing says which is the device's own.
   if (arriving.has(device.id)) return conflict(device.id, links.get(device.id)?.remote, remote);
-  arriving.add(device.id);
-  return { deviceId: device.id, existing: links.get(device.id) };
+  const attempt = Symbol(device.id);
+  arriving.set(device.id, attempt);
+  return {
+    deviceId: device.id,
+    existing: links.get(device.id),
+    // Only this attempt's own place, and as often as it likes.
+    release: () => {
+      if (arriving.get(device.id) === attempt) arriving.delete(device.id);
+    },
+  };
 }
 
 /**
@@ -642,22 +667,22 @@ export function attachSyncUpgrade(server: http.Server): void {
     const remote = remoteOf(req);
     const admitted = admit(req.headers, remote);
     if ("status" in admitted) return refuse(socket, admitted.status, admitted.message);
-    const { deviceId, existing } = admitted;
+    const { deviceId, existing, release } = admitted;
     // However the attempt ends, also while it waits for the ping below: a client that gave up must not block its next one.
     // handleUpgrade answers a malformed upgrade itself and never calls back.
-    socket.once("close", () => arriving.delete(deviceId));
+    socket.once("close", release);
     const upgrade = () =>
       wss.handleUpgrade(req, socket, head, (ws) => {
         // From the first byte on: a frame that breaks the protocol (unmasked, over the limit, bad UTF-8) is an
         // 'error' of the socket, which ends the whole process when nobody listens.
         ws.on("error", () => ws.terminate());
-        welcome(ws, deviceId, remote, () => arriving.delete(deviceId));
+        welcome(ws, deviceId, remote, release);
       });
     if (!existing) return upgrade();
-    void existing.alive(REPLACE_PROBE_MS).then((answers) => {
+    void existing.alive(TIMING.replaceProbeMs).then((answers) => {
       if (socket.destroyed) return;
       if (answers) {
-        arriving.delete(deviceId);
+        release();
         const refused = conflict(deviceId, existing.remote, remote);
         return refuse(socket, refused.status, refused.message);
       }
@@ -697,6 +722,13 @@ function welcome(ws: WebSocket, deviceId: string, remote: Remote, settled: () =>
     // Removed while it said hello: it stops. The add-on switched off: it tries again, as it does for the switch.
     if (!getDevice(deviceId)) return refused(CLOSE.revoked, "device removed");
     if (!devicesEnabled()) return refused(CLOSE.goingAway, "devices switched off");
+    // Attempts come one at a time (see arriving), and a link that was replaced is closed and gone from `links` before the new
+    // one is upgraded, so there is none here. If there ever is, it is kept and this one is turned away: never overwritten and left open.
+    const held = links.get(deviceId);
+    if (held && !held.closed) {
+      conflict(deviceId, held.remote, remote);
+      return refused(CLOSE.replaced, "this device is connected already");
+    }
     const link = new DeviceLink(ws, deviceId, hello, remote);
     links.set(deviceId, link);
     touchDevice(deviceId);
