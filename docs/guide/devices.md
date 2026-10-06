@@ -148,8 +148,8 @@ it waits on is withdrawn, and any other question the device still holds for that
 chat is denied, so an **Allow** after the switch cannot run anything. The
 device is told as well, and forgets what it allowed the chat. This is the
 portal's side: a command the device has already started may still do what it was
-doing until the device stops it, and a portal that does not act on this is
-the "compromised portal" below.
+doing until the device stops it. A portal that does not do this at all is the
+"compromised portal" under [What is trusted](#what-is-trusted).
 
 If another installed extension brings a tool of one of these names, that chat
 cannot be given a device, and the button says why, also under a device the chat
@@ -213,11 +213,28 @@ each device's own settings. In particular:
   folders, its denied paths and command rules, its hours, the tools it has
   switched off, and the settings only it may change. A device that must not be
   reachable from a compromised portal should not be paired.
-- **No chat reaches a device without a grant,** and only the chats you give
-  one: each call names the chat, and the device keeps what it allowed per chat.
-  The device is also told whether the portal's guard saw the chat read
-  something untrusted (see [Prompt injection](/guide/security)); it can only
-  make the device more careful.
+- **An agent's own shell on the server can reach the portal.** A chat's agent
+  runs as the portal's user, with the portal's login password and secret in the
+  environment of its server `bash`, and it can read and write the portal's own
+  files and database. So a chat whose agent may run commands on the server can,
+  in principle, log in to the portal's API, grant itself a device and answer the
+  approvals that device sends, or change the device's settings where it lets the
+  portal. This is the compromised portal above, reached from a chat: the portal
+  does not shut it out in this version. What stays is again only what the device
+  enforces itself (its mode's folders, denied paths and command rules, the tools
+  it has switched off, and the settings only it may change). Keeping the answer
+  to a risky approval on the device would close this, and is not there yet.
+  Until then, do not pair a computer that the server's agent must not reach.
+- **Without a grant, a chat's tools do not reach a device,** and only the chats
+  you give one (but see the shell above): each call names the chat, and the device keeps what it allowed
+  per chat. The device is also told whether the portal's guard saw the chat
+  read something untrusted (see [Prompt injection](/guide/security)); it can
+  only make the device more careful.
+- **A device's folders and home are plain paths.** The portal refuses a path
+  with a control character (a line break, for one) in what a device reports as
+  its home or folders, and in a folder you pick for a chat, and quotes the
+  folder where the chat's agent is told about it, so that a name cannot pose as
+  an instruction.
 - **The sudo password stays on the device.** Elevation (Linux `sudo`, off by
   default) uses a password stored on the device; it is never sent to the
   portal or the agent, and a command run with it always asks.
