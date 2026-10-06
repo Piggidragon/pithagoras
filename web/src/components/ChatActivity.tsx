@@ -23,7 +23,7 @@ import {
 import type { IconType } from "react-icons";
 import { Markdown } from "./Markdown";
 import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, shownFrom, stripAnsi, type Activity, type Item } from "../transcript";
-import { SHELL_TOOL, unwrapCall } from "../tool-activity";
+import { DEVICE_TOOL, SHELL_TOOL, unwrapCall } from "../tool-activity";
 import { argLabel, isBlock, isScalar } from "../tool-args";
 import { useFollowBottom } from "../use-follow-bottom";
 import { formatNumber, t, tp } from "../i18n";
@@ -299,7 +299,7 @@ export function ToolCall({
   const shell = SHELL_TOOL.test(name);
   const args = wrapped ? call.input : item.args && typeof item.args === "object" ? (item.args as Record<string, unknown>) : undefined;
   const command = shell ? String(args?.command ?? args?.cmd ?? (typeof item.args === "string" ? item.args : "")) : "";
-  const device = typeof args?.device === "string" && args.device ? args.device : undefined;
+  const device = DEVICE_TOOL.test(name) && typeof args?.device === "string" && args.device ? args.device : undefined;
   const took = item.since && item.until ? item.until - item.since : undefined;
   // Stored before times were kept to the millisecond: both on a whole second,
   // so only whole seconds can be said of it.

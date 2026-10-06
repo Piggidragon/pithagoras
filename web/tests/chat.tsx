@@ -235,6 +235,9 @@ if (phase === 'devices' || phase === 'devices-blocked') {
   events.push(
     ev('tool_execution_start', { toolCallId: 'd1', toolName: 'bash', args: { command: 'cargo test', device: 'laptop' } }, 10),
     ev('tool_execution_end', { toolCallId: 'd1', toolName: 'bash', result: { content: [{ type: 'text', text: 'test result: ok' }] } }, 9),
+    // Another extension's tool with a `device` parameter of its own: not a paired computer.
+    ev('tool_execution_start', { toolCallId: 'd2', toolName: 'lights_set', args: { device: 'kitchen', on: true } }, 8),
+    ev('tool_execution_end', { toolCallId: 'd2', toolName: 'lights_set', result: { content: [{ type: 'text', text: 'lights on' }] } }, 7),
   );
   const sent: unknown[] = ((window as any).sentDevices = []);
   const owned = 'Another extension owns bash in this chat, so they cannot take a device';

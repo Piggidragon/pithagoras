@@ -55,6 +55,9 @@ test('a call made on a device names it on its card', async ({ page }) => {
   await expect(badge).toHaveAttribute('title', 'On the device laptop');
   // A call on the server has none.
   await expect(page.locator('.chat-tool').filter({ hasText: 'npm run build' }).locator('.is-device')).toHaveCount(0);
+  // Nor has another tool's parameter that happens to be called device.
+  await expect(page.locator('.chat-tool').filter({ hasText: 'lights_set' })).toHaveCount(1);
+  await expect(page.locator('.chat-tool').filter({ hasText: 'lights_set' }).locator('.is-device')).toHaveCount(0);
 });
 
 test('without the Devices add-on there is no chip', async ({ page }) => {
