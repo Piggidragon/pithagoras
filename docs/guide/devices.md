@@ -152,7 +152,10 @@ Devices off, only pi's own `read`, `write`, `edit`, `bash`, `grep`, `find` and
 When the last device is taken back, the tools stay as they are for the rest of
 the chat's session and refuse a `device`; `grep`, `find` and `ls` go away
 again. When the chat is deleted, or the device removed, the grant ends too, and
-the device forgets what it allowed the chat.
+a device that is connected forgets what it allowed the chat. One that is not
+connected (asleep, say, or removed and paired again later) hears of it when the
+chat is next given it: it is told before the new grant takes effect, so what it
+allowed the chat before never comes back.
 
 Ending a grant also stops what the chat is doing on the device. A command that
 is running is told to stop (and killed ten seconds later if it does not), the
@@ -161,8 +164,9 @@ it waits on is withdrawn, and any other question the device still holds for that
 chat is denied, however many calls the device has open (denials and stops are
 not held back by that limit). An **Allow** on the Devices page for a chat that
 no longer has the device is refused and denies the question instead, so a page
-that was open when the grant ended cannot run anything. The device is told as
-well, and forgets what it allowed the chat. This is the
+that was open when the grant ended cannot run anything. A device that is
+connected is told as well, and forgets what it allowed the chat; one that is
+not is told when the chat is next given it (see above). This is the
 portal's side: a command the device has already started may still do what it was
 doing until the device stops it. A portal that does not do this at all is the
 "compromised portal" under [What is trusted](#what-is-trusted).

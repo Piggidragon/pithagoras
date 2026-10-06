@@ -132,18 +132,75 @@ test("a chat is granted a connected device in a folder it offers; ending the gra
   const after = (await api("GET", `/sessions/${mine}/devices`)).body.devices.find((d) => d.id === id);
   assert.equal(after.granted, true);
   assert.equal(after.cwd, "/home/alice/src/app");
+  // A new grant starts clean (the device hears the chat's last grant is over, see below); moving it to another folder does not.
+  await linkOf(id).call("device.info", {});
+  assert.deepEqual(device.asked("grant.end").map((m) => m.params), [{ chat: mine }]);
 
   // Taken back: the device forgets what it allowed the chat.
   assert.deepEqual((await api("DELETE", `/sessions/${mine}/devices/${id}`)).body, { ok: true, reload: "not running" });
-  assert.deepEqual((await device.waitFor("grant.end"))[0].params, { chat: mine });
-  assert.equal(device.asked("grant.end")[0].id, undefined, "a notification");
+  assert.deepEqual((await device.waitFor("grant.end", 2))[1].params, { chat: mine });
+  assert.equal(device.asked("grant.end")[1].id, undefined, "a notification");
   assert.deepEqual(grants.grantsOf(mine), []);
 
   // A deleted chat's grants go with it, and the device hears of it.
   await api("PUT", `/sessions/${mine}/devices/${id}`, {});
   deleteSession(mine);
-  assert.deepEqual((await device.waitFor("grant.end", 2))[1].params, { chat: mine });
+  assert.deepEqual((await device.waitFor("grant.end", 4))[3].params, { chat: mine });
   assert.equal((await api("GET", `/sessions/${mine}/devices`)).status, 404);
+});
+
+test("a device that was offline when a chat's grant was taken back hears of it before the chat is granted the device again", async () => {
+  const { id, token, device } = await online("sleepy");
+  const mine = chat();
+  const granted = await api("PUT", `/sessions/${mine}/devices/${id}`, {});
+  assert.equal(granted.status, 200);
+  assert.deepEqual((await device.waitFor("grant.end"))[0].params, { chat: mine }, "a new grant starts clean on a device that has held one");
+
+  // The laptop's lid closes, and the owner takes the device back from the chat meanwhile: nobody can be told.
+  device.ws.close(1001);
+  await until(() => !linkOf(id), "the link to go");
+  assert.equal(grants.endGrant(mine, id), true);
+
+  // It comes back, and is asked nothing of this.
+  const again = await connectTo(base, token, { answers: { "device.info": { ...INFO, name: "sleepy" } } });
+  await until(() => linkOf(id)?.info, "the device's info");
+  await linkOf(id).call("device.info", {});
+  assert.deepEqual(again.device.asked("grant.end"), []);
+
+  // The chat is given the device anew: it hears that the last grant is over before the grant is there for a call to use.
+  assert.equal((await api("PUT", `/sessions/${mine}/devices/${id}`, {})).status, 200);
+  const told = await again.device.waitFor("grant.end");
+  assert.deepEqual(told.map((m) => m.params), [{ chat: mine }]);
+  assert.equal(told[0].id, undefined, "a notification");
+  assert.equal(again.device.got.at(-1).method, "grant.end");
+  assert.equal(grants.grantsOf(mine).length, 1);
+
+  // Moving the grant to another folder is not a new grant.
+  assert.equal((await api("PUT", `/sessions/${mine}/devices/${id}`, { cwd: "/home/alice/src" })).status, 200);
+  await linkOf(id).call("device.info", {});
+  assert.equal(again.device.asked("grant.end").length, 1);
+  again.device.ws.close(1001);
+});
+
+test("a device that is removed hears that the grants of its chats are over, and what they ran there stops", async () => {
+  const { id, device } = await online("leaving", { "exec.start": () => new Promise(() => {}) });
+  const first = chat();
+  const second = chat();
+  grants.grantDevice(first, id, "/home/alice");
+  grants.grantDevice(second, id, "/home/alice");
+  const ext = extensionApi();
+  deviceTools({ sessionId: first, cwd: home, pi, serverTool: () => undefined })(ext);
+  const running = ext.tools.get("bash").execute("r1", { command: "sleep 1d", device: "leaving" }, undefined, undefined, {});
+  running.catch(() => {});
+  await device.waitFor("exec.start");
+  await linkOf(id).call("device.info", {});
+  assert.equal(device.asked("grant.end").length, 2, "one before each new grant");
+
+  assert.equal((await api("DELETE", `/devices/${id}`)).status, 200);
+  assert.deepEqual(await device.closed, { code: 4001, reason: "device removed" });
+  assert.deepEqual(device.asked("grant.end").slice(2).map((m) => m.params.chat).sort(), [first, second].sort());
+  // The chat's call ends as it does when the grant is taken back, not as a dropped connection.
+  await assert.rejects(within(running), /leaving was taken back from this chat, so this call was stopped/);
 });
 
 test("no grant for a channel's chat, an offline device, or the portal's own machine; nothing while the add-on is off", async () => {
@@ -483,7 +540,8 @@ test("taking a device back from a chat stops what the chat runs there and denies
   assert.equal(stopped.length, 1);
   assert.equal(stopped[0].signal, "SIGTERM");
   assert.equal(stopped[0].stream, device.asked("exec.start").find((m) => m.params.ctx.chat === mine).params.stream);
-  assert.deepEqual((await device.waitFor("grant.end"))[0].params, { chat: mine });
+  // The two grants were each preceded by one (a new grant starts clean), the end of this one is the third.
+  assert.deepEqual((await device.waitFor("grant.end", 3))[2].params, { chat: mine });
   const stillRunning = await Promise.race([theirs.then(() => "ended", () => "ended"), new Promise((r) => setTimeout(() => r("running"), 100))]);
   assert.equal(stillRunning, "running", "the other chat's command");
   grants.endGrant(other, id);

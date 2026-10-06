@@ -4,7 +4,7 @@ import express, { type Router } from "express";
 import { tlsFiles } from "../http-security.js";
 import { getSession } from "../db.js";
 import { sessions } from "../session-manager.js";
-import { defaultCwd, devicePath, endGrant, grantDevice, grantOf, grantRefused, grantsOf } from "../sync/grants.js";
+import { defaultCwd, devicePath, endGrant, grantDevice, grantOf, grantRefused, grantsOf, tellEnded } from "../sync/grants.js";
 import { deviceToolConflicts } from "../sync/tools.js";
 import { CLOSE, CODE, DeviceError, readPolicy, type Choice } from "../sync/protocol.js";
 import { alertOf, clearAlert, dropAll, dropDevice, linkOf } from "../sync/hub.js";
@@ -148,11 +148,13 @@ export function devicesRouter(): Router {
     }
   });
 
-  /** Removes a device: its token stops working and its connection is closed now, before the answer. */
+  /** Removes a device: its token stops working and its connection is closed now, before the answer, after it was told that its chats' grants are over. */
   router.delete("/devices/:id", (req, res) => {
     const device = getDevice(req.params.id);
     if (!device) return res.status(404).json({ error: "No such device" });
     const chats = removeDevice(device.id);
+    // As for any grant that ends: what the chats run there stops, and the device forgets what it allowed them, if it hears. The close follows.
+    for (const chat of chats) tellEnded(device.id, chat);
     dropDevice(device.id, CLOSE.revoked, "device removed");
     console.log(`[devices] removed ${device.name}`);
     if (chats.length) void sessions.reloadIdle().catch(() => {});
@@ -288,7 +290,7 @@ export function devicesRouter(): Router {
     res.json({ ok: true, cwd, reload: await sessions.reloadSoon(req.params.id) });
   });
 
-  /** Takes the device back from the chat: its tools fail from the next call, and the device forgets what it allowed the chat. */
+  /** Takes the device back from the chat: its tools fail from the next call, and a device that is connected forgets what it allowed the chat. */
   router.delete("/sessions/:id/devices/:deviceId", async (req, res) => {
     const gone = endGrant(req.params.id, req.params.deviceId);
     if (gone) console.log(`[devices] ended a grant for chat ${req.params.id}`);

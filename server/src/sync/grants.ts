@@ -13,7 +13,9 @@ import { devicesEnabled, getDevice, type DeviceRecord } from "./store.js";
  *
  * When a grant ends — taken back, the device removed, the chat deleted — the
  * device is told (`grant.end`), so that what was allowed "for this chat" ends
- * with it there too, and what the chat is running there is stopped.
+ * with it there too, and what the chat is running there is stopped. A device
+ * that was not connected then is told when the chat is next given a device,
+ * before the chat can make a call: see grantDevice.
  */
 
 export interface Grant {
@@ -32,7 +34,15 @@ export const grantOf = (sessionId: string, deviceId: string): Grant | undefined 
 export const hasGrants = (sessionId: string): boolean =>
   devicesEnabled() && Boolean(getDb().prepare("SELECT 1 FROM session_devices WHERE session_id = ? LIMIT 1").get(sessionId));
 
+/**
+ * Gives the chat the device, or moves the grant to another folder. A new grant
+ * starts clean: the device is told first that the chat's last one is over,
+ * whatever became of that notice when it was (a device that was not connected
+ * then never got it, and would still hold what it allowed "for this chat").
+ * A grant is made only while the device is connected, so this always reaches it.
+ */
 export function grantDevice(sessionId: string, deviceId: string, cwd: string): void {
+  if (!grantOf(sessionId, deviceId)) linkOf(deviceId)?.notify("grant.end", { chat: sessionId });
   getDb()
     .prepare("INSERT INTO session_devices (session_id, device_id, cwd) VALUES (?, ?, ?) ON CONFLICT (session_id, device_id) DO UPDATE SET cwd = excluded.cwd")
     .run(sessionId, deviceId, cwd);
@@ -73,7 +83,8 @@ export function trackCall(sessionId: string, deviceId: string): { signal: AbortS
  * (it forgets what it allowed "for this chat"), and the questions it still
  * holds for the chat are denied, so that an "Allow" after the switch cannot run
  * a command the chat no longer has the device for. A device that is not
- * connected has nothing of it left: its calls and approvals ended with the connection.
+ * connected is not told: its calls and approvals ended with the connection,
+ * and what it allowed the chat is cleared when the chat is granted it anew.
  */
 export function tellEnded(deviceId: string, sessionId: string): void {
   for (const call of running.get(`${sessionId}\0${deviceId}`) ?? []) call.abort();
