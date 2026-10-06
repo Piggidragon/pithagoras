@@ -178,7 +178,8 @@ export function deviceTools(opts: DeviceToolsOptions) {
     });
     const parameters = Type.Object({ ...base.parameters.properties, device: only ? device : Type.Optional(device) }, { additionalProperties: false });
     // Said once, with read: the tools' guidelines are one list in the prompt. Online state stays out, so the prompt does not change with it.
-    const listed = granted.map(({ device: d, grant }) => `${d.name} (${d.os}, folder ${grant.cwd || "its home"})`).join("; ");
+    // The folder is quoted: it is the device's own text, and a quoted one cannot read as an instruction of its own.
+    const listed = granted.map(({ device: d, grant }) => `${d.name} (${d.os}, folder ${grant.cwd ? JSON.stringify(grant.cwd) : "its home"})`).join("; ");
     const guidelines = [
       ...(base.promptGuidelines ?? []),
       ...(name === "read" && listed

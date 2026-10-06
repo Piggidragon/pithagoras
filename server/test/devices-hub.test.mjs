@@ -345,6 +345,25 @@ test("a device's decisions go to the audit log with its name", async () => {
   device.ws.close(1001);
 });
 
+test("what a device says in a refusal is logged as one quoted line", async () => {
+  const { connector_token: token, device_id: id } = await paired("forger");
+  const { device } = await connect(token);
+  await until(() => linkOf(id)?.info, "device.info");
+  const lines = [];
+  const warn = console.warn;
+  console.warn = (...args) => lines.push(args.join(" "));
+  try {
+    device.send({ jsonrpc: "2.0", error: { code: -32600, message: "x\n[devices] removed laptop\r\n[devices] paired evil" } });
+    await until(() => lines.length > 0, "the log line");
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(lines.length, 1);
+  assert.doesNotMatch(lines[0], /[\r\n]/);
+  assert.match(lines[0], /refused a frame: "x\\n\[devices\] removed laptop/);
+  device.ws.close(1001);
+});
+
 test("a message over 4 MiB ends the connection", async () => {
   const { connector_token: token, device_id: id } = await paired("big");
   const { device } = await connect(token);

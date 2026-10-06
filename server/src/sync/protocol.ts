@@ -112,6 +112,13 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 const text = (v: unknown, max: number): string | undefined => (typeof v === "string" && v.length <= max ? v : undefined);
 const int = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): number | undefined =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max ? v : undefined;
+/** Whether text has a control character: a line break among them lets a path read as a sentence of its own. */
+export const hasControl = (s: string): boolean => /[\x00-\x1f\x7f-\x9f\u2028\u2029]/.test(s);
+/** Text of at most `max` characters without control characters, or undefined: for what the agent's prompt quotes. */
+const plain = (v: unknown, max: number): string | undefined => {
+  const t = text(v, max);
+  return t !== undefined && !hasControl(t) ? t : undefined;
+};
 const textList = (v: unknown, max: number, each: number): string[] | undefined =>
   Array.isArray(v) && v.length <= max && v.every((s) => typeof s === "string" && s.length <= each) ? (v as string[]) : undefined;
 
@@ -164,14 +171,19 @@ export interface DeviceInfo {
   client_version: string;
 }
 
-/** `device.info`'s result, or undefined. Tools the portal does not know are left out. */
+/**
+ * `device.info`'s result, or undefined. Tools the portal does not know are left
+ * out. A home with a control character makes it undefined, and a folder with
+ * one is left out: they would go into the system prompt of every chat the
+ * device is given to, and a line break there is an instruction the device writes.
+ */
 export function readDeviceInfo(v: unknown): DeviceInfo | undefined {
   if (!isObject(v)) return undefined;
   const mode = v.mode === "ask" || v.mode === "folders" || v.mode === "full" ? v.mode : undefined;
   const folders = Array.isArray(v.folders) && v.folders.length <= 1000
     ? v.folders.flatMap((f): FolderInfo[] => {
         if (!isObject(f)) return [];
-        const p = text(f.path, 4096);
+        const p = plain(f.path, 4096);
         return p && (f.access === "ro" || f.access === "rw") ? [{ path: p, access: f.access, execute: f.execute === true }] : [];
       })
     : undefined;
@@ -184,7 +196,7 @@ export function readDeviceInfo(v: unknown): DeviceInfo | undefined {
     hostname: text(v.hostname, 256),
     user: text(v.user, 256),
     uid: int(v.uid, 0, 0xffffffff),
-    home: text(v.home, 4096),
+    home: plain(v.home, 4096),
     shell: text(v.shell, 64),
     session: text(v.session, 32),
     mode,

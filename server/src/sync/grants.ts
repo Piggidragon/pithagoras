@@ -2,7 +2,7 @@ import path from "node:path";
 import { getDb, onSessionDeleted } from "../db.js";
 import { isWithinText } from "../within.js";
 import { linkOf } from "./hub.js";
-import type { DeviceInfo } from "./protocol.js";
+import { hasControl, type DeviceInfo } from "./protocol.js";
 import { devicesEnabled, getDevice, type DeviceRecord } from "./store.js";
 
 /**
@@ -100,7 +100,7 @@ export function grantRefused(device: DeviceRecord, cwd: string): string | undefi
   if (!link?.info) return `${device.name} is not connected`;
   if (link.sameMachine) return `${device.name} is the portal's own machine and user: the chat's own tools reach the same files`;
   if (!link.can("fs") && !link.can("exec")) return `${device.name} offers no files or commands`;
-  if (cwd.length > 4096 || cwd.includes("\0") || !cwd.startsWith("/") || cwd.split("/").includes("..")) return "The folder must be an absolute path";
+  if (cwd.length > 4096 || hasControl(cwd) || !cwd.startsWith("/") || cwd.split("/").includes("..")) return "The folder must be an absolute path, without control characters";
   if (link.info.mode === "folders" && !link.info.folders.some((f) => isWithinText(devicePath(f.path, link.info!, "/")!, cwd))) {
     return `${device.name} offers only its folders: ${link.info.folders.map((f) => f.path).join(", ") || "none"}`;
   }

@@ -314,7 +314,8 @@ export class DeviceLink extends EventEmitter {
     if (typeof message.method === "string") return this.receiveNotification(message.method, message.params);
     if (typeof message.id !== "number") {
       // The device says the portal sent something it could not read: a bug here, worth a line in the log (never the frame).
-      if (message.error) console.warn(`[devices] ${this.deviceId} refused a frame: ${String(message.error?.message ?? "").slice(0, 200)}`);
+      // Quoted, as it is the device's own text: a line break in it could otherwise write a line of the log.
+      if (message.error) console.warn(`[devices] ${this.deviceId} refused a frame: ${JSON.stringify(String(message.error?.message ?? "").slice(0, 200))}`);
       return;
     }
     const entry = this.pending.get(message.id);

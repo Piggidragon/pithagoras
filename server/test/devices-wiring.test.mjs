@@ -117,7 +117,7 @@ test("a granted chat's model is offered the tools with a device, calls one on th
     const request = model.requests.at(-1);
     const offered = request.tools.find((t) => nameOf(t) === "read");
     assert.ok((offered.function?.parameters ?? offered.parameters).properties.device, "read takes a device");
-    assert.match(JSON.stringify(request.messages[0]), /Devices granted to this chat: laptop \(linux, folder \/home\/alice\/src\)/);
+    assert.match(JSON.stringify(request.messages[0]), /Devices granted to this chat: laptop \(linux, folder \\"\/home\/alice\/src\\"\)/);
 
     // Taken back: the tools stay and fail closed; grep, find and ls are off again, and the prompt says nothing of devices.
     grants.endGrant("granted", paired.device_id);
