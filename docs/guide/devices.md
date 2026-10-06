@@ -9,7 +9,10 @@ that on the device.
 
 Devices are an add-on, **off** in a fresh install. While it is off, nothing
 about devices answers: no device can pair or connect, and paired ones wait
-until it is on again.
+until it is on again. The pairing and connection addresses then answer
+"Devices are not available on this portal" to anybody, whether the add-on is off
+or the portal lost its password, so that they tell an outsider nothing about
+the portal; the reason is on Settings and the Devices page, for you.
 
 ## Switching it on
 

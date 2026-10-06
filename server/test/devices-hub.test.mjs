@@ -745,14 +745,34 @@ test("a removed device is cut off at once, and its token opens nothing after", a
   assert.equal((await connect(token)).status, 401);
 });
 
-test("with the add-on off nothing connects or pairs", async () => {
+test("with the add-on off, or on in a portal without a password, nothing connects or pairs, and anybody is told the same", async () => {
   const { connector_token: token } = await paired("later");
-  store.setDevicesEnabled(false);
-  try {
-    assert.equal((await connect(token)).status, 503);
+  const ask = async () => {
     const { code } = store.newPairingCode();
-    assert.equal((await pair({ code, name: "x", os: "linux", arch: "x86_64" })).status, 404);
+    return {
+      withToken: await connect(token),
+      withoutToken: await connect(undefined),
+      wrongToken: await connect(`dnotadevice00000000.${"A".repeat(43)}`),
+      pair: await pair({ code, name: "x", os: "linux", arch: "x86_64" }),
+    };
+  };
+  store.setDevicesEnabled(false);
+  const off = await ask();
+  store.setDevicesEnabled(true);
+  const password = process.env.PORTAL_PASSWORD;
+  delete process.env.PORTAL_PASSWORD;
+  let noPassword;
+  try {
+    noPassword = await ask();
   } finally {
-    store.setDevicesEnabled(true);
+    process.env.PORTAL_PASSWORD = password;
   }
+  for (const answers of [off, noPassword]) {
+    assert.deepEqual([answers.withToken.status, answers.withoutToken.status, answers.wrongToken.status, answers.pair.status], [503, 503, 503, 404]);
+    assert.deepEqual(answers.withoutToken, answers.withToken, "a token makes no difference");
+    assert.deepEqual(answers.wrongToken, answers.withToken);
+  }
+  // Whether it is the switch or the missing password makes no difference to what is said, and the password is not mentioned.
+  assert.deepEqual(noPassword, off);
+  assert.doesNotMatch(JSON.stringify(noPassword), /password|PORTAL_|Settings/i);
 });

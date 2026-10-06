@@ -48,7 +48,16 @@ export const devicesEnabled = (): boolean => hasPassword() && devicesSwitchedOn(
 /** Why the add-on cannot be on in a portal without a password: said on the switch, and where a device or the page asks. */
 export const NO_PASSWORD = "The portal runs without a password (PORTAL_ALLOW_NO_PASSWORD), and a paired computer would be open to anyone who reaches it. Set PORTAL_PASSWORD first.";
 
-/** What a refusal says while the add-on does not answer: it is off, or it is on in a portal that has lost its password. */
+/**
+ * What the device paths (connecting, pairing) answer while the add-on does not,
+ * to anybody, with a token or without. The same whether it is off or on in a
+ * portal that has lost its password: those paths are open to the network, and
+ * a reason that says the portal has no password of its own tells an outsider
+ * where to look for a way round whatever stands in front of it.
+ */
+export const NOT_AVAILABLE = "Devices are not available on this portal";
+
+/** What the signed-in owner is told while the add-on does not answer (Settings, the Devices page): it is off, or it is on in a portal that has lost its password. */
 export const devicesOffBecause = (): string =>
   devicesSwitchedOn()
     ? "Devices are switched on, but this portal runs without a password, so nothing about them answers. Set PORTAL_PASSWORD, or switch them off in Settings → Add-ons."
