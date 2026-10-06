@@ -33,6 +33,17 @@ export default function (pi) {
       return { content: [{ type: "text", text: "started" }], details: {} };
     },
   });
+  // A tool that has a device parameter of its own, not a paired computer's: a smart-home tool's.
+  pi.registerTool({
+    name: "lights_set",
+    label: "Set the lights",
+    description: "Switch the lights of a room's device on",
+    parameters: { type: "object", properties: { device: { type: "string" } } },
+    async execute(_id, params) {
+      writeFileSync(${JSON.stringify(marker + "-lights")}, String(params.device));
+      return { content: [{ type: "text", text: "lights on in " + params.device }], details: {} };
+    },
+  });
 }
 `);
 
@@ -103,9 +114,10 @@ test("a granted chat's model is offered the tools with a device, calls one on th
     for (const name of ["read", "write", "edit", "bash", "grep", "find", "ls"]) assert.equal(own(name), "<inline:devices>", name);
     for (const name of ["grep", "find", "ls"]) assert.ok(session.getActiveToolNames().includes(name), name);
 
-    const [read, foreign] = await run([
+    const [read, foreign, lights] = await run([
       { name: "read", args: { path: "notes.txt", device: "laptop" } },
       { name: "bg_run", args: { command: "make", device: "laptop" } },
+      { name: "lights_set", args: { device: "kitchen" } },
     ]);
     assert.equal(read.isError, false, textOf(read));
     assert.match(textOf(read), /on the laptop/);
@@ -114,6 +126,9 @@ test("a granted chat's model is offered the tools with a device, calls one on th
     assert.equal(foreign.isError, true);
     assert.match(textOf(foreign), /bg_run does not run on paired devices/);
     assert.equal(existsSync(marker), false, "nor on the server instead");
+    // A tool whose own parameter is called `device` is not about paired computers, and runs.
+    assert.equal(lights.isError, false, textOf(lights));
+    assert.match(textOf(lights), /lights on in kitchen/);
 
     const request = model.requests.at(-1);
     const offered = request.tools.find((t) => nameOf(t) === "read");
@@ -125,8 +140,8 @@ test("a granted chat's model is offered the tools with a device, calls one on th
     await client.reload();
     for (const name of ["grep", "find", "ls"]) assert.ok(!session.getActiveToolNames().includes(name), name);
     assert.equal(own("read"), "<inline:devices>");
-    // The script goes by the results in the conversation: two are there already.
-    const [after] = await run([undefined, undefined, { name: "read", args: { path: "notes.txt", device: "laptop" } }]);
+    // The script goes by the results in the conversation: three are there already.
+    const [after] = await run([undefined, undefined, undefined, { name: "read", args: { path: "notes.txt", device: "laptop" } }]);
     assert.equal(after.isError, true);
     assert.match(textOf(after), /No device is granted to this chat/);
     assert.equal(device.asked("fs.read").length, 1);

@@ -138,9 +138,13 @@ name on its card in the chat.
   devices the chat has.
 
 Other tools, subagents, background jobs and MCP tools always act on the server.
-A call of another tool that names a device is refused, and so is any call on a
-device for somebody who is not the primary user (a colleague in a shared
-conversation): the computers are yours.
+A call of another tool that names a device is refused, rather than run on the
+server where a device was meant, and so is any call on a device for somebody who
+is not the primary user (a colleague in a shared conversation): the computers are
+yours. A tool that has a `device` parameter of its own, a smart-home tool's for
+one, means something else by it and is left alone, with Devices on or off. With
+Devices off, only pi's own `read`, `write`, `edit`, `bash`, `grep`, `find` and
+`ls` are still refused when they are given a `device`.
 
 When the last device is taken back, the tools stay as they are for the rest of
 the chat's session and refuse a `device`; `grep`, `find` and `ls` go away

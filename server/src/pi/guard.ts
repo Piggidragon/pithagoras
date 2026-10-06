@@ -10,7 +10,8 @@ import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
 import { UNDERSTORY } from "../features.js";
 import { EDIT_IMAGE_TOOL, GENERATE_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
-import { DEVICE_TOOLS_SOURCE } from "../sync/protocol.js";
+import { DEVICE_TOOLS_SOURCE, PI_TOOLS } from "../sync/protocol.js";
+import { devicesEnabled } from "../sync/store.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
 import { agentsRoot, listAgents } from "../agents.js";
 import { workspaceRoot } from "../workspaces.js";
@@ -922,11 +923,23 @@ export function guardExtension(
 
       // A paired computer is the primary user's: nobody else's message reaches it, whatever a rule or the read-only tools would
       // let them run on the server. And only the devices extension's own tools act on one: any other tool would drop the
-      // `device` it does not know and run on the server instead, which is not what was asked.
+      // `device` it does not know and run on the server instead, which is not what was asked. That holds for a call that is
+      // aimed at a device: a tool that declares a `device` of its own (a smart-home tool, an MCP server's) means something
+      // else by it, and so does any tool but pi's own file and shell tools while Devices is off, when nothing can be aimed.
       const device = event.input && typeof event.input === "object" ? (event.input as Record<string, unknown>).device : undefined;
       if (device !== undefined && device !== null) {
-        const own = (pi.getAllTools?.() ?? []).find((tool: any) => tool?.name === event.toolName)?.sourceInfo?.path === `<inline:${DEVICE_TOOLS_SOURCE}>`;
-        const why = role !== "primary" ? `a ${role} cannot act on a paired device` : !own ? `${event.toolName} does not run on paired devices` : undefined;
+        const tool = (pi.getAllTools?.() ?? []).find((t: any) => t?.name === event.toolName);
+        const own = tool?.sourceInfo?.path === `<inline:${DEVICE_TOOLS_SOURCE}>`;
+        const declared = !own && typeof tool?.parameters?.properties === "object" && tool.parameters.properties !== null && Object.hasOwn(tool.parameters.properties, "device");
+        const piTool = (PI_TOOLS as readonly string[]).includes(event.toolName);
+        const aimed = own || (!declared && (devicesEnabled() || piTool));
+        const why = !aimed
+          ? undefined
+          : role !== "primary"
+            ? `a ${role} cannot act on a paired device`
+            : !own
+              ? piTool ? `${event.toolName} takes a device only in a chat that was given one` : `${event.toolName} does not run on paired devices`
+              : undefined;
         if (why) {
           console.warn(`[guard ${sessionId}] blocked ${event.toolName} on a device: ${why}`);
           note("refused", `Device ${String(device).slice(0, 64)}: ${why}`);
@@ -935,8 +948,8 @@ export function guardExtension(
             reason: role !== "primary"
               ? `Refused: ${why}. You are speaking with someone who is not your primary user, and the primary user's ` +
                 `computers are not theirs to reach. Say so rather than looking for another way to it.`
-              : `Refused: ${why}. Only read, write, edit, bash, grep, find and ls take a device; this tool always acts on ` +
-                `the server. Call it without device, or use one of those tools.`,
+              : `Refused: ${why}. Only read, write, edit, bash, grep, find and ls take a device, and only in a chat that has one; ` +
+                `every other tool always acts on the server. Call it without device, or use one of those tools.`,
           };
         }
       }

@@ -605,3 +605,39 @@ test("the guard lets only the primary user's call reach a device, and only throu
   assert.equal(refused.block, true);
   assert.match(refused.reason, /a colleague cannot act on a paired device/);
 });
+
+test("the guard blocks a device only on a call aimed at a paired computer: a tool's own device parameter is left alone, also with Devices off", async () => {
+  let role = "primary";
+  const ext = extensionApi();
+  const own = (name) => ({ name, sourceInfo: { path: "<inline:devices>" }, parameters: { type: "object", properties: { device: { type: "string" } } } });
+  ext.getAllTools = () => [
+    own("read"),
+    { name: "bash", sourceInfo: { path: "<builtin:bash>" }, parameters: { type: "object", properties: { command: { type: "string" } } } },
+    { name: "lights_set", sourceInfo: { path: "/pkg/lights/index.ts" }, parameters: { type: "object", properties: { device: { type: "string" }, on: { type: "boolean" } } } },
+    { name: "bg_run", sourceInfo: { path: "/pkg/background/index.ts" }, parameters: { type: "object", properties: { command: { type: "string" } } } },
+  ];
+  guardExtension(path.join(home, "guard-3"), () => ({ role }), chat())(ext);
+  const call = (toolName, input) => ext.handlers.tool_call.reduce((r, fn) => r ?? fn({ toolName, input }), undefined);
+
+  // On: the tool that takes a device of its own runs, for anybody; one that does not is refused, with pi's own tools in a chat without a grant.
+  assert.equal(call("lights_set", { device: "kitchen", on: true }), undefined);
+  assert.match(call("bg_run", { command: "ls", device: "laptop" }).reason, /bg_run does not run on paired devices/);
+  assert.match(call("bash", { command: "ls", device: "laptop" }).reason, /bash takes a device only in a chat that was given one/);
+  role = "colleague";
+  // Another rule may still refuse a colleague's call of a tool nobody listed, but not as one aimed at a paired computer.
+  assert.doesNotMatch(String(call("lights_set", { device: "kitchen", on: true })?.reason), /paired device/);
+  assert.match(call("read", { path: "a", device: "laptop" }).reason, /a colleague cannot act on a paired device/);
+  assert.match(call("bg_run", { command: "ls", device: "laptop" }).reason, /a colleague cannot act/);
+  role = "primary";
+
+  // Off: nothing can be aimed at a computer, so a tool that means something else by `device` is not refused, whatever it is called;
+  // pi's own file and shell tools still are, as they would run on the server and not where the model meant.
+  store.setDevicesEnabled(false);
+  try {
+    assert.equal(call("lights_set", { device: "kitchen", on: true }), undefined);
+    assert.equal(call("bg_run", { command: "ls", device: "laptop" }), undefined);
+    assert.match(call("bash", { command: "ls", device: "laptop" }).reason, /bash takes a device only in a chat that was given one/);
+  } finally {
+    store.setDevicesEnabled(true);
+  }
+});
