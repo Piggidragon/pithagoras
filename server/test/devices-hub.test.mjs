@@ -17,7 +17,7 @@ const { pairRouter } = await import("../dist/sync/pair.js");
 const { attachSyncUpgrade, linkOf, dropDevice, hub } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
 const { getDb, listAudit } = await import("../dist/db.js");
-const { encodeFrame, decodeFrame, FRAME, CLOSE } = await import("../dist/sync/protocol.js");
+const { encodeFrame, decodeFrame, FRAME, CLOSE, MAX_APPROVALS } = await import("../dist/sync/protocol.js");
 const { connect: connectTo, until } = await import("./fake-device.mjs");
 
 let server;
@@ -331,6 +331,40 @@ test("an approval reaches the call that waits for it; a call given up on denies 
   assert.deepEqual(signals[0].params, { stream: started.stream, signal: "SIGKILL" });
   device.notify("approval.resolved", { id: 12, chat: "c1", answer: "deny", minutes: null, by: "portal" });
   await until(() => linkOf(id).approvals.size === 0, "the approval to close");
+  device.ws.close(1001);
+});
+
+test("a device can open only as many approvals as a person could answer, and one at a time for a call", async () => {
+  const { connector_token: token, device_id: id } = await paired("asker-many");
+  const approval = (n, call) => ({ id: n, call, chat: "c1", tool: "exec", target: "make", reasons: [], preview: null, choices: ["once", "deny"], max_minutes: 0, created_ms: 1, expires_ms: 2 });
+  const asked = [];
+  const { device } = await connect(token, {
+    answers: {
+      // One call, asked about three times over: only the first stands.
+      "exec.start": (_params, rid, d) => {
+        for (const n of [9001, 9002, 9003]) d.notify("approval.requested", approval(n, rid));
+        d.notify("approval.requested", approval(9004, 424242));
+      },
+    },
+  });
+  await until(() => linkOf(id)?.info, "device.info");
+  const link = linkOf(id);
+  const run = link.exec({ command: "make", cwd: "/w", ctx: { chat: "c1", tainted: false, tool: "bash" }, onData: () => {}, onApproval: (a) => asked.push(a.id) });
+  run.catch(() => {});
+  await until(() => asked.length > 0, "the approval");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(asked, [9001]);
+  assert.deepEqual([...link.approvals.keys()], [9001], "not the repeats, nor one for a call that is not there");
+  // A flood that names no call: kept up to the limit, the rest dropped.
+  for (let n = 1; n <= MAX_APPROVALS * 3; n++) device.notify("approval.requested", approval(n, null));
+  await until(() => link.approvals.size >= MAX_APPROVALS, "the approvals");
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(link.approvals.size, MAX_APPROVALS);
+  // Answered ones make room.
+  device.notify("approval.resolved", { id: 1, chat: "c1", answer: "deny", minutes: null, by: "device" });
+  await until(() => link.approvals.size === MAX_APPROVALS - 1, "room");
+  device.notify("approval.requested", approval(5000, null));
+  await until(() => link.approvals.has(5000), "the next approval");
   device.ws.close(1001);
 });
 

@@ -13,6 +13,7 @@ import {
   CONNECT_PATH,
   DeviceError,
   FRAME,
+  MAX_APPROVALS,
   MAX_CALLS,
   MAX_CHUNK,
   MAX_FILE,
@@ -342,6 +343,21 @@ export class DeviceLink extends EventEmitter {
     sink.take(frame.payload);
   }
 
+  /**
+   * Whether a question the device asks is taken up. Each is kept, shown on the
+   * Devices page and asked in a chat until it is answered, so what a device
+   * can open is bounded: a number of them in all, none that repeats one it has,
+   * none for a call of this connection that is not waiting, and one at a time
+   * for a call, which waits on a single answer.
+   */
+  private keepsApproval(approval: ApprovalInfo): boolean {
+    if (this.approvals.has(approval.id) || this.approvals.size >= MAX_APPROVALS) return false;
+    if (typeof approval.call !== "number") return true;
+    if (!this.pending.has(approval.call)) return false;
+    for (const open of this.approvals.values()) if (open.call === approval.call) return false;
+    return true;
+  }
+
   private receiveNotification(method: string, params: unknown): void {
     switch (method) {
       case "exec.exit": {
@@ -351,7 +367,7 @@ export class DeviceLink extends EventEmitter {
       }
       case "approval.requested": {
         const approval = readApproval(params);
-        if (!approval) return;
+        if (!approval || !this.keepsApproval(approval)) return;
         this.approvals.set(approval.id, approval);
         // Asked for a call the portal has stopped waiting for: nobody is there to answer it.
         const waiting = typeof approval.call === "number" ? this.pending.get(approval.call) : undefined;
@@ -565,7 +581,7 @@ async function learn(link: DeviceLink): Promise<void> {
     link.sameMachine = await sameMachine(link);
     if (link.can("approvals")) {
       const listed = (await link.call("approval.list", {}, { timeoutMs: QUICK_TIMEOUT_MS })) as { approvals?: unknown[] };
-      for (const a of Array.isArray(listed?.approvals) ? listed.approvals : []) {
+      for (const a of Array.isArray(listed?.approvals) ? listed.approvals.slice(0, MAX_APPROVALS) : []) {
         const approval = readApproval(a);
         if (approval) link.approvals.set(approval.id, approval);
       }

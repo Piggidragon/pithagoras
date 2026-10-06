@@ -21,6 +21,8 @@ export const MAX_CHUNK = 64 * 1024;
 export const MAX_FILE = 64 * 1024 * 1024;
 /** Calls the device handles at once; more are refused here before they are sent. */
 export const MAX_CALLS = 64;
+/** Approvals one device may have open at once. A person answers them; a device that asks for more than this is not asking one. */
+export const MAX_APPROVALS = 128;
 
 /** Close codes the portal sends (protocol.md, section 4). */
 export const CLOSE = {
