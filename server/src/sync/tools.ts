@@ -323,9 +323,10 @@ export function deviceTools(opts: DeviceToolsOptions) {
           exposeSessionEnvironment: false,
           operations: {
             exec: async (command: string, dir: string, o: { onData: (d: Buffer) => void; signal?: AbortSignal; timeout?: number }) => {
+              const timeoutMs = commandTimeoutMs(o.timeout);
               let exit;
               try {
-                exit = await link.exec({ command, cwd: dir, timeoutMs: o.timeout ? o.timeout * 1000 : undefined, ctx: call(), onData: o.onData, signal: o.signal, onApproval: waiting.onApproval });
+                exit = await link.exec({ command, cwd: dir, timeoutMs, ctx: call(), onData: o.onData, signal: o.signal, onApproval: waiting.onApproval });
               } catch (e) {
                 if (o.signal?.aborted) throw new Error("aborted");
                 throw failure(e, device.name);
@@ -436,6 +437,17 @@ export function deviceTools(opts: DeviceToolsOptions) {
       return truncation.content + (notices.length ? `\n\n[${notices.join(". ")}]` : "");
     }
   }
+}
+
+/** The longest timeout pi's bash takes, in ms: the longest a timer waits. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/** pi's own check of a bash command's timeout (seconds), which its local shell makes and a device's operations do not go through; in ms. */
+function commandTimeoutMs(timeout: unknown): number | undefined {
+  if (timeout === undefined) return undefined;
+  if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0) throw new Error("Invalid timeout: must be a finite number of seconds");
+  if (timeout * 1000 > MAX_TIMEOUT_MS) throw new Error(`Invalid timeout: maximum is ${MAX_TIMEOUT_MS / 1000} seconds`);
+  return timeout * 1000;
 }
 
 /** The file pi writes a command's full output to: in the temp folder, by this name, and no other path is removed. */

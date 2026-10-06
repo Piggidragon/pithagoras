@@ -265,6 +265,13 @@ test("the tools take a device once the chat has one; without one, nothing of the
   await assert.rejects(ext.tools.get("bash").execute("c6", { command: "false", device: "laptop", timeout: 5 }, undefined, undefined, {}), /Command exited with code 2/);
   assert.equal(device.asked("exec.start")[1].params.timeout_ms, 5000);
 
+  // A timeout pi would refuse on the server is refused here too, before anything goes to the device.
+  const started = device.asked("exec.start").length;
+  await assert.rejects(ext.tools.get("bash").execute("c6b", { command: "make", device: "laptop", timeout: 2_147_484 }, undefined, undefined, {}), /Invalid timeout: maximum is 2147483.647 seconds/);
+  await assert.rejects(ext.tools.get("bash").execute("c6c", { command: "make", device: "laptop", timeout: -1 }, undefined, undefined, {}), /Invalid timeout: must be a finite number of seconds/);
+  await assert.rejects(ext.tools.get("bash").execute("c6d", { command: "make", device: "laptop", timeout: 0 }, undefined, undefined, {}), /Invalid timeout/);
+  assert.equal(device.asked("exec.start").length, started);
+
   assert.equal(textOf(await ext.tools.get("ls").execute("c7", { device: "laptop" }, undefined, undefined, {})), "alpha\nsrc/\nZeta.md");
   assert.equal(textOf(await ext.tools.get("find").execute("c8", { pattern: "**/*.rs", device: "laptop" }, undefined, undefined, {})),
     "a.rs\nsub/b.rs\n\n[1 files left out by laptop: protected, outside its folders or unreadable]");

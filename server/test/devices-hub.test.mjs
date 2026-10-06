@@ -448,6 +448,58 @@ test("a command's output past what the portal takes kills it; one that never end
   device.ws.close(1001);
 });
 
+test("how long the portal waits for a command's end is bounded by what the device lets run, and never overflows a timer", async () => {
+  const { connector_token: token, device_id: id } = await paired("timekeeper");
+  // Starts a command and ends it a moment later, or never.
+  let endsAfter = 150;
+  const { device } = await connect(token, {
+    answers: {
+      "exec.start": (params, rid, d) => {
+        d.send({ jsonrpc: "2.0", id: rid, result: {} });
+        if (endsAfter !== null) setTimeout(() => d.notify("exec.exit", { stream: params.stream, code: 0, signal: null, timed_out: false, truncated: false }), endsAfter);
+      },
+      "exec.signal": {},
+    },
+  });
+  await until(() => linkOf(id)?.info, "device.info");
+  const link = linkOf(id);
+  const ctx = { chat: "c1", tainted: false, tool: "bash" };
+  const run = (opts) => link.exec({ command: "make", cwd: "/w", ctx, onData: () => {}, ...opts });
+
+  // A timeout so long that the portal's wait for the end does not fit a timer: the wait is not cut to nothing, the command ends on its own.
+  const warnings = [];
+  const onWarning = (w) => warnings.push(w.name);
+  process.on("warning", onWarning);
+  try {
+    assert.equal((await run({ timeoutMs: 2_147_483 * 1000 })).code, 0);
+    assert.equal(device.asked("exec.start").at(-1).params.timeout_ms, 2_147_483_000, "what the agent asked for goes to the device as it is");
+    await sleep(20);
+  } finally {
+    process.off("warning", onWarning);
+  }
+  assert.ok(!warnings.includes("TimeoutOverflowWarning"), "no timer overflowed");
+
+  // Longer than the portal waits for a command whose device says nothing of its own limit: not waited for longer.
+  endsAfter = null;
+  const started = Date.now();
+  await assert.rejects(run({ timeoutMs: 10_000, limits: { maxMs: 50, graceMs: 100 } }), /did not report the end of the command/);
+  assert.ok(Date.now() - started < 3000, `${Date.now() - started} ms`);
+
+  // The device says how long it lets a command run: that, and not the portal's default, is what the portal waits for, whatever is asked.
+  link.policy = { portal_policy: "read", version: "v1", settings: { exec: { max_timeout_secs: 1 } }, device_only: [] };
+  const again = Date.now();
+  await assert.rejects(run({ timeoutMs: 3_600_000, limits: { graceMs: 100 } }), /did not report the end of the command/);
+  assert.ok(Date.now() - again >= 1000 && Date.now() - again < 4000, `${Date.now() - again} ms`);
+  const noneAsked = Date.now();
+  await assert.rejects(run({ limits: { graceMs: 100 } }), /did not report the end of the command/);
+  assert.ok(Date.now() - noneAsked >= 1000 && Date.now() - noneAsked < 4000, `${Date.now() - noneAsked} ms`);
+  // A device that lets a command run longer than the portal's default is waited for that long.
+  endsAfter = 300;
+  link.policy = { portal_policy: "read", version: "v2", settings: { exec: { max_timeout_secs: 2 } }, device_only: [] };
+  assert.equal((await run({ limits: { maxMs: 50, graceMs: 100 } })).code, 0);
+  device.ws.close(1001);
+});
+
 test("a stop still goes out when the device's table of calls is full", async () => {
   const { connector_token: token, device_id: id } = await paired("stopper");
   const { device } = await connect(token, { answers: { "exec.start": {}, "exec.signal": {}, "fs.stat": () => undefined } });

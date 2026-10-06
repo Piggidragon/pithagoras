@@ -80,6 +80,8 @@ export const TIMING = {
   refusedLogMs: 60_000,
   auditNoteMs: 1_000,
 };
+/** The longest wait a timer takes: past it Node fires the timer at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 /**
  * What the portal puts up with from a command on a device. The device has its
  * own limits (16 MiB of output by default, four hours at most), but they are
@@ -89,8 +91,9 @@ export const TIMING = {
 const EXEC_LIMITS = {
   /** Bytes of output passed on; past them the command is killed. */
   output: 32 * 1024 * 1024,
-  /** How long past its own timeout (or the four hours) a command's end is waited for. */
+  /** How long past its own timeout (or the device's longest) a command's end is waited for. */
   graceMs: 30_000,
+  /** The longest a command is waited for when the device does not say how long it lets one run (its default is four hours). */
   maxMs: 4 * 60 * 60_000,
   /** How long a command that was told to stop is given before it is killed and given up on. */
   killMs: 10_000,
@@ -371,6 +374,12 @@ export class DeviceLink extends EventEmitter {
    */
   async exec(opts: { command: string; cwd: string; timeoutMs?: number; ctx: Ctx; onData: (data: Buffer) => void; limits?: Partial<ExecLimits> } & Waiting): Promise<ExecExit> {
     const limit = { ...EXEC_LIMITS, ...opts.limits };
+    // How long the device lets a command run, as it says in the settings it shares, which hold the command to it whatever is asked;
+    // without them the portal's own default. The portal's wait is never longer: it is a wait for the device's word, not a second limit.
+    const shared = this.policy?.settings.exec;
+    const secs = typeof shared === "object" && shared !== null ? (shared as Record<string, unknown>).max_timeout_secs : undefined;
+    const longest = Math.min(typeof secs === "number" && Number.isFinite(secs) && secs > 0 ? secs * 1000 : limit.maxMs, MAX_TIMER_MS - limit.graceMs);
+    const asked = typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
     const stream = this.openStream();
     let ended: (exit: ExecExit) => void = () => {};
     const exit = new Promise<ExecExit>((resolve) => (ended = resolve));
@@ -409,7 +418,7 @@ export class DeviceLink extends EventEmitter {
     try {
       await this.call(
         "exec.start",
-        { stream, command: opts.command, cwd: opts.cwd, ...(opts.timeoutMs ? { timeout_ms: Math.round(opts.timeoutMs) } : {}), ctx: opts.ctx },
+        { stream, command: opts.command, cwd: opts.cwd, ...(asked ? { timeout_ms: Math.max(1, Math.round(asked)) } : {}), ctx: opts.ctx },
         { onApproval: opts.onApproval, signal: opts.signal },
       );
       started = true;
@@ -418,7 +427,7 @@ export class DeviceLink extends EventEmitter {
       deadline = setTimeout(() => {
         this.notifySignal(stream, "SIGKILL");
         giveUp(new DeviceError(CODE.IO, "the device did not report the end of the command in time"));
-      }, (opts.timeoutMs ?? limit.maxMs) + limit.graceMs);
+      }, Math.min(asked ?? longest, longest) + limit.graceMs);
       deadline.unref();
       if (this.closed) onClosed();
       else this.once("closed", onClosed);

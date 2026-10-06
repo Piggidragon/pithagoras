@@ -271,8 +271,14 @@ each device's own settings. In particular:
   taking it and has the command killed, as the output also goes into a log file
   in the portal's temp folder while the command runs (the file is removed when
   it is over). A command that the device does not report as ended within its
-  timeout (at most four hours) and half a minute is killed and
-  given up on. Nothing in a call carries environment variables to the device.
+  timeout and half a minute is killed and given up on. That timeout is the one
+  the agent gave, and never longer than the device lets a command run: its own
+  `exec.max_timeout_secs` (four hours by default), which the portal knows from
+  the settings the device shares, and takes as four hours when it does not. So a
+  device set to eight hours needs to share its settings for the portal to wait
+  that long. A `timeout` that pi would refuse on the server (not above zero, or
+  over 2,147,483 seconds) is refused for a device too. Nothing in a call carries
+  environment variables to the device.
 - The portal logs pairing and removal by device name only; tokens and codes
   never reach a log. When a device says it refused something the portal sent,
   the portal writes the first such message of a minute (quoted, cut at 200
