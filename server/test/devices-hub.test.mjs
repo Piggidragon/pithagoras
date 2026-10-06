@@ -95,13 +95,47 @@ test("only the device's own token opens the socket, never from a browser, and on
   assert.equal(linkOf(id).sameMachine, false);
   // The probe names a file directly in a temp folder, and nothing else.
   for (const m of first.device.asked("device.probe")) assert.match(m.params.path, /^\/.+\/pithagoras-probe-[0-9a-f]{32}$/);
-  assert.equal((await connect(token)).status, 409);
+  // The first answers the ping, so the second is not the device's own coming back: refused, and said with where each came from.
+  assert.equal((await connect(token, { userAgent: "copied-client/9 \u0085" })).status, 409);
   const { alertOf } = await import("../dist/sync/hub.js");
   assert.match(alertOf(id).message, /second connection/);
+  assert.equal(alertOf(id).existing.userAgent, "pithagoras-sync/0.1.0");
+  assert.equal(alertOf(id).refused.userAgent, "copied-client/9 ", "cleaned of control characters");
+  assert.match(alertOf(id).refused.address, /127\.0\.0\.1$/);
+  assert.equal(linkOf(id).remote.userAgent, "pithagoras-sync/0.1.0");
   first.device.ws.close(1001);
   await until(() => !linkOf(id), "the link to go");
   const second = await connect(token);
   assert.equal(second.status, 101);
+  second.device.ws.close(1001);
+  await until(() => !linkOf(id), "the link to go");
+});
+
+test("a device that comes back after its connection went quiet takes over at once, with no alert; a live connection is not pushed off", async () => {
+  const { connector_token: token, device_id: id } = await paired("sleeper");
+  const { alertOf, clearAlert } = await import("../dist/sync/hub.js");
+  const first = await connect(token, { answers: { "fs.stat": () => undefined } });
+  await until(() => linkOf(id)?.info, "device.info");
+  const stale = linkOf(id);
+  const waiting = stale.call("fs.stat", { path: "/x", ctx: { chat: "c", tainted: false } });
+  waiting.catch(() => {});
+  // A sleeping laptop: whatever the portal sends it, it answers nothing, and no FIN ever came.
+  first.device.ws.pause();
+  const started = Date.now();
+  const second = await connect(token, { userAgent: "pithagoras-sync/0.1.1" });
+  assert.equal(second.status, 101);
+  assert.ok(Date.now() - started < 8000, "within the probe");
+  await until(() => linkOf(id) && linkOf(id) !== stale && linkOf(id).info, "the new link");
+  assert.equal(alertOf(id), undefined, "no alert for the device's own return");
+  assert.equal(linkOf(id).remote.userAgent, "pithagoras-sync/0.1.1");
+  await assert.rejects(waiting, /disconnected/);
+  assert.equal(stale.closed, true);
+  first.device.ws.terminate();
+
+  // The new one answers pings, so a third is refused, and the page's alert is for that one.
+  assert.equal((await connect(token)).status, 409);
+  assert.ok(alertOf(id));
+  clearAlert(id);
   second.device.ws.close(1001);
   await until(() => !linkOf(id), "the link to go");
 });

@@ -82,9 +82,17 @@ not, so it is not offered to chats.
 working, its connection is closed at once, and every chat loses it. To use the
 computer again, pair it again.
 
-When something else tries to connect with a device's token while the device is
-connected, it is refused, and the device shows a warning. If that was not you
-(a second copy of the client, say), remove the device and pair it again.
+Under a connected device, **Connected from** shows the address and the client's
+name for itself that the portal saw. Behind a reverse proxy the address is the
+proxy's.
+
+A device has one connection at a time. When something else connects with its
+token, the portal asks the connection it has whether it still answers. A laptop
+that slept or changed network does not, so its next connection replaces the old
+one, and nothing is shown. When the old one does answer, the new one is refused
+and the device shows a warning with where each came from. If one of them is not
+yours (a second copy of the client, a copied token), remove the device and pair
+it again.
 
 ## Giving a chat a device
 
@@ -210,8 +218,12 @@ each device's own settings. In particular:
   browser (any request that names an `Origin`), so a web page cannot spend a
   code or open a device's connection.
 - **One connection per device.** A second connection with the same token is
-  refused while the first is up, so a copied token cannot push the real device
-  off; the attempt is shown on the Devices page.
+  refused while the first is up and answering, so a copied token cannot push the
+  real device off; the attempt is shown on the Devices page, with the address
+  and client name of both. A first connection that has gone quiet (the laptop
+  slept) is replaced by the device's next one after a short ping, and that is
+  not shown: a token copied to another machine could take a quiet device's
+  place the same way, and the **Connected from** line is how to tell.
 - Messages on the device's connection are limited to 4 MiB and file transfers
   to 64 MiB. A command's output is limited by the device (16 MiB by default)
   and, whatever the device does, by the portal: past 32 MiB the portal stops

@@ -60,6 +60,8 @@ const DEAD_AFTER_MS = 45_000;
 /** Most calls answer at once; one may wait for the owner's approval, which the device gives up on after at most an hour. */
 const CALL_TIMEOUT_MS = 65 * 60_000;
 const QUICK_TIMEOUT_MS = 30_000;
+/** A second connection with a device's token waits this long for the first to answer a ping, before it is taken for the device's own, back after a sleep or a change of network. */
+const REPLACE_PROBE_MS = 3_000;
 /**
  * What the portal puts up with from a command on a device. The device has its
  * own limits (16 MiB of output by default, four hours at most), but they are
@@ -109,6 +111,12 @@ export interface Waiting {
 
 const offline = () => new DeviceError(CODE.IO, "the device disconnected");
 
+/** Where a connection came from, as the portal saw it: so that its owner can tell the device's own from another. Behind a proxy the address is the proxy's. */
+export interface Remote {
+  address: string;
+  userAgent: string;
+}
+
 /** One live connection, from the hello on. */
 export class DeviceLink extends EventEmitter {
   readonly connectedAt = Date.now();
@@ -136,17 +144,40 @@ export class DeviceLink extends EventEmitter {
     private readonly ws: WebSocket,
     readonly deviceId: string,
     readonly hello: Hello,
+    readonly remote: Remote,
   ) {
     super();
     this.setMaxListeners(0);
     ws.on("message", (data, isBinary) => this.receive(data, isBinary));
-    ws.on("pong", () => (this.lastHeard = Date.now()));
+    ws.on("pong", () => {
+      this.lastHeard = Date.now();
+      this.emit("pong");
+    });
     ws.on("close", () => this.ended());
     this.pinger = setInterval(() => {
       if (Date.now() - this.lastHeard > DEAD_AFTER_MS) return void ws.terminate();
       ws.ping();
     }, PING_EVERY_MS);
     this.pinger.unref();
+  }
+
+  /** Whether the device answers a ping within `ms`. One that slept or lost its network does not, and the portal learns that only from its silence. */
+  alive(ms: number): Promise<boolean> {
+    if (this.closed || this.ws.readyState !== this.ws.OPEN) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const done = (answer: boolean) => {
+        clearTimeout(timer);
+        this.off("pong", yes);
+        this.off("closed", no);
+        resolve(answer);
+      };
+      const yes = () => done(true);
+      const no = () => done(false);
+      const timer = setTimeout(no, ms);
+      this.once("pong", yes);
+      this.once("closed", no);
+      this.ws.ping();
+    });
   }
 
   can(capability: string): boolean {
@@ -517,8 +548,8 @@ hub.setMaxListeners(0);
 const links = new Map<string, DeviceLink>();
 /** Devices whose upgrade is under way, so that two at once cannot both get through the one-connection check. */
 const arriving = new Set<string>();
-/** A connection refused because the device already had one, by device: said on the Devices page. */
-const alerts = new Map<string, { at: number; message: string }>();
+/** A connection refused because the device already had one that answered, by device: said on the Devices page, with where each came from. */
+const alerts = new Map<string, { at: number; message: string; existing: Remote | null; refused: Remote }>();
 
 export const linkOf = (deviceId: string): DeviceLink | undefined => links.get(deviceId);
 export const alertOf = (deviceId: string) => alerts.get(deviceId);
@@ -549,12 +580,25 @@ const http_status = (status: number) =>
 /** Whether an upgrade is the sync connection's: only its exact path, without a query. */
 export const isSyncUpgrade = (url: string | undefined): boolean => url === CONNECT_PATH;
 
+/** The address and User-Agent of an upgrade request; the User-Agent is the client's own word, cut and cleaned as it is shown and logged. */
+const remoteOf = (req: http.IncomingMessage): Remote => ({
+  address: req.socket.remoteAddress ?? "",
+  userAgent: String(req.headers["user-agent"] ?? "").replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 200),
+});
+
+function conflict(deviceId: string, existing: Remote | null | undefined, refused: Remote): { status: number; message: string } {
+  alerts.set(deviceId, { at: Date.now(), message: "A second connection with this device's token was refused while it was connected", existing: existing ?? null, refused });
+  hub.emit("status", deviceId);
+  return { status: 409, message: "This device is already connected" };
+}
+
 /**
  * Who an upgrade is from: a device, or the status and words to refuse it with.
  * Checked before the upgrade, so that nothing unauthenticated ever becomes a
- * WebSocket.
+ * WebSocket. A device that is connected already is not refused here: the
+ * connection may be a dead one (see attachSyncUpgrade), so the answer says which.
  */
-export function admit(headers: http.IncomingHttpHeaders): { deviceId: string } | { status: number; message: string } {
+export function admit(headers: http.IncomingHttpHeaders, remote: Remote): { deviceId: string; existing?: DeviceLink } | { status: number; message: string } {
   if (!devicesEnabled()) return { status: 503, message: devicesOffBecause() };
   // A browser always names the page it opens a socket from; the device client never does.
   if (headers.origin !== undefined) return { status: 403, message: "Not from a browser" };
@@ -562,17 +606,23 @@ export function admit(headers: http.IncomingHttpHeaders): { deviceId: string } |
   const token = /^Bearer ([\x21-\x7e]{16,512})$/.exec(auth)?.[1];
   const device = token ? deviceOfToken(token) : undefined;
   if (!device) return { status: 401, message: "Unknown or revoked token" };
-  if (links.has(device.id) || arriving.has(device.id)) {
-    alerts.set(device.id, { at: Date.now(), message: "A second connection with this device's token was refused while it was connected" });
-    hub.emit("status", device.id);
-    return { status: 409, message: "This device is already connected" };
-  }
-  return { deviceId: device.id };
+  // Two connections at once, and the first not up yet: nothing says which is the device's own.
+  if (arriving.has(device.id)) return conflict(device.id, links.get(device.id)?.remote, remote);
+  arriving.add(device.id);
+  return { deviceId: device.id, existing: links.get(device.id) };
 }
 
 /**
  * The sync WebSocket, on the portal's own HTTP server. Registered before the
  * browser's upgrade listener, which leaves this path alone.
+ *
+ * One live connection per device, so a copied token cannot push the real
+ * device off. But a laptop that slept, or changed network, leaves a connection
+ * the portal still takes for live until its pings go unanswered, and the device
+ * comes back at once: so a second connection pings the first. When it answers,
+ * the second is refused (409) and the alert says where each came from. When it
+ * does not, it is closed and the second takes over, with no alert: the device
+ * came back, and the old connection was nobody's.
  */
 export function attachSyncUpgrade(server: http.Server): void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE, perMessageDeflate: false, clientTracking: false });
@@ -580,18 +630,32 @@ export function attachSyncUpgrade(server: http.Server): void {
     if (!isSyncUpgrade(req.url)) return;
     socket.on("error", () => {});
     if (req.method !== "GET") return refuse(socket, 400, "Bad request");
-    const admitted = admit(req.headers);
+    const remote = remoteOf(req);
+    const admitted = admit(req.headers, remote);
     if ("status" in admitted) return refuse(socket, admitted.status, admitted.message);
-    const { deviceId } = admitted;
-    arriving.add(deviceId);
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      // From the first byte on: a frame that breaks the protocol (unmasked, over the limit, bad UTF-8) is an
-      // 'error' of the socket, which ends the whole process when nobody listens.
-      ws.on("error", () => ws.terminate());
-      welcome(ws, deviceId, () => arriving.delete(deviceId));
-    });
+    const { deviceId, existing } = admitted;
+    // However the attempt ends, also while it waits for the ping below: a client that gave up must not block its next one.
     // handleUpgrade answers a malformed upgrade itself and never calls back.
     socket.once("close", () => arriving.delete(deviceId));
+    const upgrade = () =>
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        // From the first byte on: a frame that breaks the protocol (unmasked, over the limit, bad UTF-8) is an
+        // 'error' of the socket, which ends the whole process when nobody listens.
+        ws.on("error", () => ws.terminate());
+        welcome(ws, deviceId, remote, () => arriving.delete(deviceId));
+      });
+    if (!existing) return upgrade();
+    void existing.alive(REPLACE_PROBE_MS).then((answers) => {
+      if (socket.destroyed) return;
+      if (answers) {
+        arriving.delete(deviceId);
+        const refused = conflict(deviceId, existing.remote, remote);
+        return refuse(socket, refused.status, refused.message);
+      }
+      console.log(`[devices] ${getDevice(deviceId)?.name ?? deviceId} connected again from ${remote.address}; its earlier connection from ${existing.remote.address} no longer answered, and was closed`);
+      existing.close(CLOSE.replaced, "replaced by a new connection");
+      upgrade();
+    });
   });
 }
 
@@ -601,7 +665,7 @@ export function attachSyncUpgrade(server: http.Server): void {
  * `message` handler: the socket may deliver the next frame in the same
  * breath, and a listener added later would not hear it.
  */
-function welcome(ws: WebSocket, deviceId: string, settled: () => void): void {
+function welcome(ws: WebSocket, deviceId: string, remote: Remote, settled: () => void): void {
   const refused = (code: number, reason: string) => {
     settled();
     ws.close(code, reason);
@@ -624,7 +688,7 @@ function welcome(ws: WebSocket, deviceId: string, settled: () => void): void {
     // Removed while it said hello: it stops. The add-on switched off: it tries again, as it does for the switch.
     if (!getDevice(deviceId)) return refused(CLOSE.revoked, "device removed");
     if (!devicesEnabled()) return refused(CLOSE.goingAway, "devices switched off");
-    const link = new DeviceLink(ws, deviceId, hello);
+    const link = new DeviceLink(ws, deviceId, hello, remote);
     links.set(deviceId, link);
     touchDevice(deviceId);
     link.once("closed", () => {

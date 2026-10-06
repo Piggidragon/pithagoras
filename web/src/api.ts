@@ -1389,13 +1389,21 @@ export interface Device {
   last_seen: string | null;
   online: boolean;
   connectedAt: string | null;
+  /** Where the live connection came from, as the portal saw it. */
+  remote: DeviceRemote | null;
   hello: { clientVersion: string; user: string; shell: string; capabilities: string[] } | null;
   info: DeviceInfo | null;
   /** The device is the portal's own machine and user: it reaches nothing the portal's own tools do not. */
   sameMachine: boolean | null;
   approvals: DeviceApproval[];
   policy: DevicePolicy | null;
-  alert: { at: number; message: string } | null;
+  /** A second connection with the device's token was refused while the first still answered: where each came from. */
+  alert: { at: number; message: string; existing: DeviceRemote | null; refused: DeviceRemote } | null;
+}
+
+export interface DeviceRemote {
+  address: string;
+  userAgent: string;
 }
 
 /** A paired device as one chat sees it. */

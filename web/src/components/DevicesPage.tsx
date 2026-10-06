@@ -298,7 +298,11 @@ function DeviceCard({ device: d, onChanged, onError }: { device: Device; onChang
         <div role="alert" className="mt-2 flex items-start gap-2 rounded-lg bg-warn/10 p-2 text-xs text-warn">
           <LuTriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1">
-            {t("At {time} something else tried to connect with this device's token while it was connected, and was refused. If that was not you, remove the device and pair it again.", { time: formatDateTime(d.alert.at, { dateStyle: "short", timeStyle: "short" }) })}
+            {t("At {time} a connection from {refused} tried to connect with this device's token while the device was connected from {existing}, and was refused. If one of them is not yours, remove the device and pair it again.", {
+              time: formatDateTime(d.alert.at, { dateStyle: "short", timeStyle: "short" }),
+              refused: where(d.alert.refused),
+              existing: where(d.alert.existing),
+            })}
           </span>
           <button type="button" className={ghostCls} aria-label={t("Dismiss")} onClick={() => void api.clearDeviceAlert(d.id).then(onChanged, (e: Error) => onError(e.message))}>
             <LuX className="h-3.5 w-3.5" />
@@ -310,6 +314,7 @@ function DeviceCard({ device: d, onChanged, onError }: { device: Device; onChang
         <Row label={t("System")}>{info ? `${info.os_release ?? info.os} · ${info.arch}` : `${d.os} · ${d.arch}`}</Row>
         {info && <Row label={t("Runs as")}><code>{info.user}@{info.hostname}</code> · {info.shell} · {info.session}</Row>}
         {d.hello && <Row label={t("Client")}>{d.hello.clientVersion}</Row>}
+        {d.remote && <Row label={t("Connected from")}>{where(d.remote)}</Row>}
         {info && (
           <Row label={t("Mode")}>
             {t(MODE_LABEL[info.mode] ?? info.mode)}
@@ -343,6 +348,9 @@ function DeviceCard({ device: d, onChanged, onError }: { device: Device; onChang
     </li>
   );
 }
+
+/** Where a connection came from: its address and the client's own name for itself. */
+const where = (r: { address: string; userAgent: string } | null): string => (r ? `${r.address}${r.userAgent ? ` (${r.userAgent})` : ""}` : t("another connection"));
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (

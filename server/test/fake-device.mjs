@@ -65,9 +65,9 @@ export const INFO = { name: "laptop", os: "linux", arch: "x86_64", os_release: n
 export const BASE_ANSWERS = { "device.info": INFO, "device.probe": { found: false, sha256: null, user: "alice", uid: 4242 }, "approval.list": { approvals: [] } };
 
 /** Opens the socket on `base` (host:port) as the client does; the status of a refused upgrade, or the device once it said hello. */
-export function connect(base, token, { origin, hello = {}, answers = {}, sayHello = true } = {}) {
+export function connect(base, token, { origin, hello = {}, answers = {}, sayHello = true, userAgent = "pithagoras-sync/0.1.0" } = {}) {
   return new Promise((resolve) => {
-    const headers = { "User-Agent": "pithagoras-sync/0.1.0", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+    const headers = { "User-Agent": userAgent, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
     const ws = new WebSocket(`ws://${base}/sync/v1/connect`, { headers, ...(origin ? { origin } : {}), perMessageDeflate: false });
     ws.on("unexpected-response", (_req, res) => resolve({ status: res.statusCode }));
     ws.on("error", () => {});

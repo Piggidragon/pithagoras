@@ -60,6 +60,7 @@ function shown(device: DeviceRecord) {
     ...device,
     online: Boolean(link),
     connectedAt: link ? new Date(link.connectedAt).toISOString() : null,
+    remote: link?.remote ?? null,
     hello: link ? { clientVersion: link.hello.client_version, user: link.hello.user, shell: link.hello.shell, capabilities: link.hello.capabilities } : null,
     info: link?.info ?? null,
     sameMachine: link?.sameMachine ?? null,

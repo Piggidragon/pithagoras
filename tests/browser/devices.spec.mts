@@ -17,7 +17,7 @@ const approval = {
 function device(over: Record<string, unknown> = {}) {
   return {
     id: 'd0123456789abcdef', name: 'laptop', os: 'linux', arch: 'x86_64', created_at: '2026-10-05 08:00:00', last_seen: '2026-10-05 08:00:00',
-    online: true, connectedAt: '2026-10-05T08:00:00Z', hello: { clientVersion: '0.1.0', user: 'alice', shell: 'bash', capabilities: ['fs', 'exec', 'probe', 'approvals', 'policy'] },
+    online: true, connectedAt: '2026-10-05T08:00:00Z', remote: { address: '192.0.2.10', userAgent: 'pithagoras-sync/0.1.0' }, hello: { clientVersion: '0.1.0', user: 'alice', shell: 'bash', capabilities: ['fs', 'exec', 'probe', 'approvals', 'policy'] },
     info: info('ask'), sameMachine: false, approvals: [approval],
     policy: { portal_policy: 'read', version: 'v1', settings: { policy: { mode: 'ask', tools: { bash: true } }, exec: {} }, device_only: ['exec.shell'] },
     alert: null, ...over,
@@ -137,7 +137,7 @@ test('a device shows its state; an approval is answered from the page, for a tim
   const { sent } = await portal(page);
   await page.goto('/devices');
   const card = page.getByRole('listitem', { name: 'laptop' });
-  await expect(card.getByText('connected')).toBeVisible();
+  await expect(card.getByText('connected', { exact: true })).toBeVisible();
   await expect(card.getByText('Ask: every call asks you first')).toBeVisible();
   await expect(card.getByText('alice@laptop', { exact: false })).toBeVisible();
   const asks = card.getByTestId('device-approval');
@@ -176,9 +176,11 @@ test('settings the device keeps to itself are only shown; where it allows it, a 
 });
 
 test('rename, and removal after asking; a second connection with the token is said', async ({ page }) => {
-  const { sent } = await portal(page, { devices: [device({ alert: { at: Date.parse('2026-10-05T09:00:00Z'), message: 'x' }, approvals: [] })] });
+  const alert = { at: Date.parse('2026-10-05T09:00:00Z'), message: 'x', existing: { address: '192.0.2.10', userAgent: 'pithagoras-sync/0.1.0' }, refused: { address: '198.51.100.7', userAgent: 'curl/8' } };
+  const { sent } = await portal(page, { devices: [device({ alert, approvals: [] })] });
   await page.goto('/devices');
-  await expect(page.getByRole('alert')).toContainText("something else tried to connect with this device's token");
+  await expect(page.getByRole('listitem', { name: 'laptop' }).getByText('192.0.2.10 (pithagoras-sync/0.1.0)').first()).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText("a connection from 198.51.100.7 (curl/8) tried to connect with this device's token while the device was connected from 192.0.2.10 (pithagoras-sync/0.1.0)");
   await page.getByRole('button', { name: 'Rename laptop' }).click();
   await page.getByRole('textbox', { name: 'Device name' }).fill('desk');
   await page.getByRole('textbox', { name: 'Device name' }).press('Enter');
