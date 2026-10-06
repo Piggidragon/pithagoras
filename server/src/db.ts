@@ -1652,6 +1652,13 @@ export interface AuditRow {
 
 /** Keeps the log from growing without bound; old entries are not evidence. */
 export const AUDIT_KEEP = 2000;
+/**
+ * What a device's own reports (`kind = 'device'`) may keep of it. They are the
+ * device's word, and a stolen token speaks as the device, so they are trimmed
+ * among themselves: however many it sends, the portal's own entries (what the
+ * guard refused, who was let in) stay.
+ */
+export const AUDIT_DEVICE_KEEP = 500;
 
 export function recordAudit(entry: {
   kind: string;
@@ -1673,9 +1680,12 @@ export function recordAudit(entry: {
     entry.personKey ?? null,
     entry.sessionId ?? null
   );
+  // The newest AUDIT_KEEP of the portal's own, and the newest AUDIT_DEVICE_KEEP of the devices', each trimmed by what it adds.
+  const device = entry.kind === "device";
+  const own = device ? "kind = 'device'" : "kind != 'device'";
   db.prepare(
-    `DELETE FROM audit WHERE id <= (SELECT MAX(id) FROM audit) - ?`
-  ).run(AUDIT_KEEP);
+    `DELETE FROM audit WHERE ${own} AND id <= (SELECT id FROM audit WHERE ${own} ORDER BY id DESC LIMIT 1 OFFSET ?)`
+  ).run(device ? AUDIT_DEVICE_KEEP : AUDIT_KEEP);
 }
 
 export const listAudit = (limit = 200): AuditRow[] =>

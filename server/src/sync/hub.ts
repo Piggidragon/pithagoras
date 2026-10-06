@@ -60,6 +60,9 @@ const DEAD_AFTER_MS = 45_000;
 /** Most calls answer at once; one may wait for the owner's approval, which the device gives up on after at most an hour. */
 const CALL_TIMEOUT_MS = 65 * 60_000;
 const QUICK_TIMEOUT_MS = 30_000;
+/** What a device may add to the portal's audit log: a burst, then a steady few a second. Each is a write on the event loop. */
+export const AUDIT_BURST = 50;
+const AUDIT_PER_SECOND = 5;
 
 interface Pending {
   method: string;
@@ -106,6 +109,9 @@ export class DeviceLink extends EventEmitter {
   private readonly sinks = new Map<number, Sink>();
   private readonly exits = new Map<number, (exit: ExecExit) => void>();
   private lastHeard = Date.now();
+  private auditTokens = AUDIT_BURST;
+  private auditAt = Date.now();
+  private auditLeftOut = 0;
   private readonly pinger: NodeJS.Timeout;
   closed = false;
 
@@ -344,6 +350,29 @@ export class DeviceLink extends EventEmitter {
   }
 
   /**
+   * Whether the device may add another event to the audit log now. Past its
+   * rate the events are dropped, and the next one that is taken says how many
+   * were: the log shows a device that talked too much, and a flood costs the
+   * portal a counter, not a database write each.
+   */
+  private mayAudit(): boolean {
+    const now = Date.now();
+    this.auditTokens = Math.min(AUDIT_BURST, this.auditTokens + ((now - this.auditAt) / 1000) * AUDIT_PER_SECOND);
+    this.auditAt = now;
+    if (this.auditTokens < 1) {
+      this.auditLeftOut++;
+      return false;
+    }
+    this.auditTokens--;
+    if (this.auditLeftOut > 0) {
+      this.auditTokens--;
+      recordAudit({ kind: "device", tool: "audit", reason: `${getDevice(this.deviceId)?.name ?? this.deviceId}: ${this.auditLeftOut} events left out, as it sent more than ${AUDIT_PER_SECOND} a second` });
+      this.auditLeftOut = 0;
+    }
+    return true;
+  }
+
+  /**
    * Whether a question the device asks is taken up. Each is kept, shown on the
    * Devices page and asked in a chat until it is answered, so what a device
    * can open is bounded: a number of them in all, none that repeats one it has,
@@ -389,7 +418,7 @@ export class DeviceLink extends EventEmitter {
       }
       case "audit": {
         const event = readAudit(params);
-        if (!event) return;
+        if (!event || !this.mayAudit()) return;
         recordAudit({
           kind: "device",
           tool: event.tool,

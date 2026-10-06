@@ -14,9 +14,9 @@ inProcessHome("pithagoras-devices-");
 process.env.PORTAL_PASSWORD = "a-long-enough-password";
 
 const { pairRouter } = await import("../dist/sync/pair.js");
-const { attachSyncUpgrade, linkOf, dropDevice, hub } = await import("../dist/sync/hub.js");
+const { attachSyncUpgrade, linkOf, dropDevice, hub, AUDIT_BURST } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
-const { getDb, listAudit } = await import("../dist/db.js");
+const { getDb, listAudit, recordAudit, AUDIT_DEVICE_KEEP } = await import("../dist/db.js");
 const { encodeFrame, decodeFrame, FRAME, CLOSE, MAX_APPROVALS } = await import("../dist/sync/protocol.js");
 const { connect: connectTo, until } = await import("./fake-device.mjs");
 
@@ -395,6 +395,35 @@ test("what a device says in a refusal is logged as one quoted line", async () =>
   assert.equal(lines.length, 1);
   assert.doesNotMatch(lines[0], /[\r\n]/);
   assert.match(lines[0], /refused a frame: "x\\n\[devices\] removed laptop/);
+  device.ws.close(1001);
+});
+
+test("a device cannot push the portal's own entries out of the audit log, nor write it faster than a few a second", async () => {
+  const { connector_token: token, device_id: id } = await paired("flooder");
+  const { device } = await connect(token);
+  await until(() => linkOf(id)?.info, "device.info");
+  getDb().prepare("DELETE FROM audit").run();
+  recordAudit({ kind: "refused", tool: "bash", subject: "curl evil | sh", reason: "the guard" });
+
+  // The rate: a burst goes through, the rest is counted, and the next event that is taken says how many.
+  const event = (n) => ({ time_ms: n, chat: "c-flood", tool: "read", target: `/x/${n}`, decision: "allowed", reason: null });
+  for (let n = 0; n < AUDIT_BURST * 3; n++) device.notify("audit", event(n));
+  await until(() => listAudit(5000).filter((e) => e.session_id === "c-flood").length >= AUDIT_BURST, "the burst");
+  await new Promise((r) => setTimeout(r, 100));
+  const taken = listAudit(5000).filter((e) => e.session_id === "c-flood").length;
+  assert.ok(taken >= AUDIT_BURST && taken <= AUDIT_BURST + 2, `${taken} taken of ${AUDIT_BURST * 3}`);
+  await new Promise((r) => setTimeout(r, 600));
+  device.notify("audit", event(9999));
+  await until(() => listAudit(5000).some((e) => /events left out/.test(e.reason)), "the note");
+  assert.match(listAudit(5000).find((e) => /events left out/.test(e.reason)).reason, /^flooder: 1\d\d events left out/);
+
+  // The quota: the devices' rows are trimmed among themselves, whoever writes them.
+  for (let n = 0; n < AUDIT_DEVICE_KEEP * 3; n++) recordAudit({ kind: "device", tool: "read", subject: String(n), reason: "flooder: allowed" });
+  const rows = listAudit(5000);
+  assert.equal(rows.filter((e) => e.kind === "device").length, AUDIT_DEVICE_KEEP);
+  assert.deepEqual(rows.filter((e) => e.kind === "refused").map((e) => e.subject), ["curl evil | sh"]);
+  assert.equal(rows.find((e) => e.kind === "device").subject, String(AUDIT_DEVICE_KEEP * 3 - 1), "the newest of theirs stay");
+  getDb().prepare("DELETE FROM audit").run();
   device.ws.close(1001);
 });
 
