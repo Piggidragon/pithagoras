@@ -118,7 +118,6 @@ export class DeviceLink extends EventEmitter {
     ws.on("message", (data, isBinary) => this.receive(data, isBinary));
     ws.on("pong", () => (this.lastHeard = Date.now()));
     ws.on("close", () => this.ended());
-    ws.on("error", () => ws.terminate());
     this.pinger = setInterval(() => {
       if (Date.now() - this.lastHeard > DEAD_AFTER_MS) return void ws.terminate();
       ws.ping();
@@ -490,45 +489,75 @@ export function attachSyncUpgrade(server: http.Server): void {
     const { deviceId } = admitted;
     arriving.add(deviceId);
     wss.handleUpgrade(req, socket, head, (ws) => {
-      void welcome(ws, deviceId).finally(() => arriving.delete(deviceId));
+      // From the first byte on: a frame that breaks the protocol (unmasked, over the limit, bad UTF-8) is an
+      // 'error' of the socket, which ends the whole process when nobody listens.
+      ws.on("error", () => ws.terminate());
+      welcome(ws, deviceId, () => arriving.delete(deviceId));
     });
     // handleUpgrade answers a malformed upgrade itself and never calls back.
     socket.once("close", () => arriving.delete(deviceId));
   });
 }
 
-/** The first frame is the device's hello; then the link is up and the portal asks what it needs to know. */
-async function welcome(ws: WebSocket, deviceId: string): Promise<void> {
-  const hello = await new Promise<Hello | undefined | "proto">((resolve) => {
-    const timer = setTimeout(() => resolve(undefined), HELLO_WITHIN_MS);
-    ws.once("message", (data, isBinary) => {
-      clearTimeout(timer);
-      if (isBinary) return resolve(undefined);
-      try {
-        const m = JSON.parse(String(data));
-        if (m?.jsonrpc !== "2.0" || m.method !== "hello" || "id" in m) return resolve(undefined);
-        const h = readHello(m.params);
-        if (h && h.proto !== PROTO_VERSION) return resolve("proto");
-        resolve(h);
-      } catch {
-        resolve(undefined);
-      }
+/**
+ * The first frame is the device's hello; then the link is up and the portal
+ * asks what it needs to know. The link is made inside the hello's own
+ * `message` handler: the socket may deliver the next frame in the same
+ * breath, and a listener added later would not hear it.
+ */
+function welcome(ws: WebSocket, deviceId: string, settled: () => void): void {
+  const refused = (code: number, reason: string) => {
+    settled();
+    ws.close(code, reason);
+  };
+  const late = setTimeout(() => {
+    ws.off("message", first);
+    refused(CLOSE.violation, "hello expected");
+  }, HELLO_WITHIN_MS);
+  const gone = () => {
+    clearTimeout(late);
+    ws.off("message", first);
+    settled();
+  };
+  const first = (data: RawData, isBinary: boolean) => {
+    clearTimeout(late);
+    ws.off("close", gone);
+    const hello = isBinary ? undefined : readFirst(data);
+    if (hello === "proto") return refused(CLOSE.unsupported, "unsupported protocol version");
+    if (!hello || hello.device_id !== deviceId) return refused(CLOSE.violation, "hello expected");
+    // Removed while it said hello: it stops. The add-on switched off: it tries again, as it does for the switch.
+    if (!getDevice(deviceId)) return refused(CLOSE.revoked, "device removed");
+    if (!devicesEnabled()) return refused(CLOSE.goingAway, "devices switched off");
+    const link = new DeviceLink(ws, deviceId, hello);
+    links.set(deviceId, link);
+    touchDevice(deviceId);
+    link.once("closed", () => {
+      if (links.get(deviceId) === link) links.delete(deviceId);
+      if (getDevice(deviceId)) touchDevice(deviceId);
+      hub.emit("status", deviceId);
     });
-    ws.once("close", () => resolve(undefined));
-  });
-  if (hello === "proto") return void ws.close(CLOSE.unsupported, "unsupported protocol version");
-  if (!hello || hello.device_id !== deviceId) return void ws.close(CLOSE.violation, "hello expected");
-  // Removed, or the add-on switched off, while it said hello.
-  if (!getDevice(deviceId) || !devicesEnabled()) return void ws.close(CLOSE.revoked, "device removed");
-  const link = new DeviceLink(ws, deviceId, hello);
-  links.set(deviceId, link);
-  touchDevice(deviceId);
-  link.once("closed", () => {
-    if (links.get(deviceId) === link) links.delete(deviceId);
-    if (getDevice(deviceId)) touchDevice(deviceId);
+    settled();
     hub.emit("status", deviceId);
-  });
-  hub.emit("status", deviceId);
+    void learn(link);
+  };
+  ws.once("message", first);
+  ws.once("close", gone);
+}
+
+/** The hello's params, "proto" for another protocol version, or undefined when the frame is not a hello. */
+function readFirst(data: RawData): Hello | "proto" | undefined {
+  try {
+    const m = JSON.parse(String(data));
+    if (m?.jsonrpc !== "2.0" || m.method !== "hello" || "id" in m) return undefined;
+    const hello = readHello(m.params);
+    return hello && hello.proto !== PROTO_VERSION ? "proto" : hello;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What the portal asks a device once it is connected: what it is, whether it is the portal's own machine, its approvals and its settings. */
+async function learn(link: DeviceLink): Promise<void> {
   try {
     const info = readDeviceInfo(await link.call("device.info", {}, { timeoutMs: QUICK_TIMEOUT_MS }));
     if (info) link.info = info;
@@ -544,7 +573,7 @@ async function welcome(ws: WebSocket, deviceId: string): Promise<void> {
   } catch {
     // A device that does not answer these is still connected; it is offered nothing until it has said what it is.
   }
-  hub.emit("status", deviceId);
+  hub.emit("status", link.deviceId);
 }
 
 /**

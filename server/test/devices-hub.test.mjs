@@ -142,6 +142,59 @@ test("a hello for another protocol or another device ends the connection", async
   assert.equal(linkOf(id), undefined);
 });
 
+test("a frame that breaks the protocol before the hello ends that connection and nothing else", async () => {
+  const { connector_token: token, device_id: id } = await paired("early");
+  const other = await paired("bystander");
+  const bystander = await connect(other.connector_token);
+  await until(() => linkOf(other.device_id)?.info, "device.info");
+  // An unmasked frame from a client: ws reports it as an 'error' of the server's socket, which kills the process unless something listens.
+  const unmasked = await connect(token, { sayHello: false });
+  unmasked.device.ws._socket.write(Buffer.from([0x81, 0x02, 0x68, 0x69]));
+  await unmasked.device.closed;
+  // And one over the size limit, before any hello.
+  const huge = await connect(token, { sayHello: false });
+  huge.device.ws.send(Buffer.alloc(4 * 1024 * 1024 + 10, 1), { binary: true });
+  assert.equal((await huge.device.closed).code, 1009);
+  // The device can still connect, and the other device's link is up.
+  const again = await connect(token);
+  assert.equal(again.status, 101);
+  await until(() => linkOf(id)?.info, "device.info");
+  assert.ok(linkOf(other.device_id));
+  again.device.ws.close(1001);
+  bystander.device.ws.close(1001);
+});
+
+test("a frame in the same chunk as the hello is heard", async () => {
+  const { connector_token: token, device_id: id } = await paired("chunk");
+  const { device } = await connect(token, { sayHello: false });
+  // One write on the socket: the hello and, right behind it, an audit event.
+  const socket = device.ws._socket;
+  socket.cork();
+  device.notify("hello", { proto: 1, device_id: id, client_version: "0.1.0", os: "linux", user: "alice", shell: "bash", capabilities: ["fs", "exec", "approvals"] });
+  device.notify("audit", { time_ms: 1, chat: "c-chunk", tool: "read", target: "/home/alice/a", decision: "allowed", reason: null });
+  socket.uncork();
+  await until(() => listAudit(50).some((e) => e.session_id === "c-chunk"), "the audit row sent with the hello");
+  getDb().prepare("DELETE FROM audit WHERE session_id = 'c-chunk'").run();
+  device.ws.close(1001);
+});
+
+test("a device that says hello after the add-on went off is told to try again; one that was removed is told to stop", async () => {
+  const gone = await paired("midway");
+  const pending = await connect(gone.connector_token, { sayHello: false });
+  store.setDevicesEnabled(false);
+  try {
+    pending.device.notify("hello", { proto: 1, device_id: gone.device_id, client_version: "0.1.0", os: "linux", user: "alice", shell: "bash", capabilities: ["fs"] });
+    assert.equal((await pending.device.closed).code, CLOSE.goingAway);
+  } finally {
+    store.setDevicesEnabled(true);
+  }
+  assert.ok(store.getDevice(gone.device_id), "still paired");
+  const removed = await connect(gone.connector_token, { sayHello: false });
+  store.removeDevice(gone.device_id);
+  removed.device.notify("hello", { proto: 1, device_id: gone.device_id, client_version: "0.1.0", os: "linux", user: "alice", shell: "bash", capabilities: ["fs"] });
+  assert.equal((await removed.device.closed).code, CLOSE.revoked);
+});
+
 test("calls are matched by id, whatever order the answers come in", async () => {
   const { connector_token: token, device_id: id } = await paired("order");
   const held = [];
