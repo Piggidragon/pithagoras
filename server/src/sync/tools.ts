@@ -302,7 +302,8 @@ export function deviceTools(opts: DeviceToolsOptions) {
                 if (o.signal?.aborted) throw new Error("aborted");
                 throw failure(e, device.name);
               }
-              if (exit.truncated) o.onData(Buffer.from(`\n[${device.name} dropped the output past its limit]\n`));
+              if (exit.cut) o.onData(Buffer.from(`\n[${device.name} sent more output than the portal takes, so the command was stopped]\n`));
+              else if (exit.truncated) o.onData(Buffer.from(`\n[${device.name} dropped the output past its limit]\n`));
               if (o.signal?.aborted) throw new Error("aborted");
               if (exit.timed_out && o.timeout) throw new Error(`timeout:${o.timeout}`);
               if (exit.timed_out) {

@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { writeFileSync } from "node:fs";
+import { rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import express from "express";
@@ -297,6 +297,34 @@ test("the tools take a device once the chat has one; without one, nothing of the
   assert.deepEqual(later.active, ["read", "bash", "edit", "write", "web"]);
   await assert.rejects(later.tools.get("read").execute("x", { path: "a", device: "laptop" }, undefined, undefined, {}), /No device is granted to this chat/);
   assert.match(textOf(await later.tools.get("read").execute("x", { path: serverFile }, undefined, undefined, {})), /on the server/);
+});
+
+test("a command that never stops printing is cut at what the portal takes, and pi's log of it stays within that", async () => {
+  const line = "abcdefghi\n".repeat(6553);
+  const { id } = await online("printer", {
+    "exec.start": (params, rid, d) => {
+      d.send({ jsonrpc: "2.0", id: rid, result: {} });
+      // 600 frames of about 64 KiB: 37 MiB, and no exit.
+      for (let seq = 0; seq < 600; seq++) d.frame(FRAME.execOutput, params.stream, seq, line);
+    },
+    "exec.signal": {},
+  });
+  const mine = chat();
+  grants.grantDevice(mine, id, "/home/alice");
+  const ext = extensionApi();
+  deviceTools({ sessionId: mine, cwd: home, pi, serverTool: () => undefined })(ext);
+  let message = "";
+  await ext.tools.get("bash").execute("p1", { command: "yes", device: "printer" }, undefined, undefined, {}).catch((e) => (message = e.message));
+  assert.match(message, /sent more output than the portal takes, so the command was stopped/);
+  assert.match(message, /Command exited with code 137/);
+  const log = /Full output: (\S+\.log)/.exec(message)?.[1];
+  assert.ok(log, message.slice(-300));
+  try {
+    const size = statSync(log).size;
+    assert.ok(size > 31 * 1024 * 1024 && size < 32 * 1024 * 1024 + 4096, `${size} bytes in pi's log`);
+  } finally {
+    rmSync(log, { force: true });
+  }
 });
 
 test("an approval the device asks for is asked in the chat and answered from there, and taken back when it is answered elsewhere", async () => {

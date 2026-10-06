@@ -212,8 +212,12 @@ each device's own settings. In particular:
 - **One connection per device.** A second connection with the same token is
   refused while the first is up, so a copied token cannot push the real device
   off; the attempt is shown on the Devices page.
-- Messages on the device's connection are limited to 4 MiB, file transfers to
-  64 MiB, and a command's output to what the device allows (16 MiB by default).
-  Nothing in a call carries environment variables to the device.
+- Messages on the device's connection are limited to 4 MiB and file transfers
+  to 64 MiB. A command's output is limited by the device (16 MiB by default)
+  and, whatever the device does, by the portal: past 32 MiB the portal stops
+  taking it and has the command killed, as the output also goes into a log file
+  in the portal's temp folder. A command that the device does not report as
+  ended within its timeout (at most four hours) and half a minute is killed and
+  given up on. Nothing in a call carries environment variables to the device.
 - The portal logs pairing and removal by device name only; tokens and codes
   never reach a log.

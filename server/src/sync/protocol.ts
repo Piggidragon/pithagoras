@@ -252,6 +252,8 @@ export interface ExecExit {
   signal: string | null;
   timed_out: boolean;
   truncated: boolean;
+  /** Set by the portal, never read from a device: the command printed more than the portal takes, and was killed. */
+  cut?: boolean;
 }
 
 export function readExecExit(v: unknown): ExecExit | undefined {

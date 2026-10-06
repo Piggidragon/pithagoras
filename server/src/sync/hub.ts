@@ -60,6 +60,23 @@ const DEAD_AFTER_MS = 45_000;
 /** Most calls answer at once; one may wait for the owner's approval, which the device gives up on after at most an hour. */
 const CALL_TIMEOUT_MS = 65 * 60_000;
 const QUICK_TIMEOUT_MS = 30_000;
+/**
+ * What the portal puts up with from a command on a device. The device has its
+ * own limits (16 MiB of output by default, four hours at most), but they are
+ * its own: the output goes on into the portal's temp folder, and a command is
+ * waited for until the device says it is over.
+ */
+const EXEC_LIMITS = {
+  /** Bytes of output passed on; past them the command is killed. */
+  output: 32 * 1024 * 1024,
+  /** How long past its own timeout (or the four hours) a command's end is waited for. */
+  graceMs: 30_000,
+  maxMs: 4 * 60 * 60_000,
+  /** How long a command that was told to stop is given before it is killed and given up on. */
+  killMs: 10_000,
+};
+export type ExecLimits = typeof EXEC_LIMITS;
+
 /** What a device may add to the portal's audit log: a burst, then a steady few a second. Each is a write on the event loop. */
 export const AUDIT_BURST = 50;
 const AUDIT_PER_SECOND = 5;
@@ -240,19 +257,48 @@ export class DeviceLink extends EventEmitter {
 
   /**
    * Runs a command: `exec.start`, its output as it comes, and its end. The
-   * command runs in the device's own environment; nothing of the portal's is sent.
+   * command runs in the device's own environment; nothing of the portal's is
+   * sent. The portal bounds what it takes (see EXEC_LIMITS): more output than
+   * that kills the command, one that does not end in time is killed and given
+   * up on, and so is one that was told to stop and does not.
    */
-  async exec(opts: { command: string; cwd: string; timeoutMs?: number; ctx: Ctx; onData: (data: Buffer) => void } & Waiting): Promise<ExecExit> {
+  async exec(opts: { command: string; cwd: string; timeoutMs?: number; ctx: Ctx; onData: (data: Buffer) => void; limits?: Partial<ExecLimits> } & Waiting): Promise<ExecExit> {
+    const limit = { ...EXEC_LIMITS, ...opts.limits };
     const stream = this.openStream();
     let ended: (exit: ExecExit) => void = () => {};
     const exit = new Promise<ExecExit>((resolve) => (ended = resolve));
-    this.sinks.set(stream, { kind: FRAME.execOutput, next: 0, take: opts.onData, fail: () => {} });
+    let printed = 0;
+    let cut = false;
+    this.sinks.set(stream, {
+      kind: FRAME.execOutput,
+      next: 0,
+      take: (data) => {
+        if (cut) return;
+        printed += data.length;
+        if (printed <= limit.output) return opts.onData(data);
+        cut = true;
+        this.notifySignal(stream, "SIGKILL");
+        ended({ stream, code: null, signal: "SIGKILL", timed_out: false, truncated: true, cut: true });
+      },
+      fail: () => {},
+    });
     this.exits.set(stream, ended);
     let started = false;
+    let giveUp: (e: Error) => void = () => {};
+    const gone = new Promise<never>((_, reject) => (giveUp = reject));
+    gone.catch(() => {});
+    let killer: NodeJS.Timeout | undefined;
+    let deadline: NodeJS.Timeout | undefined;
     const stop = () => {
-      if (started) this.notifySignal(stream, "SIGTERM");
+      if (!started) return;
+      this.notifySignal(stream, "SIGTERM");
+      killer ??= setTimeout(() => {
+        this.notifySignal(stream, "SIGKILL");
+        giveUp(new DeviceError(CODE.INTERNAL, "stopped"));
+      }, limit.killMs);
+      killer.unref();
     };
-    let onClosed = () => {};
+    const onClosed = () => giveUp(offline());
     try {
       await this.call(
         "exec.start",
@@ -262,13 +308,17 @@ export class DeviceLink extends EventEmitter {
       started = true;
       if (opts.signal?.aborted) stop();
       opts.signal?.addEventListener("abort", stop, { once: true });
-      const lost = new Promise<never>((_, reject) => {
-        onClosed = () => reject(offline());
-        if (this.closed) onClosed();
-        else this.once("closed", onClosed);
-      });
-      return await Promise.race([exit, lost]);
+      deadline = setTimeout(() => {
+        this.notifySignal(stream, "SIGKILL");
+        giveUp(new DeviceError(CODE.IO, "the device did not report the end of the command in time"));
+      }, (opts.timeoutMs ?? limit.maxMs) + limit.graceMs);
+      deadline.unref();
+      if (this.closed) onClosed();
+      else this.once("closed", onClosed);
+      return await Promise.race([exit, gone]);
     } finally {
+      clearTimeout(deadline);
+      clearTimeout(killer);
       this.off("closed", onClosed);
       opts.signal?.removeEventListener("abort", stop);
       this.sinks.delete(stream);

@@ -287,6 +287,55 @@ test("a command's output streams as it comes, and its end says how it ended; it 
   device.ws.close(1001);
 });
 
+test("a command's output past what the portal takes kills it; one that never ends, or ignores a stop, is given up on", async () => {
+  const { connector_token: token, device_id: id } = await paired("endless");
+  let quiet = false;
+  const { device } = await connect(token, {
+    answers: {
+      "exec.start": (params, rid, d) => {
+        d.send({ jsonrpc: "2.0", id: rid, result: {} });
+        if (quiet) return;
+        // 40 frames of 64 KiB, and no exit: a device that does not stop printing.
+        for (let seq = 0; seq < 40; seq++) d.ws.send(encodeFrame(FRAME.execOutput, params.stream, seq, Buffer.alloc(65536, 65)));
+      },
+      "exec.signal": {},
+    },
+  });
+  await until(() => linkOf(id)?.info, "device.info");
+  const ctx = { chat: "c1", tainted: false, tool: "bash" };
+
+  // More output than the portal takes: what came before is passed on, the rest is not, and the device is told to kill it.
+  let got = 0;
+  const exit = await linkOf(id).exec({ command: "yes", cwd: "/w", ctx, onData: (d) => (got += d.length), limits: { output: 1024 * 1024 } });
+  assert.equal(exit.cut, true);
+  assert.equal(exit.truncated, true);
+  assert.equal(exit.signal, "SIGKILL");
+  assert.ok(got > 0 && got <= 1024 * 1024, `${got} bytes passed on`);
+  assert.deepEqual((await device.waitFor("exec.signal"))[0].params.signal, "SIGKILL");
+
+  // No end within the command's own timeout and a grace: killed, and the call fails.
+  quiet = true;
+  const before = device.asked("exec.signal").length;
+  const started = Date.now();
+  await assert.rejects(linkOf(id).exec({ command: "sleep 1d", cwd: "/w", timeoutMs: 50, ctx, onData: () => {}, limits: { graceMs: 100 } }), /did not report the end of the command/);
+  assert.ok(Date.now() - started < 3000);
+  assert.equal((await device.waitFor("exec.signal", before + 1)).at(-1).params.signal, "SIGKILL");
+  // Without a timeout of the agent's, the device's own longest one counts.
+  await assert.rejects(linkOf(id).exec({ command: "sleep 1d", cwd: "/w", ctx, onData: () => {}, limits: { maxMs: 50, graceMs: 100 } }), /did not report the end of the command/);
+
+  // Told to stop (Stop, a grant taken back) and not stopping: SIGTERM, then SIGKILL and the call ends.
+  const stop = new AbortController();
+  const stopped = linkOf(id).exec({ command: "trap '' TERM; sleep 1d", cwd: "/w", ctx, onData: () => {}, signal: stop.signal, limits: { killMs: 80 } });
+  stopped.catch(() => {});
+  await until(() => device.asked("exec.start").length === 4, "the command to start");
+  const signals = device.asked("exec.signal").length;
+  stop.abort();
+  await assert.rejects(stopped, /stopped/);
+  const sent = (await device.waitFor("exec.signal", signals + 2)).slice(signals).map((m) => m.params.signal);
+  assert.deepEqual(sent, ["SIGTERM", "SIGKILL"]);
+  device.ws.close(1001);
+});
+
 test("a dropped connection fails what waits on it at once", async () => {
   const { connector_token: token, device_id: id } = await paired("dropper");
   const { device } = await connect(token, { answers: { "fs.stat": () => undefined } });
