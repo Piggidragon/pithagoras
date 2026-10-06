@@ -233,6 +233,15 @@ export class DeviceLink extends EventEmitter {
     // Kept until the device answers, so that a late answer is known as this call's.
   }
 
+  /** Denies what the device still asks for a chat that no longer has it. Those of a call already given up on were denied with it. */
+  withdrawApprovals(chat: string): void {
+    for (const approval of this.approvals.values()) {
+      if (approval.chat !== chat) continue;
+      if (typeof approval.call === "number" && this.pending.get(approval.call)?.abandoned) continue;
+      this.answerApproval(approval.id, "deny").catch(() => {});
+    }
+  }
+
   /** The owner's answer to an approval, sent to the device. */
   answerApproval(id: number, answer: Choice, minutes?: number): Promise<unknown> {
     return this.call("approval.answer", { id, answer, ...(answer === "time" ? { minutes } : {}) }, { timeoutMs: QUICK_TIMEOUT_MS });

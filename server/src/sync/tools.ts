@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Type } from "typebox";
 import { taintedNow } from "../pi/guard.js";
-import { grantsOf, devicePath, grantedByName, type Grant } from "./grants.js";
+import { grantsOf, devicePath, grantedByName, trackCall, type Grant } from "./grants.js";
 import { hub, linkOf, type DeviceLink, type Waiting } from "./hub.js";
 import { CODE, DEVICE_TOOLS_SOURCE, DeviceError, PI_TOOLS, type ApprovalInfo, type Choice, type Ctx, type PiTool } from "./protocol.js";
 import { devicesEnabled, getDevice, type DeviceRecord } from "./store.js";
@@ -228,8 +228,28 @@ export function deviceTools(opts: DeviceToolsOptions) {
     return { link, ...found };
   }
 
-  async function onDevice(name: PiTool, wanted: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
-    const { link, device, grant } = reach(name, wanted);
+  async function onDevice(name: PiTool, wanted: string, params: Record<string, unknown>, stop: AbortSignal | undefined, onUpdate: any, ctx: any) {
+    const reached = reach(name, wanted);
+    // The call ends with the grant too (see grants.ts): the command is told to stop, the approval it waits on is denied.
+    const track = trackCall(opts.sessionId, reached.device.id);
+    try {
+      return await onReached(name, reached, params, stop ? AbortSignal.any([stop, track.signal]) : track.signal, onUpdate, ctx);
+    } catch (e) {
+      if (track.signal.aborted && !stop?.aborted) throw new Error(`${reached.device.name} was taken back from this chat, so this call was stopped.`);
+      throw e;
+    } finally {
+      track.done();
+    }
+  }
+
+  async function onReached(
+    name: PiTool,
+    { link, device, grant }: { link: DeviceLink; device: DeviceRecord; grant: Grant },
+    params: Record<string, unknown>,
+    signal: AbortSignal,
+    onUpdate: any,
+    ctx: any,
+  ) {
     const info = link.info!;
     const cwd = grant.cwd || devicePath(info.home, info, "/")!;
     const where = (p: unknown, fallback = ".") => {

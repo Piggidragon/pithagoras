@@ -13,7 +13,7 @@ import { devicesEnabled, getDevice, type DeviceRecord } from "./store.js";
  *
  * When a grant ends — taken back, the device removed, the chat deleted — the
  * device is told (`grant.end`), so that what was allowed "for this chat" ends
- * with it there too.
+ * with it there too, and what the chat is running there is stopped.
  */
 
 export interface Grant {
@@ -38,16 +38,48 @@ export function grantDevice(sessionId: string, deviceId: string, cwd: string): v
     .run(sessionId, deviceId, cwd);
 }
 
-/** Takes a grant back, and tells the device. False when there was none. */
+/** Takes a grant back, and ends what the chat does there. False when there was none. */
 export function endGrant(sessionId: string, deviceId: string): boolean {
   const gone = getDb().prepare("DELETE FROM session_devices WHERE session_id = ? AND device_id = ?").run(sessionId, deviceId).changes > 0;
   if (gone) tellEnded(deviceId, sessionId);
   return gone;
 }
 
-/** The device forgets what it allowed this chat. A device that is not connected has nothing of it left: its approvals ended with the connection. */
+/** The calls a chat has running on a device, by chat and device: ended with the grant. */
+const running = new Map<string, Set<AbortController>>();
+
+/**
+ * Notes that the chat is running a call on the device. `signal` aborts when the
+ * grant ends, which stops the call where it is: a command is told to stop, an
+ * approval it waits on is denied. `done` when the call is over.
+ */
+export function trackCall(sessionId: string, deviceId: string): { signal: AbortSignal; done: () => void } {
+  const key = `${sessionId}\0${deviceId}`;
+  const controller = new AbortController();
+  const calls = running.get(key) ?? new Set();
+  running.set(key, calls);
+  calls.add(controller);
+  return {
+    signal: controller.signal,
+    done: () => {
+      calls.delete(controller);
+      if (!calls.size && running.get(key) === calls) running.delete(key);
+    },
+  };
+}
+
+/**
+ * A grant is over: what the chat runs on the device stops, the device is told
+ * (it forgets what it allowed "for this chat"), and the questions it still
+ * holds for the chat are denied, so that an "Allow" after the switch cannot run
+ * a command the chat no longer has the device for. A device that is not
+ * connected has nothing of it left: its calls and approvals ended with the connection.
+ */
 export function tellEnded(deviceId: string, sessionId: string): void {
-  linkOf(deviceId)?.notify("grant.end", { chat: sessionId });
+  for (const call of running.get(`${sessionId}\0${deviceId}`) ?? []) call.abort();
+  const link = linkOf(deviceId);
+  link?.notify("grant.end", { chat: sessionId });
+  link?.withdrawApprovals(sessionId);
 }
 
 // A deleted chat's grants go with its rows; its devices are told once the delete is done.

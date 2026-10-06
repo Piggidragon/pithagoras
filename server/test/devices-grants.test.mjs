@@ -374,6 +374,92 @@ test("an approval the device asks for is asked in the chat and answered from the
   assert.deepEqual(approvalOptions({ choices: ["time", "deny"], max_minutes: 10 }).map((o) => [o.label, o.minutes]), [["Allow for 10 minutes", 10], ["Deny", undefined]]);
 });
 
+/** What a test waits for, failing rather than hanging when it does not come. */
+const within = (promise, ms = 3000) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("still waiting")), ms))]);
+
+test("taking a device back from a chat stops what the chat runs there and denies what it waits on", async () => {
+  let approvals = 0;
+  const { id, device } = await online("runner", {
+    "exec.start": {},
+    // The device kills the command it is told to stop, and says so.
+    "exec.signal": (params, _rid, d) => {
+      d.notify("exec.exit", { stream: params.stream, code: null, signal: params.signal, timed_out: false, truncated: false });
+      return {};
+    },
+    "fs.list": (params, rid, d) => {
+      d.notify("approval.requested", { id: ++approvals, call: rid, chat: params.ctx.chat, tool: "ls", target: params.path, reasons: [], preview: null, choices: ["once", "deny"], max_minutes: 0, created_ms: Date.now(), expires_ms: Date.now() + 120_000 });
+      return new Promise(() => {});
+    },
+    "approval.answer": {},
+  });
+  const mine = chat();
+  const other = chat();
+  grants.grantDevice(mine, id, "/home/alice");
+  grants.grantDevice(other, id, "/home/alice");
+  const ext = extensionApi();
+  deviceTools({ sessionId: mine, cwd: home, pi, serverTool: () => undefined })(ext);
+
+  // A command that runs on: told to stop (and killed if it does not), and the chat's call ends. Another chat's call on the same device goes on.
+  const otherExt = extensionApi();
+  deviceTools({ sessionId: other, cwd: home, pi, serverTool: () => undefined })(otherExt);
+  const theirs = otherExt.tools.get("bash").execute("o1", { command: "sleep 2d", device: "runner" }, undefined, undefined, {});
+  theirs.catch(() => {});
+  const running = ext.tools.get("bash").execute("r1", { command: "sleep 1d", device: "runner" }, undefined, undefined, {});
+  running.catch(() => {});
+  await device.waitFor("exec.start", 2);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(grants.endGrant(mine, id), true);
+  await assert.rejects(within(running), /runner was taken back from this chat, so this call was stopped/);
+  const stopped = (await device.waitFor("exec.signal")).map((m) => m.params);
+  assert.equal(stopped.length, 1);
+  assert.equal(stopped[0].signal, "SIGTERM");
+  assert.equal(stopped[0].stream, device.asked("exec.start").find((m) => m.params.ctx.chat === mine).params.stream);
+  assert.deepEqual((await device.waitFor("grant.end"))[0].params, { chat: mine });
+  const stillRunning = await Promise.race([theirs.then(() => "ended", () => "ended"), new Promise((r) => setTimeout(() => r("running"), 100))]);
+  assert.equal(stillRunning, "running", "the other chat's command");
+  grants.endGrant(other, id);
+  await assert.rejects(within(theirs), /taken back/);
+
+  // A call that waits for the owner: its question goes from the chat, the device is told to deny it, and the call ends.
+  grants.grantDevice(mine, id, "/home/alice");
+  const asked = [];
+  const ui = { select: (title, options, opts) => new Promise((resolve) => asked.push({ opts, resolve })) };
+  const listing = ext.tools.get("ls").execute("l1", { device: "runner" }, undefined, undefined, { ui });
+  listing.catch(() => {});
+  await until(() => asked.length === 1, "the question in the chat");
+  grants.endGrant(mine, id);
+  await assert.rejects(within(listing), /taken back/);
+  assert.equal(asked[0].opts.signal.aborted, true, "the question is taken back");
+  const answers = await device.waitFor("approval.answer");
+  assert.deepEqual(answers[0].params, { id: 1, answer: "deny" });
+  assert.equal(answers.length, 1, "denied once");
+});
+
+test("the questions a device holds for a chat are denied when the chat no longer has the device, and only that chat's", async () => {
+  const { id, device } = await online("holder", { "approval.answer": {} });
+  const mine = chat();
+  grants.grantDevice(mine, id, "/home/alice");
+  const ask = (n, chatId) => device.notify("approval.requested", { id: n, call: null, chat: chatId, tool: "exec", target: "make", reasons: [], preview: null, choices: ["once", "deny"], max_minutes: 0, created_ms: 1, expires_ms: 2 });
+  ask(71, mine);
+  ask(72, "someone-elses-chat");
+  await until(() => linkOf(id).approvals.size === 2, "both approvals");
+  grants.endGrant(mine, id);
+  const answers = await device.waitFor("approval.answer");
+  assert.deepEqual(answers.map((m) => m.params), [{ id: 71, answer: "deny" }]);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(device.asked("approval.answer").length, 1);
+  // The device's own chat's question stays for its owner.
+  assert.deepEqual([...linkOf(id).approvals.keys()].sort(), [71, 72]);
+
+  // A deleted chat is a taken grant as well.
+  const gone = chat();
+  grants.grantDevice(gone, id, "/home/alice");
+  ask(73, gone);
+  await until(() => linkOf(id).approvals.has(73), "the third");
+  deleteSession(gone);
+  await until(() => device.asked("approval.answer").some((m) => m.params.id === 73), "the deny after the delete");
+});
+
 test("a dialog its asker takes back goes from the chat as well", async () => {
   const sent = [];
   const ui = SdkPiClient.prototype.buildUiContext.call({ pendingUi: new Map(), emit: (_type, event) => sent.push(event) });

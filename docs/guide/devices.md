@@ -141,6 +141,16 @@ the chat's session and refuse a `device`; `grep`, `find` and `ls` go away
 again. When the chat is deleted, or the device removed, the grant ends too, and
 the device forgets what it allowed the chat.
 
+Ending a grant also stops what the chat is doing on the device. A command that
+is running is told to stop (and killed ten seconds later if it does not), the
+chat's call ends with an error that says the device was taken back, a question
+it waits on is withdrawn, and any other question the device still holds for that
+chat is denied, so an **Allow** after the switch cannot run anything. The
+device is told as well, and forgets what it allowed the chat. This is the
+portal's side: a command the device has already started may still do what it was
+doing until the device stops it, and a portal that does not act on this is
+the "compromised portal" below.
+
 If another installed extension brings a tool of one of these names, that chat
 cannot be given a device, and the button says why.
 
