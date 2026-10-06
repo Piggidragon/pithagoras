@@ -177,7 +177,14 @@ export class DeviceLink extends EventEmitter {
   ) {
     super();
     this.setMaxListeners(0);
-    ws.on("message", (data, isBinary) => this.receive(data, isBinary));
+    ws.on("message", (data, isBinary) => {
+      // Whatever a frame does, it ends this link and nothing else: an exception here reaches no one else's handler, and ends the process.
+      try {
+        this.receive(data, isBinary);
+      } catch (e) {
+        this.broke(e);
+      }
+    });
     ws.on("pong", () => this.heard());
     ws.on("close", () => this.ended());
     this.pinger = setInterval(() => {
@@ -473,6 +480,12 @@ export class DeviceLink extends EventEmitter {
     });
   }
 
+  /** A frame the portal could not handle: said once in the log (quoted, as the text may come from the device), and the link is closed. */
+  private broke(e: unknown): void {
+    console.warn(`[devices] ${this.deviceId} sent a frame the portal could not handle, and the link is closed: ${JSON.stringify(e instanceof Error && typeof e.message === "string" ? e.message.slice(0, 200) : "")}`);
+    this.close(CLOSE.violation, "the frame could not be handled");
+  }
+
   private receive(data: RawData, isBinary: boolean): void {
     this.heard();
     const buffer = Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data);
@@ -499,7 +512,9 @@ export class DeviceLink extends EventEmitter {
     }
     if (message.error && typeof message.error === "object") {
       const code = Number.isInteger(message.error.code) ? message.error.code : CODE.INTERNAL;
-      entry.reject(new DeviceError(code, String(message.error.message ?? "the device refused").slice(0, 2000), message.error.data));
+      // The message is the device's word and any JSON: it is text only when it is, as String() of some objects throws.
+      const said = typeof message.error.message === "string" ? message.error.message.slice(0, 2000) : "the device refused";
+      entry.reject(new DeviceError(code, said, message.error.data));
     } else entry.resolve(message.result);
   }
 
@@ -682,7 +697,7 @@ function logRefused(deviceId: string, said: unknown): void {
   }
   const gate = { skipped: 0 };
   refusedLogs.set(deviceId, gate);
-  console.warn(`[devices] ${deviceId} refused a frame: ${JSON.stringify(String(said ?? "").slice(0, 200))}`);
+  console.warn(`[devices] ${deviceId} refused a frame: ${JSON.stringify(typeof said === "string" ? said.slice(0, 200) : "")}`);
   setTimeout(() => {
     refusedLogs.delete(deviceId);
     if (gate.skipped) console.warn(`[devices] ${deviceId} refused ${gate.skipped} more frames in the last ${Math.round(TIMING.refusedLogMs / 1000)} seconds`);

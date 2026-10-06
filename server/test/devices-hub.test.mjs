@@ -634,6 +634,70 @@ test("what a device says in a refusal is logged as one quoted line", async () =>
   device.ws.close(1001);
 });
 
+test("a device that answers the portal's probe with an error whose message is no text cannot stop the portal", async () => {
+  // JSON.parse can give an object that String() cannot turn into text, which threw inside the socket's message handler.
+  const { connector_token: token, device_id: id } = await paired("poisoner");
+  const { device } = await connect(token, { answers: { "device.probe": { error: { code: -32002, message: { toString: 0 } } } } });
+  // The probe is asked on every connect: its answer is the frame, and the link goes on with what comes after.
+  await until(() => linkOf(id)?.info && linkOf(id).sameMachine === false, "what the portal asks on connect");
+  await until(() => device.asked("approval.list").length > 0, "the questions after the probe");
+  assert.equal(linkOf(id).closed, false);
+  assert.equal((await linkOf(id).call("device.info", {})).name, "laptop");
+  device.ws.close(1001);
+});
+
+test("a refusal whose message is no text, unasked or as the answer to a call, is the device refusing and nothing more", async () => {
+  const bad = { toString: 0 };
+  const { connector_token: token, device_id: id } = await paired("poisoner-too");
+  const { device } = await connect(token, { answers: { "fs.stat": { error: { code: -32005, message: bad } } } });
+  await until(() => linkOf(id)?.info, "device.info");
+  const lines = [];
+  const warn = console.warn;
+  console.warn = (...args) => lines.push(args.join(" "));
+  try {
+    // Unasked, and with an id that matches no call.
+    device.send({ jsonrpc: "2.0", error: { code: -32700, message: bad } });
+    device.send({ jsonrpc: "2.0", id: 4242, error: { code: -32700, message: bad } });
+    // As the answer to a call: the portal's own error, with a fixed text.
+    await assert.rejects(linkOf(id).call("fs.stat", { path: "/x", ctx: { chat: "c", tainted: false } }), (e) => e.code === -32005 && e.message === "the device refused");
+    assert.equal((await linkOf(id).call("device.info", {})).name, "laptop", "the same link goes on");
+    assert.equal(linkOf(id).closed, false);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /refused a frame: ""$/);
+  } finally {
+    console.warn = warn;
+  }
+  device.ws.close(1001);
+});
+
+test("a frame that makes the portal throw ends that link only, with a protocol violation", async () => {
+  const { connector_token: token, device_id: id } = await paired("breaker");
+  const { connector_token: otherToken, device_id: otherId } = await paired("bystander");
+  const { device } = await connect(token);
+  const other = await connect(otherToken);
+  await until(() => linkOf(id)?.info && linkOf(otherId)?.info, "both devices");
+  const lines = [];
+  const warn = console.warn;
+  console.warn = (...args) => lines.push(args.join(" "));
+  const boom = () => {
+    throw new Error("a listener broke on\nthe frame");
+  };
+  hub.on("approval", boom);
+  try {
+    device.notify("approval.requested", { id: 1, call: null, chat: "c1", tool: "exec", target: "make", reasons: [], preview: null, choices: ["once", "deny"], max_minutes: 0, created_ms: 1, expires_ms: 2 });
+    assert.deepEqual(await device.closed, { code: 1008, reason: "the frame could not be handled" });
+  } finally {
+    hub.off("approval", boom);
+    console.warn = warn;
+  }
+  await until(() => !linkOf(id), "the link to go");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^\[devices\] \S+ sent a frame the portal could not handle, and the link is closed: "a listener broke on\\nthe frame"$/);
+  assert.equal(linkOf(otherId).closed, false, "the other device is not touched");
+  assert.equal((await linkOf(otherId).call("device.info", {})).name, "laptop");
+  other.device.ws.close(1001);
+});
+
 test("a device that sends refusals as fast as it can writes one log line and a count, not a line each", async () => {
   const { connector_token: token, device_id: id } = await paired("chatty");
   const { device } = await connect(token);
