@@ -154,8 +154,12 @@ the chat's session and refuse a `device`; `grep`, `find` and `ls` go away
 again. When the chat is deleted, or the device removed, the grant ends too, and
 a device that is connected forgets what it allowed the chat. One that is not
 connected (asleep, say, or removed and paired again later) hears of it when the
-chat is next given it: it is told before the new grant takes effect, so what it
-allowed the chat before never comes back.
+chat is next given it: the portal tells it, makes the grant only once the device
+has answered something after that, and so what it allowed the chat before never
+comes back. A device whose connection has gone quiet without the portal noticing
+yet, a laptop that has just gone to sleep or lost its network, does not answer:
+the chat is not given it (the answer says so), and trying again a moment later
+works.
 
 Ending a grant also stops what the chat is doing on the device. A command that
 is running is told to stop (and killed ten seconds later if it does not), the

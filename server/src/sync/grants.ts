@@ -14,8 +14,8 @@ import { devicesEnabled, getDevice, type DeviceRecord } from "./store.js";
  * When a grant ends — taken back, the device removed, the chat deleted — the
  * device is told (`grant.end`), so that what was allowed "for this chat" ends
  * with it there too, and what the chat is running there is stopped. A device
- * that was not connected then is told when the chat is next given a device,
- * before the chat can make a call: see grantDevice.
+ * that was not connected then is told when the chat is next given it, before
+ * the grant is made: see startGrant.
  */
 
 export interface Grant {
@@ -34,18 +34,34 @@ export const grantOf = (sessionId: string, deviceId: string): Grant | undefined 
 export const hasGrants = (sessionId: string): boolean =>
   devicesEnabled() && Boolean(getDb().prepare("SELECT 1 FROM session_devices WHERE session_id = ? LIMIT 1").get(sessionId));
 
+/** Writes the grant: the chat has the device, in this folder. What a new grant needs first is startGrant's. */
+export function grantDevice(sessionId: string, deviceId: string, cwd: string): void {
+  getDb()
+    .prepare("INSERT INTO session_devices (session_id, device_id, cwd) VALUES (?, ?, ?) ON CONFLICT (session_id, device_id) DO UPDATE SET cwd = excluded.cwd")
+    .run(sessionId, deviceId, cwd);
+}
+
 /**
  * Gives the chat the device, or moves the grant to another folder. A new grant
  * starts clean: the device is told first that the chat's last one is over,
  * whatever became of that notice when it was (a device that was not connected
- * then never got it, and would still hold what it allowed "for this chat").
- * A grant is made only while the device is connected, so this always reaches it.
+ * then never got it, and would still hold what it allowed "for this chat"),
+ * and the grant is made only once the device has answered something after the
+ * notice, which shows it was read. A connection that is half open takes the
+ * notice and says nothing: that device is not granted, and false is returned.
  */
-export function grantDevice(sessionId: string, deviceId: string, cwd: string): void {
-  if (!grantOf(sessionId, deviceId)) linkOf(deviceId)?.notify("grant.end", { chat: sessionId });
-  getDb()
-    .prepare("INSERT INTO session_devices (session_id, device_id, cwd) VALUES (?, ?, ?) ON CONFLICT (session_id, device_id) DO UPDATE SET cwd = excluded.cwd")
-    .run(sessionId, deviceId, cwd);
+export async function startGrant(sessionId: string, deviceId: string, cwd: string): Promise<boolean> {
+  if (!grantOf(sessionId, deviceId)) {
+    const link = linkOf(deviceId);
+    if (!link) return false;
+    try {
+      await link.tell("grant.end", { chat: sessionId });
+    } catch {
+      return false;
+    }
+  }
+  grantDevice(sessionId, deviceId, cwd);
+  return true;
 }
 
 /** Takes a grant back, and ends what the chat does there. False when there was none. */

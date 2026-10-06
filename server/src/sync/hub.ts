@@ -71,7 +71,8 @@ const QUICK_TIMEOUT_MS = 30_000;
  * `closeGraceMs` to answer the close, and what a device says in a frame it
  * refuses is logged once per `refusedLogMs`, with a count of the rest. The
  * audit events left out are noted `auditNoteMs` after the first of them, when
- * the device says nothing more to note them with.
+ * the device says nothing more to note them with. A device that is told
+ * something it must have read has `confirmMs` to answer (see `tell`).
  */
 export const TIMING = {
   replaceProbeMs: 3_000,
@@ -79,6 +80,7 @@ export const TIMING = {
   closeGraceMs: 2_000,
   refusedLogMs: 60_000,
   auditNoteMs: 1_000,
+  confirmMs: QUICK_TIMEOUT_MS,
 };
 /** The longest wait a timer takes: past it Node fires the timer at once. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -269,6 +271,18 @@ export class DeviceLink extends EventEmitter {
 
   notify(method: string, params: Record<string, unknown>): void {
     if (!this.closed) this.send({ jsonrpc: "2.0", method, params });
+  }
+
+  /**
+   * A notification that the device is known to have read: sent, and then a
+   * request whose answer comes only once the client has applied everything
+   * before it (it reads its frames in order). A connection that is half open,
+   * which the portal has not noticed yet, takes the notification and never
+   * answers, and that fails here, where `notify` would pass without a sign.
+   */
+  async tell(method: string, params: Record<string, unknown>): Promise<void> {
+    this.notify(method, params);
+    await this.call("device.info", {}, { timeoutMs: TIMING.confirmMs });
   }
 
   /**

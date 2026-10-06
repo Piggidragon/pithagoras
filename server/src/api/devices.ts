@@ -4,7 +4,7 @@ import express, { type Router } from "express";
 import { tlsFiles } from "../http-security.js";
 import { getSession } from "../db.js";
 import { sessions } from "../session-manager.js";
-import { defaultCwd, devicePath, endGrant, grantDevice, grantOf, grantRefused, grantsOf, tellEnded } from "../sync/grants.js";
+import { defaultCwd, devicePath, endGrant, grantOf, grantRefused, grantsOf, startGrant, tellEnded } from "../sync/grants.js";
 import { deviceToolConflicts } from "../sync/tools.js";
 import { CLOSE, CODE, DeviceError, readPolicy, type Choice } from "../sync/protocol.js";
 import { alertOf, clearAlert, dropAll, dropDevice, linkOf } from "../sync/hub.js";
@@ -285,7 +285,8 @@ export function devicesRouter(): Router {
     const refused = cwd ? grantRefused(device, cwd) : "The folder must be an absolute path";
     if (refused) return res.status(409).json({ error: refused });
     const had = grantsOf(req.params.id).some((g) => g.deviceId === device.id);
-    grantDevice(req.params.id, device.id, cwd!);
+    // A new grant waits for the device to confirm it was told the chat's last one is over: a link that went quiet has not been noticed yet.
+    if (!(await startGrant(req.params.id, device.id, cwd!))) return res.status(409).json({ error: `${device.name} did not answer, so the connection to it is not working. Try again in a moment` });
     console.log(`[devices] ${had ? "moved" : "granted"} ${device.name} for chat ${req.params.id}`);
     res.json({ ok: true, cwd, reload: await sessions.reloadSoon(req.params.id) });
   });

@@ -19,7 +19,7 @@ process.env.PORTAL_PASSWORD = "a-long-enough-password";
 
 const pi = await import("@earendil-works/pi-coding-agent");
 const { pairRouter } = await import("../dist/sync/pair.js");
-const { attachSyncUpgrade, linkOf, dropDevice } = await import("../dist/sync/hub.js");
+const { attachSyncUpgrade, linkOf, dropDevice, TIMING } = await import("../dist/sync/hub.js");
 const store = await import("../dist/sync/store.js");
 const grants = await import("../dist/sync/grants.js");
 const { deviceTools, approvalOptions, deviceToolConflicts } = await import("../dist/sync/tools.js");
@@ -172,7 +172,8 @@ test("a device that was offline when a chat's grant was taken back hears of it b
   const told = await again.device.waitFor("grant.end");
   assert.deepEqual(told.map((m) => m.params), [{ chat: mine }]);
   assert.equal(told[0].id, undefined, "a notification");
-  assert.equal(again.device.got.at(-1).method, "grant.end");
+  // The grant came after the device answered a request that followed the notice: it was read.
+  assert.deepEqual(again.device.got.slice(-2).map((m) => m.method), ["grant.end", "device.info"]);
   assert.equal(grants.grantsOf(mine).length, 1);
 
   // Moving the grant to another folder is not a new grant.
@@ -180,6 +181,33 @@ test("a device that was offline when a chat's grant was taken back hears of it b
   await linkOf(id).call("device.info", {});
   assert.equal(again.device.asked("grant.end").length, 1);
   again.device.ws.close(1001);
+});
+
+test("a chat is not granted a device whose connection went quiet: the notice that its last grant is over must have been read", async () => {
+  const { id, device } = await online("drowsy");
+  const mine = chat();
+  // A laptop that slept: the portal still has the link, and what it sends there is never read.
+  device.ws.pause();
+  TIMING.confirmMs = 200;
+  try {
+    const refused = await api("PUT", `/sessions/${mine}/devices/${id}`, {});
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /did not answer/);
+  } finally {
+    TIMING.confirmMs = 30_000;
+  }
+  assert.deepEqual(grants.grantsOf(mine), [], "nothing granted");
+  assert.equal(grants.hasGrants(mine), false);
+
+  // Awake again: it reads what was sent and answers, and the grant that follows is made after it did.
+  device.ws.resume();
+  await device.waitFor("grant.end");
+  const granted = await api("PUT", `/sessions/${mine}/devices/${id}`, {});
+  assert.equal(granted.status, 200);
+  assert.deepEqual(device.asked("grant.end").map((m) => m.params), [{ chat: mine }, { chat: mine }]);
+  assert.deepEqual(device.got.slice(-2).map((m) => m.method), ["grant.end", "device.info"]);
+  assert.deepEqual(grants.grantsOf(mine), [{ deviceId: id, cwd: "/home/alice" }]);
+  device.ws.close(1001);
 });
 
 test("a device that is removed hears that the grants of its chats are over, and what they ran there stops", async () => {
@@ -193,12 +221,10 @@ test("a device that is removed hears that the grants of its chats are over, and 
   const running = ext.tools.get("bash").execute("r1", { command: "sleep 1d", device: "leaving" }, undefined, undefined, {});
   running.catch(() => {});
   await device.waitFor("exec.start");
-  await linkOf(id).call("device.info", {});
-  assert.equal(device.asked("grant.end").length, 2, "one before each new grant");
 
   assert.equal((await api("DELETE", `/devices/${id}`)).status, 200);
   assert.deepEqual(await device.closed, { code: 4001, reason: "device removed" });
-  assert.deepEqual(device.asked("grant.end").slice(2).map((m) => m.params.chat).sort(), [first, second].sort());
+  assert.deepEqual(device.asked("grant.end").map((m) => m.params.chat).sort(), [first, second].sort());
   // The chat's call ends as it does when the grant is taken back, not as a dropped connection.
   await assert.rejects(within(running), /leaving was taken back from this chat, so this call was stopped/);
 });
@@ -540,8 +566,7 @@ test("taking a device back from a chat stops what the chat runs there and denies
   assert.equal(stopped.length, 1);
   assert.equal(stopped[0].signal, "SIGTERM");
   assert.equal(stopped[0].stream, device.asked("exec.start").find((m) => m.params.ctx.chat === mine).params.stream);
-  // The two grants were each preceded by one (a new grant starts clean), the end of this one is the third.
-  assert.deepEqual((await device.waitFor("grant.end", 3))[2].params, { chat: mine });
+  assert.deepEqual((await device.waitFor("grant.end"))[0].params, { chat: mine });
   const stillRunning = await Promise.race([theirs.then(() => "ended", () => "ended"), new Promise((r) => setTimeout(() => r("running"), 100))]);
   assert.equal(stillRunning, "running", "the other chat's command");
   grants.endGrant(other, id);
