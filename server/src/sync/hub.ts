@@ -68,13 +68,16 @@ const QUICK_TIMEOUT_MS = 30_000;
  * second came, as long as the regular pinger would still have kept it, is said
  * on the Devices page when it is replaced. A connection that is closed has
  * `closeGraceMs` to answer the close, and what a device says in a frame it
- * refuses is logged once per `refusedLogMs`, with a count of the rest.
+ * refuses is logged once per `refusedLogMs`, with a count of the rest. The
+ * audit events left out are noted `auditNoteMs` after the first of them, when
+ * the device says nothing more to note them with.
  */
 export const TIMING = {
   replaceProbeMs: 3_000,
   recentMs: DEAD_AFTER_MS,
   closeGraceMs: 2_000,
   refusedLogMs: 60_000,
+  auditNoteMs: 1_000,
 };
 /**
  * What the portal puts up with from a command on a device. The device has its
@@ -93,7 +96,10 @@ const EXEC_LIMITS = {
 };
 export type ExecLimits = typeof EXEC_LIMITS;
 
-/** What a device may add to the portal's audit log: a burst, then a steady few a second. Each is a write on the event loop. */
+/**
+ * What a device may add to the portal's audit log: a burst, then a steady few a second. Each is a write on the event loop.
+ * It is the device's allowance, not its connection's: a connection that starts afresh does not get a new burst.
+ */
 export const AUDIT_BURST = 50;
 const AUDIT_PER_SECOND = 5;
 
@@ -148,9 +154,6 @@ export class DeviceLink extends EventEmitter {
   private readonly sinks = new Map<number, Sink>();
   private readonly exits = new Map<number, (exit: ExecExit) => void>();
   private lastHeard = Date.now();
-  private auditTokens = AUDIT_BURST;
-  private auditAt = Date.now();
-  private auditLeftOut = 0;
   private readonly pinger: NodeJS.Timeout;
   closed = false;
 
@@ -467,29 +470,6 @@ export class DeviceLink extends EventEmitter {
   }
 
   /**
-   * Whether the device may add another event to the audit log now. Past its
-   * rate the events are dropped, and the next one that is taken says how many
-   * were: the log shows a device that talked too much, and a flood costs the
-   * portal a counter, not a database write each.
-   */
-  private mayAudit(): boolean {
-    const now = Date.now();
-    this.auditTokens = Math.min(AUDIT_BURST, this.auditTokens + ((now - this.auditAt) / 1000) * AUDIT_PER_SECOND);
-    this.auditAt = now;
-    if (this.auditTokens < 1) {
-      this.auditLeftOut++;
-      return false;
-    }
-    this.auditTokens--;
-    if (this.auditLeftOut > 0) {
-      this.auditTokens--;
-      recordAudit({ kind: "device", tool: "audit", reason: `${getDevice(this.deviceId)?.name ?? this.deviceId}: ${this.auditLeftOut} events left out, as it sent more than ${AUDIT_PER_SECOND} a second` });
-      this.auditLeftOut = 0;
-    }
-    return true;
-  }
-
-  /**
    * Whether a question the device asks is taken up. Each is kept, shown on the
    * Devices page and asked in a chat until it is answered, so what a device
    * can open is bounded: a number of them in all, none that repeats one it has,
@@ -535,7 +515,7 @@ export class DeviceLink extends EventEmitter {
       }
       case "audit": {
         const event = readAudit(params);
-        if (!event || !this.mayAudit()) return;
+        if (!event || !mayAudit(this.deviceId)) return;
         recordAudit({
           kind: "device",
           tool: event.tool,
@@ -573,6 +553,68 @@ export class DeviceLink extends EventEmitter {
     this.approvals.clear();
     this.emit("closed");
   }
+}
+
+interface AuditGate {
+  tokens: number;
+  at: number;
+  /** Events refused since the last note. */
+  leftOut: number;
+  /** The note that is due when the device says nothing more to write it with. */
+  timer?: NodeJS.Timeout;
+}
+/** Each device's allowance of audit events, kept while the portal runs, whatever its connections do. */
+const auditGates = new Map<string, AuditGate>();
+
+function refill(gate: AuditGate): void {
+  const now = Date.now();
+  gate.tokens = Math.min(AUDIT_BURST, gate.tokens + ((now - gate.at) / 1000) * AUDIT_PER_SECOND);
+  gate.at = now;
+}
+
+/** The note that says how many events were left out: one write, for all of them. */
+function noteLeftOut(deviceId: string, gate: AuditGate): void {
+  recordAudit({ kind: "device", tool: "audit", reason: `${getDevice(deviceId)?.name ?? deviceId}: ${gate.leftOut} events left out, as it sent more than ${AUDIT_PER_SECOND} a second` });
+  gate.leftOut = 0;
+}
+
+/**
+ * Whether a device may add another event to the audit log now. Past its rate
+ * the events are dropped and counted, and the count is written as one note: by
+ * the next event that is taken, or, when the device falls silent, a moment
+ * later by itself. The log shows a device that talked too much, and a flood
+ * costs the portal a counter, not a database write each.
+ */
+function mayAudit(deviceId: string): boolean {
+  let gate = auditGates.get(deviceId);
+  if (!gate) auditGates.set(deviceId, (gate = { tokens: AUDIT_BURST, at: Date.now(), leftOut: 0 }));
+  refill(gate);
+  if (gate.tokens < 1) {
+    gate.leftOut++;
+    noteSoon(deviceId, gate);
+    return false;
+  }
+  gate.tokens--;
+  if (gate.leftOut > 0) {
+    gate.tokens--;
+    noteLeftOut(deviceId, gate);
+  }
+  return true;
+}
+
+/** Writes the note for what was left out once the allowance has a token to spare, however quiet the device is. */
+function noteSoon(deviceId: string, gate: AuditGate): void {
+  if (gate.timer) return;
+  gate.timer = setTimeout(() => {
+    gate.timer = undefined;
+    refill(gate);
+    if (gate.leftOut === 0) return;
+    if (gate.tokens >= 1) {
+      gate.tokens--;
+      noteLeftOut(deviceId, gate);
+    } else noteSoon(deviceId, gate);
+  }, TIMING.auditNoteMs);
+  gate.timer.unref();
 }
 
 /** Devices that have had a refusal logged within the interval, with how many more it sent since. */
@@ -630,7 +672,11 @@ export const clearAlert = (deviceId: string) => alerts.delete(deviceId);
 export function dropDevice(deviceId: string, code: number = CLOSE.revoked, reason = "device removed"): void {
   links.get(deviceId)?.close(code, reason);
   links.delete(deviceId);
-  if (code === CLOSE.revoked) alerts.delete(deviceId);
+  if (code === CLOSE.revoked) {
+    alerts.delete(deviceId);
+    clearTimeout(auditGates.get(deviceId)?.timer);
+    auditGates.delete(deviceId);
+  }
   hub.emit("status", deviceId);
 }
 

