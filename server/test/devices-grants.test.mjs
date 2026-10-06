@@ -210,6 +210,64 @@ test("a chat is not granted a device whose connection went quiet: the notice tha
   device.ws.close(1001);
 });
 
+/** A device whose answer to device.info, after the one on connect, is held back until `release` is called: a slow link, or a laptop waking up. */
+async function slow(name) {
+  const gate = { held: false, release: () => {} };
+  const info = { ...INFO, name };
+  const made = await online(name, {
+    "device.info": () => (gate.held ? new Promise((resolve) => (gate.release = () => resolve(info))) : info),
+  });
+  gate.held = true;
+  return { ...made, gate };
+}
+
+test("a grant that waits for its device's answer is not made when the chat was deleted meanwhile", async () => {
+  const { id, device, gate } = await slow("slowpoke");
+  const mine = chat();
+  const put = api("PUT", `/sessions/${mine}/devices/${id}`, {});
+  await device.waitFor("grant.end");
+  await device.waitFor("device.info", 2);
+  deleteSession(mine);
+  gate.release();
+  const answer = await put;
+  assert.equal(answer.status, 404);
+  assert.deepEqual(grants.grantsOf(mine), [], "no row for a chat that is gone");
+  assert.equal(grants.hasGrants(mine), false);
+  device.ws.close(1001);
+});
+
+test("a grant that waits for its device's answer is not made when it was taken back meanwhile, and the next one is", async () => {
+  const { id, device, gate } = await slow("slowpoke-back");
+  const mine = chat();
+  const put = api("PUT", `/sessions/${mine}/devices/${id}`, {});
+  await device.waitFor("device.info", 2);
+  // The owner switches it off again before the switch on has come back: nothing to take back yet, and the answer is ok.
+  assert.deepEqual((await api("DELETE", `/sessions/${mine}/devices/${id}`)).body, { ok: true, reload: "not running" });
+  gate.release();
+  const answer = await put;
+  assert.equal(answer.status, 409);
+  assert.match(answer.body.error, /taken back/);
+  assert.deepEqual(grants.grantsOf(mine), [], "switched off stays off");
+
+  // Nothing is left of the cancelled one: the chat can be given the device afterwards.
+  gate.held = false;
+  assert.equal((await api("PUT", `/sessions/${mine}/devices/${id}`, {})).status, 200);
+  assert.equal(grants.grantsOf(mine).length, 1);
+  device.ws.close(1001);
+});
+
+test("a grant that waits for its device's answer is not made when the device was removed meanwhile", async () => {
+  const { id, device, gate } = await slow("slowpoke-gone");
+  const mine = chat();
+  const put = api("PUT", `/sessions/${mine}/devices/${id}`, {});
+  await device.waitFor("device.info", 2);
+  assert.equal((await api("DELETE", `/devices/${id}`)).status, 200);
+  gate.release();
+  const answer = await put;
+  assert.equal(answer.status, 404);
+  assert.deepEqual(grants.grantsOf(mine), []);
+});
+
 test("a device that is removed hears that the grants of its chats are over, and what they ran there stops", async () => {
   const { id, device } = await online("leaving", { "exec.start": () => new Promise(() => {}) });
   const first = chat();

@@ -159,7 +159,8 @@ has answered something after that, and so what it allowed the chat before never
 comes back. A device whose connection has gone quiet without the portal noticing
 yet, a laptop that has just gone to sleep or lost its network, does not answer:
 the chat is not given it (the answer says so), and trying again a moment later
-works.
+works. A grant that is switched off again, or whose chat or device is deleted,
+while it waits for that answer is not made.
 
 Ending a grant also stops what the chat is doing on the device. A command that
 is running is told to stop (and killed ten seconds later if it does not), the

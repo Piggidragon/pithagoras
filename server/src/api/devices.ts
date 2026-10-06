@@ -286,7 +286,11 @@ export function devicesRouter(): Router {
     if (refused) return res.status(409).json({ error: refused });
     const had = grantsOf(req.params.id).some((g) => g.deviceId === device.id);
     // A new grant waits for the device to confirm it was told the chat's last one is over: a link that went quiet has not been noticed yet.
-    if (!(await startGrant(req.params.id, device.id, cwd!))) return res.status(409).json({ error: `${device.name} did not answer, so the connection to it is not working. Try again in a moment` });
+    const started = await startGrant(req.params.id, device.id, cwd!);
+    if (started === "no chat") return res.status(404).json({ error: "No such chat" });
+    if (started === "no device") return res.status(404).json({ error: "No such device" });
+    if (started === "cancelled") return res.status(409).json({ error: `${device.name} was taken back from this chat before it was granted` });
+    if (started === "unreachable") return res.status(409).json({ error: `${device.name} did not answer, so the connection to it is not working. Try again in a moment` });
     console.log(`[devices] ${had ? "moved" : "granted"} ${device.name} for chat ${req.params.id}`);
     res.json({ ok: true, cwd, reload: await sessions.reloadSoon(req.params.id) });
   });

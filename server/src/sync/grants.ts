@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getDb, onSessionDeleted } from "../db.js";
+import { getDb, getSession, onSessionDeleted } from "../db.js";
 import { isWithinText } from "../within.js";
 import { linkOf } from "./hub.js";
 import { hasControl, type DeviceInfo } from "./protocol.js";
@@ -41,6 +41,13 @@ export function grantDevice(sessionId: string, deviceId: string, cwd: string): v
     .run(sessionId, deviceId, cwd);
 }
 
+/** New grants that wait for their device's answer, by chat and device: a take-back clears the set, and what was in it is cancelled. */
+const starting = new Map<string, Set<symbol>>();
+const keyOf = (sessionId: string, deviceId: string) => `${sessionId}\0${deviceId}`;
+
+/** What became of a grant that was asked for: made, or why not. */
+export type Started = "granted" | "unreachable" | "no device" | "no chat" | "cancelled";
+
 /**
  * Gives the chat the device, or moves the grant to another folder. A new grant
  * starts clean: the device is told first that the chat's last one is over,
@@ -48,24 +55,46 @@ export function grantDevice(sessionId: string, deviceId: string, cwd: string): v
  * then never got it, and would still hold what it allowed "for this chat"),
  * and the grant is made only once the device has answered something after the
  * notice, which shows it was read. A connection that is half open takes the
- * notice and says nothing: that device is not granted, and false is returned.
+ * notice and says nothing: that device is not granted ("unreachable").
+ *
+ * The device's answer can take a while, and what the grant was asked for is
+ * looked at again when it comes: a chat that was deleted meanwhile, a device
+ * that was removed or whose connection ended, or a grant that was taken back
+ * (the owner switched it off again) is not granted after all.
  */
-export async function startGrant(sessionId: string, deviceId: string, cwd: string): Promise<boolean> {
+export async function startGrant(sessionId: string, deviceId: string, cwd: string): Promise<Started> {
   if (!grantOf(sessionId, deviceId)) {
     const link = linkOf(deviceId);
-    if (!link) return false;
+    if (!link) return "unreachable";
+    const key = keyOf(sessionId, deviceId);
+    const waiting = starting.get(key) ?? new Set<symbol>();
+    starting.set(key, waiting);
+    const mine = Symbol(key);
+    waiting.add(mine);
+    let told = true;
     try {
       await link.tell("grant.end", { chat: sessionId });
     } catch {
-      return false;
+      told = false;
     }
+    // Still in the set unless a take-back cleared it.
+    const kept = waiting.delete(mine);
+    if (!waiting.size && starting.get(key) === waiting) starting.delete(key);
+    if (!getDevice(deviceId)) return "no device";
+    if (!getSession(sessionId)) return "no chat";
+    if (!kept) return "cancelled";
+    if (!told || link.closed || linkOf(deviceId) !== link) return "unreachable";
   }
   grantDevice(sessionId, deviceId, cwd);
-  return true;
+  return "granted";
 }
 
 /** Takes a grant back, and ends what the chat does there. False when there was none. */
 export function endGrant(sessionId: string, deviceId: string): boolean {
+  // A grant still waiting for its device is taken back as well: it is not made when the device answers.
+  const key = keyOf(sessionId, deviceId);
+  starting.get(key)?.clear();
+  starting.delete(key);
   const gone = getDb().prepare("DELETE FROM session_devices WHERE session_id = ? AND device_id = ?").run(sessionId, deviceId).changes > 0;
   if (gone) tellEnded(deviceId, sessionId);
   return gone;
