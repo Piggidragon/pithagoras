@@ -1397,8 +1397,11 @@ export interface Device {
   sameMachine: boolean | null;
   approvals: DeviceApproval[];
   policy: DevicePolicy | null;
-  /** A second connection with the device's token was refused while the first still answered: where each came from. */
-  alert: { at: number; message: string; existing: DeviceRemote | null; refused: DeviceRemote } | null;
+  /**
+   * A second connection with the device's token: where each came from. It was refused while the first still answered, or (`replaced`)
+   * it took the place of one that had just been in touch, and `refused` is then the connection that took over.
+   */
+  alert: { at: number; message: string; existing: DeviceRemote | null; refused: DeviceRemote; replaced?: boolean } | null;
 }
 
 export interface DeviceRemote {

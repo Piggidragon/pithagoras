@@ -219,6 +219,14 @@ test('rename, and removal after asking; a second connection with the token is sa
   ]);
 });
 
+test('a connection that took the place of one that was just in touch is said as that, not as refused', async ({ page }) => {
+  const alert = { at: Date.parse('2026-10-05T09:00:00Z'), message: 'x', replaced: true, existing: { address: '192.0.2.10', userAgent: 'pithagoras-sync/0.1.0' }, refused: { address: '198.51.100.7', userAgent: 'curl/8' } };
+  await portal(page, { devices: [device({ alert, approvals: [] })] });
+  await page.goto('/devices');
+  await expect(page.getByRole('alert')).toContainText('a connection from 198.51.100.7 (curl/8) took the place of the one from 192.0.2.10 (pithagoras-sync/0.1.0), which had just been in touch');
+  await expect(page.getByRole('alert')).not.toContainText('was refused');
+});
+
 test('the page fits a phone without scrolling sideways', async ({ page }) => {
   await portal(page);
   await page.setViewportSize({ width: 375, height: 800 });

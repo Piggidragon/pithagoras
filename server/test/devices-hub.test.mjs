@@ -116,29 +116,74 @@ test("only the device's own token opens the socket, never from a browser, and on
 test("a device that comes back after its connection went quiet takes over at once, with no alert; a live connection is not pushed off", async () => {
   const { connector_token: token, device_id: id } = await paired("sleeper");
   const { alertOf, clearAlert } = await import("../dist/sync/hub.js");
-  const first = await connect(token, { answers: { "fs.stat": () => undefined } });
-  await until(() => linkOf(id)?.info, "device.info");
-  const stale = linkOf(id);
-  const waiting = stale.call("fs.stat", { path: "/x", ctx: { chat: "c", tainted: false } });
-  waiting.catch(() => {});
-  // A sleeping laptop: whatever the portal sends it, it answers nothing, and no FIN ever came.
-  first.device.ws.pause();
-  const started = Date.now();
-  const second = await connect(token, { userAgent: "pithagoras-sync/0.1.1" });
-  assert.equal(second.status, 101);
-  assert.ok(Date.now() - started < 8000, "within the probe");
-  await until(() => linkOf(id) && linkOf(id) !== stale && linkOf(id).info, "the new link");
-  assert.equal(alertOf(id), undefined, "no alert for the device's own return");
-  assert.equal(linkOf(id).remote.userAgent, "pithagoras-sync/0.1.1");
-  await assert.rejects(waiting, /disconnected/);
-  assert.equal(stale.closed, true);
-  first.device.ws.terminate();
+  Object.assign(TIMING, { replaceProbeMs: 150, recentMs: 100 });
+  try {
+    const first = await connect(token, { answers: { "fs.stat": () => undefined } });
+    await until(() => linkOf(id)?.info, "device.info");
+    const stale = linkOf(id);
+    const waiting = stale.call("fs.stat", { path: "/x", ctx: { chat: "c", tainted: false } });
+    waiting.catch(() => {});
+    // A sleeping laptop: whatever the portal sends it, it answers nothing, and no FIN ever came. Nothing was heard from it for a while.
+    first.device.ws.pause();
+    await sleep(200);
+    const started = Date.now();
+    const second = await connect(token, { userAgent: "pithagoras-sync/0.1.1" });
+    assert.equal(second.status, 101);
+    assert.ok(Date.now() - started < 3000, "within the probe");
+    await until(() => linkOf(id) && linkOf(id) !== stale && linkOf(id).info, "the new link");
+    assert.equal(alertOf(id), undefined, "no alert for the device's own return");
+    assert.equal(linkOf(id).remote.userAgent, "pithagoras-sync/0.1.1");
+    await assert.rejects(waiting, /disconnected/);
+    assert.equal(stale.closed, true);
+    first.device.ws.terminate();
 
-  // The new one answers pings, so a third is refused, and the page's alert is for that one.
-  assert.equal((await connect(token)).status, 409);
-  assert.ok(alertOf(id));
-  clearAlert(id);
-  second.device.ws.close(1001);
+    // The new one answers pings, so a third is refused, and the page's alert is for that one.
+    assert.equal((await connect(token)).status, 409);
+    assert.equal(alertOf(id).replaced, false);
+    clearAlert(id);
+    second.device.ws.close(1001);
+    await until(() => !linkOf(id), "the link to go");
+  } finally {
+    Object.assign(TIMING, { replaceProbeMs: 3_000, recentMs: 45_000 });
+  }
+});
+
+test("a connection that does not answer a ping but sends other things is alive; one that was heard a moment ago and is replaced is said", async () => {
+  const { connector_token: token, device_id: id } = await paired("busy");
+  const { alertOf, clearAlert } = await import("../dist/sync/hub.js");
+  Object.assign(TIMING, { replaceProbeMs: 150 });
+  const open = [];
+  let chatter;
+  try {
+    // Its pong is stuck behind what it is writing, but the writing arrives: a live device, which a copied token cannot push off.
+    const live = await connect(token, { autoPong: false, userAgent: "pithagoras-sync/0.1.0" });
+    open.push(live.device.ws);
+    await until(() => linkOf(id)?.info, "device.info");
+    chatter = setInterval(() => live.device.notify("log", { n: 1 }), 20);
+    const copy = await connect(token, { userAgent: "copied-client/9" });
+    if (copy.device) open.push(copy.device.ws);
+    assert.equal(copy.status, 409);
+    assert.equal(alertOf(id).replaced, false);
+    assert.equal(alertOf(id).refused.userAgent, "copied-client/9");
+    assert.ok(linkOf(id) && !linkOf(id).closed, "still the device's link");
+    clearInterval(chatter);
+    clearAlert(id);
+
+    // Quiet now, and no pong: replaced after the probe. It had been heard a moment ago, so the owner is told where each came from.
+    const second = await connect(token, { userAgent: "pithagoras-sync/0.1.1" });
+    assert.equal(second.status, 101);
+    open.push(second.device.ws);
+    const alert = alertOf(id);
+    assert.equal(alert.replaced, true);
+    assert.equal(alert.existing.userAgent, "pithagoras-sync/0.1.0");
+    assert.equal(alert.refused.userAgent, "pithagoras-sync/0.1.1");
+    assert.match(alert.refused.address, /127\.0\.0\.1$/);
+    clearAlert(id);
+  } finally {
+    clearInterval(chatter);
+    Object.assign(TIMING, { replaceProbeMs: 3_000 });
+    for (const ws of open) ws.terminate();
+  }
   await until(() => !linkOf(id), "the link to go");
 });
 

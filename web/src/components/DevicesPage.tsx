@@ -239,6 +239,13 @@ const MODE_LABEL: Record<string, string> = {
   full: msg("Full: everything its user can do"),
 };
 
+/** The words of a second connection's alert: when, and where each connection came from. */
+const whoAndWhen = (alert: NonNullable<Device["alert"]>) => ({
+  time: formatDateTime(alert.at, { dateStyle: "short", timeStyle: "short" }),
+  refused: where(alert.refused),
+  existing: where(alert.existing),
+});
+
 function DeviceCard({ device: d, onChanged, onError }: { device: Device; onChanged: () => unknown; onError: (e: string) => void }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const info = d.info;
@@ -310,11 +317,9 @@ function DeviceCard({ device: d, onChanged, onError }: { device: Device; onChang
         <div role="alert" className="mt-2 flex items-start gap-2 rounded-lg bg-warn/10 p-2 text-xs text-warn">
           <LuTriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1">
-            {t("At {time} a connection from {refused} tried to connect with this device's token while the device was connected from {existing}, and was refused. If one of them is not yours, remove the device and pair it again.", {
-              time: formatDateTime(d.alert.at, { dateStyle: "short", timeStyle: "short" }),
-              refused: where(d.alert.refused),
-              existing: where(d.alert.existing),
-            })}
+            {d.alert.replaced
+              ? t("At {time} a connection from {refused} took the place of the one from {existing}, which had just been in touch. If one of them is not yours, remove the device and pair it again.", whoAndWhen(d.alert))
+              : t("At {time} a connection from {refused} tried to connect with this device's token while the device was connected from {existing}, and was refused. If one of them is not yours, remove the device and pair it again.", whoAndWhen(d.alert))}
           </span>
           <button type="button" className={ghostCls} aria-label={t("Dismiss")} onClick={() => void api.clearDeviceAlert(d.id).then(onChanged, (e: Error) => onError(e.message))}>
             <LuX className="h-3.5 w-3.5" />

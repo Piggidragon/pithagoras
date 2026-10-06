@@ -2440,6 +2440,7 @@ const de: Locale = {
     "last seen {when}": "zuletzt gesehen {when}",
     "never connected": "nie verbunden",
     "At {time} a connection from {refused} tried to connect with this device's token while the device was connected from {existing}, and was refused. If one of them is not yours, remove the device and pair it again.": "Um {time} hat eine Verbindung von {refused} versucht, sich mit dem Token dieses Geräts zu verbinden, während das Gerät von {existing} verbunden war, und wurde abgewiesen. Gehört eine der beiden nicht dir, entferne das Gerät und kopple es neu.",
+    "At {time} a connection from {refused} took the place of the one from {existing}, which had just been in touch. If one of them is not yours, remove the device and pair it again.": "Um {time} hat eine Verbindung von {refused} die Stelle der Verbindung von {existing} eingenommen, von der gerade noch etwas zu hören war. Gehört eine der beiden nicht dir, entferne das Gerät und kopple es neu.",
     "another connection": "eine andere Verbindung",
     "Connected from": "Verbunden von",
     "System": "System",

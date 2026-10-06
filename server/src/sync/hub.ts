@@ -62,12 +62,16 @@ const CALL_TIMEOUT_MS = 65 * 60_000;
 const QUICK_TIMEOUT_MS = 30_000;
 /**
  * Waits that a test shortens. A second connection with a device's token gives
- * the first `replaceProbeMs` to show a sign of life before it is taken for the
- * device's own, back after a sleep or a change of network, and a connection
- * that is closed has `closeGraceMs` to answer the close.
+ * the first `replaceProbeMs` to show a sign of life (a pong, or anything else
+ * it sends) before it is taken for the device's own, back after a sleep or a
+ * change of network. A first that was heard from within `recentMs` before the
+ * second came, as long as the regular pinger would still have kept it, is said
+ * on the Devices page when it is replaced. A connection that is closed has
+ * `closeGraceMs` to answer the close.
  */
 export const TIMING = {
   replaceProbeMs: 3_000,
+  recentMs: DEAD_AFTER_MS,
   closeGraceMs: 2_000,
 };
 /**
@@ -157,10 +161,7 @@ export class DeviceLink extends EventEmitter {
     super();
     this.setMaxListeners(0);
     ws.on("message", (data, isBinary) => this.receive(data, isBinary));
-    ws.on("pong", () => {
-      this.lastHeard = Date.now();
-      this.emit("pong");
-    });
+    ws.on("pong", () => this.heard());
     ws.on("close", () => this.ended());
     this.pinger = setInterval(() => {
       if (Date.now() - this.lastHeard > DEAD_AFTER_MS) return void ws.terminate();
@@ -169,20 +170,37 @@ export class DeviceLink extends EventEmitter {
     this.pinger.unref();
   }
 
-  /** Whether the device answers a ping within `ms`. One that slept or lost its network does not, and the portal learns that only from its silence. */
+  /** Anything from the device, a pong or any message, is a sign of life. */
+  private heard(): void {
+    this.lastHeard = Date.now();
+    this.emit("heard");
+  }
+
+  /** When the device was last heard from, in ms since the epoch. */
+  get heardAt(): number {
+    return this.lastHeard;
+  }
+
+  /**
+   * Whether the device shows a sign of life within `ms` of a ping: its pong, or
+   * anything else it sends. A pong can wait behind what the device is writing,
+   * a command's output or a big file, so the data that keeps coming is as good
+   * as the pong. One that slept or lost its network says nothing, and the
+   * portal learns that only from its silence.
+   */
   alive(ms: number): Promise<boolean> {
     if (this.closed || this.ws.readyState !== this.ws.OPEN) return Promise.resolve(false);
     return new Promise((resolve) => {
       const done = (answer: boolean) => {
         clearTimeout(timer);
-        this.off("pong", yes);
+        this.off("heard", yes);
         this.off("closed", no);
         resolve(answer);
       };
       const yes = () => done(true);
       const no = () => done(false);
       const timer = setTimeout(no, ms);
-      this.once("pong", yes);
+      this.once("heard", yes);
       this.once("closed", no);
       this.ws.ping();
     });
@@ -406,7 +424,7 @@ export class DeviceLink extends EventEmitter {
   }
 
   private receive(data: RawData, isBinary: boolean): void {
-    this.lastHeard = Date.now();
+    this.heard();
     const buffer = Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data);
     if (isBinary) return this.receiveFrame(buffer);
     let message: any;
@@ -571,8 +589,12 @@ const links = new Map<string, DeviceLink>();
  * the place of the one that is still waiting for its hello.
  */
 const arriving = new Map<string, symbol>();
-/** A connection refused because the device already had one that answered, by device: said on the Devices page, with where each came from. */
-const alerts = new Map<string, { at: number; message: string; existing: Remote | null; refused: Remote }>();
+/**
+ * A second connection with a device's token, by device: said on the Devices page, with where each came from. It was refused
+ * because the device had one that answered, or it took the place of one that had been heard from a moment before (`replaced`;
+ * `refused` is then the connection that took over).
+ */
+const alerts = new Map<string, { at: number; message: string; existing: Remote | null; refused: Remote; replaced: boolean }>();
 
 export const linkOf = (deviceId: string): DeviceLink | undefined => links.get(deviceId);
 export const alertOf = (deviceId: string) => alerts.get(deviceId);
@@ -610,9 +632,15 @@ const remoteOf = (req: http.IncomingMessage): Remote => ({
 });
 
 function conflict(deviceId: string, existing: Remote | null | undefined, refused: Remote): { status: number; message: string } {
-  alerts.set(deviceId, { at: Date.now(), message: "A second connection with this device's token was refused while it was connected", existing: existing ?? null, refused });
+  alerts.set(deviceId, { at: Date.now(), message: "A second connection with this device's token was refused while it was connected", existing: existing ?? null, refused, replaced: false });
   hub.emit("status", deviceId);
   return { status: 409, message: "This device is already connected" };
+}
+
+/** A connection took the place of one that had still been in touch: the owner is told, as a copied token would do the same. */
+function tookOver(deviceId: string, existing: Remote, taken: Remote): void {
+  alerts.set(deviceId, { at: Date.now(), message: "A connection with this device's token took the place of one that had just been in touch", existing, refused: taken, replaced: true });
+  hub.emit("status", deviceId);
 }
 
 /**
@@ -653,10 +681,13 @@ export function admit(
  * One live connection per device, so a copied token cannot push the real
  * device off. But a laptop that slept, or changed network, leaves a connection
  * the portal still takes for live until its pings go unanswered, and the device
- * comes back at once: so a second connection pings the first. When it answers,
- * the second is refused (409) and the alert says where each came from. When it
- * does not, it is closed and the second takes over, with no alert: the device
- * came back, and the old connection was nobody's.
+ * comes back at once: so a second connection pings the first. When it shows a
+ * sign of life (a pong, or anything else it sends), the second is refused (409)
+ * and the alert says where each came from. When it does not, it is closed and
+ * the second takes over. That is said on the Devices page too when the first
+ * had been heard from a moment before, which a device that slept hardly was
+ * but a copied token that answers late was: the device's own return is then
+ * told apart from another's by its owner, who sees where each came from.
  */
 export function attachSyncUpgrade(server: http.Server): void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE, perMessageDeflate: false, clientTracking: false });
@@ -679,6 +710,7 @@ export function attachSyncUpgrade(server: http.Server): void {
         welcome(ws, deviceId, remote, release);
       });
     if (!existing) return upgrade();
+    const heardAt = existing.heardAt;
     void existing.alive(TIMING.replaceProbeMs).then((answers) => {
       if (socket.destroyed) return;
       if (answers) {
@@ -686,7 +718,9 @@ export function attachSyncUpgrade(server: http.Server): void {
         const refused = conflict(deviceId, existing.remote, remote);
         return refuse(socket, refused.status, refused.message);
       }
-      console.log(`[devices] ${getDevice(deviceId)?.name ?? deviceId} connected again from ${remote.address}; its earlier connection from ${existing.remote.address} no longer answered, and was closed`);
+      const recent = Date.now() - heardAt < TIMING.recentMs;
+      console.log(`[devices] ${getDevice(deviceId)?.name ?? deviceId} connected again from ${remote.address}; its earlier connection from ${existing.remote.address} no longer answered, and was closed${recent ? " (it had been heard from a moment before)" : ""}`);
+      if (recent) tookOver(deviceId, existing.remote, remote);
       existing.close(CLOSE.replaced, "replaced by a new connection");
       upgrade();
     });

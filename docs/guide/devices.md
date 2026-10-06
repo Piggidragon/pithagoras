@@ -87,12 +87,16 @@ name for itself that the portal saw. Behind a reverse proxy the address is the
 proxy's.
 
 A device has one connection at a time. When something else connects with its
-token, the portal asks the connection it has whether it still answers. A laptop
-that slept or changed network does not, so its next connection replaces the old
-one, and nothing is shown. When the old one does answer, the new one is refused
-and the device shows a warning with where each came from. If one of them is not
-yours (a second copy of the client, a copied token), remove the device and pair
-it again.
+token, the portal pings the connection it has. Anything it sends in the next
+few seconds counts as a sign of life, not only its answer to the ping, as a
+device that is busy writing a command's output answers late. A laptop that slept
+or changed network says nothing, so its next connection replaces the old one.
+When the old one is alive, the new one is refused and the device shows a
+warning with where each came from. The warning is shown too when the old one was
+replaced but had been heard from within the 45 seconds before: a laptop that
+slept is hardly ever that fresh, a copied token that answers slowly is. If one
+of them is not yours (a second copy of the client, a copied token), remove the
+device and pair it again.
 
 ## Giving a chat a device
 
@@ -246,12 +250,14 @@ each device's own settings. In particular:
   browser (any request that names an `Origin`), so a web page cannot spend a
   code or open a device's connection.
 - **One connection per device.** A second connection with the same token is
-  refused while the first is up and answering, so a copied token cannot push the
-  real device off; the attempt is shown on the Devices page, with the address
-  and client name of both. A first connection that has gone quiet (the laptop
-  slept) is replaced by the device's next one after a short ping, and that is
-  not shown: a token copied to another machine could take a quiet device's
-  place the same way, and the **Connected from** line is how to tell.
+  refused while the first is up and showing signs of life, so a copied token
+  cannot push the real device off; the attempt is shown on the Devices page, with
+  the address and client name of both. A first connection that has gone quiet
+  (the laptop slept) is replaced by the device's next one after a short ping. A
+  token copied to another machine could take a quiet device's place the same
+  way, so it is shown too when the old connection had been heard from in the
+  45 seconds before, and the **Connected from** line is how to tell after a
+  longer silence. Only one new connection per device is looked at at a time.
 - Messages on the device's connection are limited to 4 MiB and file transfers
   to 64 MiB. A command's output is limited by the device (16 MiB by default)
   and, whatever the device does, by the portal: past 32 MiB the portal stops
